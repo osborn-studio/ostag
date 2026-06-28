@@ -14,8 +14,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install system tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
       - name: Install dependencies
-        run: uv sync --extra dev --extra feishu
+        run: uv sync --extra dev --extra feishu --extra slack
       - name: Run release check
         run: scripts/release_check.sh
       - name: Run deployment and live-evidence gates
