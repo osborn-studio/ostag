@@ -1,0 +1,9 @@
+OS Tag / ostag
+
+This project is inspired by and may include adapted concepts from
+zilliztech/mfs open-tag-skill, licensed under the Apache License 2.0.
+Original project: https://github.com/zilliztech/mfs
+Modifications: adapted and renamed as OS Tag / ostag with Feishu/Lark
+integration.
+
+OS Tag is not a Zilliz official product.

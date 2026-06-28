@@ -1,0 +1,187 @@
+{
+  "generated_at": "2026-06-28T14:24:36+00:00",
+  "product": "OS Tag",
+  "fork_root": "/Users/gilbertchen/Documents/CODE/ostag-deep-fork",
+  "management_root": "/Users/gilbertchen/Documents/CODE/ostag",
+  "branch": "ostag/deep-fork",
+  "current_commit": "16574f9b365bc67f3716c552dad416da730088b8",
+  "upstream": {
+    "url": "https://github.com/zilliztech/mfs",
+    "baseline_commit": "16574f9b365bc67f3716c552dad416da730088b8"
+  },
+  "score": "96 / 100",
+  "readiness_gate": "PASS",
+  "readiness_checks": "17 passed / 0 warnings / 0 failed",
+  "production_candidate": "not_recorded",
+  "external_blockers": [],
+  "artifacts": [
+    "FORK_ORIGIN.md",
+    "docs/fork_migration_report.md",
+    "release/ostag-scorecard.md",
+    "release/readiness-audit.md",
+    "release/ostag-launch-evidence.md",
+    "release/live-validation-feishu.md",
+    "release/live-validation-feishu-transcript-20260628.txt",
+    "release/launchd-production-validation-20260628.txt",
+    "release/mfs-validation.md",
+    "release/manual-live-validation-handoff.md",
+    "release/release-manifest.json",
+    "release/ai.ostag.feishu.plist",
+    ".github/workflows/ostag-ci.yml",
+    "release/completion-audit.md",
+    "release/completion-audit.json",
+    "release/launch-status.md",
+    "release/launch-status.json",
+    "release/production-scope.md",
+    "release/production-scope.json",
+    "release/external-validation-handoff.md",
+    "release/external-validation-handoff.json",
+    "release/secret-hygiene.md",
+    "release/secret-hygiene.json",
+    "release/ostag-release-bundle.tar.gz",
+    "release/ostag-release-bundle.sha256"
+  ],
+  "verification_commands": [
+    "scripts/release_check.sh",
+    "scripts/deploy_preflight.sh",
+    "scripts/ci_release_gates.sh",
+    "scripts/validate_live_validation_record.sh feishu",
+    "scripts/promote_production_candidate.sh feishu",
+    "scripts/generate_completion_audit.py",
+    "scripts/validate_completion_audit.py",
+    "scripts/launch_status.sh",
+    "scripts/production_scope_record.sh",
+    "scripts/validate_production_scope.sh",
+    "scripts/external_validation_handoff.sh",
+    "scripts/validate_external_validation_handoff.sh",
+    "scripts/secret_hygiene_check.sh",
+    "scripts/validate_secret_hygiene.sh",
+    "scripts/release_readiness_audit.sh"
+  ],
+  "osstack_tasks": [
+    {
+      "task_id": "task_0034b624",
+      "archived": true
+    },
+    {
+      "task_id": "task_0cd7cac4",
+      "archived": true
+    },
+    {
+      "task_id": "task_1d0171a0",
+      "archived": true
+    },
+    {
+      "task_id": "task_1d181656",
+      "archived": true
+    },
+    {
+      "task_id": "task_1edc63fd",
+      "archived": true
+    },
+    {
+      "task_id": "task_29f2ca9f",
+      "archived": true
+    },
+    {
+      "task_id": "task_2b786dcd",
+      "archived": true
+    },
+    {
+      "task_id": "task_3f9f86a2",
+      "archived": true
+    },
+    {
+      "task_id": "task_49df7528",
+      "archived": true
+    },
+    {
+      "task_id": "task_4fe88e7f",
+      "archived": true
+    },
+    {
+      "task_id": "task_52cc9ad0",
+      "archived": true
+    },
+    {
+      "task_id": "task_657bb669",
+      "archived": true
+    },
+    {
+      "task_id": "task_6a154f84",
+      "archived": true
+    },
+    {
+      "task_id": "task_73b45f33",
+      "archived": true
+    },
+    {
+      "task_id": "task_8c98c03f",
+      "archived": true
+    },
+    {
+      "task_id": "task_938dc237",
+      "archived": true
+    },
+    {
+      "task_id": "task_9db34f83",
+      "archived": true
+    },
+    {
+      "task_id": "task_9e75642a",
+      "archived": true
+    },
+    {
+      "task_id": "task_b57ff6f9",
+      "archived": true
+    },
+    {
+      "task_id": "task_b607da9d",
+      "archived": true
+    },
+    {
+      "task_id": "task_c0be8580",
+      "archived": true
+    },
+    {
+      "task_id": "task_c657d330",
+      "archived": true
+    },
+    {
+      "task_id": "task_c754fc3a",
+      "archived": true
+    },
+    {
+      "task_id": "task_cbcf6d63",
+      "archived": true
+    },
+    {
+      "task_id": "task_d2859192",
+      "archived": true
+    },
+    {
+      "task_id": "task_d488dfdc",
+      "archived": true
+    },
+    {
+      "task_id": "task_d57d82ef",
+      "archived": true
+    },
+    {
+      "task_id": "task_d6e536d7",
+      "archived": true
+    },
+    {
+      "task_id": "task_deff9f0d",
+      "archived": true
+    },
+    {
+      "task_id": "task_e5ed23d9",
+      "archived": true
+    },
+    {
+      "task_id": "task_ed36600e",
+      "archived": true
+    }
+  ]
+}

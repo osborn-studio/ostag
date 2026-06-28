@@ -1,0 +1,73 @@
+{
+  "generated_at": "2026-06-28T14:24:38+00:00",
+  "gate": "PASS",
+  "counts": {
+    "PASS": 12,
+    "EXTERNAL_BLOCKER": 0,
+    "FAIL": 0,
+    "PENDING": 0
+  },
+  "remaining_external_blockers": [],
+  "rows": [
+    {
+      "status": "PASS",
+      "requirement": "DoD 1: real fork-derived git history exists",
+      "evidence": "`FORK_ORIGIN.md`, upstream remote, and baseline commit are present"
+    },
+    {
+      "status": "PASS",
+      "requirement": "DoD 2: upstream Open Tag code is traced and mapped",
+      "evidence": "`docs/fork_migration_report.md` records ported/rewritten/deferred/deleted decisions"
+    },
+    {
+      "status": "PASS",
+      "requirement": "DoD 3: productized OS Tag repo exists",
+      "evidence": "Product modules, Feishu/Lark adapters, MFS integration, CI, Docker, and launchd paths exist"
+    },
+    {
+      "status": "PASS",
+      "requirement": "DoD 4: automated dry-run/backend/safety/audit gates pass",
+      "evidence": "`scripts/release_check.sh` passes compile, pytest, doctor, and Feishu/Lark dry-runs"
+    },
+    {
+      "status": "PASS",
+      "requirement": "DoD 5: live Feishu/Lark validation is complete or externally blocked",
+      "evidence": "`release/live-validation-feishu.md` records manual pass or missing-credential blocker"
+    },
+    {
+      "status": "PASS",
+      "requirement": "DoD 6: osstack records phases, verifier commands, and final score",
+      "evidence": "`STATE.md`, archived tasks, execution board, and scorecard are current"
+    },
+    {
+      "status": "PASS",
+      "requirement": "Phases 0-7 are completed and archived",
+      "evidence": "All primary phase task files exist under `tasks/archive/2026-06-28/`"
+    },
+    {
+      "status": "PASS",
+      "requirement": "Deployment paths are reproducible",
+      "evidence": "`docker compose config` passes and launchd plist artifact exists"
+    },
+    {
+      "status": "PASS",
+      "requirement": "Live MFS smoke is complete or externally blocked",
+      "evidence": "`release/mfs-validation.md` records a live smoke pass or structured MFS blocker; `release/production-scope.json` can explicitly exclude MFS from production scope"
+    },
+    {
+      "status": "PASS",
+      "requirement": "Release handoff bundle exists",
+      "evidence": "Tarball and sha256 checksum are generated and bundle validator covers required/forbidden paths"
+    },
+    {
+      "status": "PASS",
+      "requirement": "Machine-readable manifest matches current gates",
+      "evidence": "`release/release-manifest.json` reflects readiness gate, artifacts, and archived osstack tasks"
+    },
+    {
+      "status": "PASS",
+      "requirement": "No current P0 blocker is detected by release readiness audit",
+      "evidence": "`release/readiness-audit.md` has zero failed checks"
+    }
+  ]
+}

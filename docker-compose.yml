@@ -1,0 +1,12 @@
+services:
+  ostag:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OSTAG_DRY_RUN: "false"
+      OSTAG_PLATFORM: "feishu"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.ostag.feishu</string>
+  <key>WorkingDirectory</key><string>/Users/gilbertchen/Documents/CODE/ostag-deep-fork</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OSTAG_PLATFORM</key><string>feishu</string>
+  </dict>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gilbertchen/.local/bin/uv</string>
+    <string>run</string>
+    <string>python</string>
+    <string>-m</string>
+    <string>ostag.main</string>
+    <string>--platform</string>
+    <string>feishu</string>
+    <string>--live</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/gilbertchen/Documents/CODE/ostag-deep-fork/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/gilbertchen/Documents/CODE/ostag-deep-fork/logs/launchd.err.log</string>
+</dict>
+</plist>

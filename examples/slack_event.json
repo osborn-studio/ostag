@@ -1,0 +1,10 @@
+{
+  "event": {
+    "type": "app_mention",
+    "user": "U123456",
+    "text": "<@UOSTAGBOT> Summarize the launch blockers and next action.",
+    "ts": "1710000000.000100",
+    "event_ts": "1710000000.000100",
+    "channel": "C123456"
+  }
+}

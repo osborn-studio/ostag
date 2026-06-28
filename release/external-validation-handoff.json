@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-06-28T13:43:42Z",
+  "launch_status": "blocked_external",
+  "launch_exit_code": 3,
+  "mfs_mode": "required",
+  "blocking_conditions": [
+    "Feishu/Lark manual live validation is not complete.",
+    "Live MFS smoke is not complete or is intentionally out of production scope."
+  ],
+  "required_operator_commands": [
+    "scripts/deploy_preflight.sh",
+    "scripts/live_validation_record.sh feishu",
+    "scripts/validate_live_validation_record.sh feishu",
+    "scripts/mfs_validation_record.sh",
+    "scripts/validate_mfs_validation_record.sh",
+    "scripts/launch_status.sh"
+  ]
+}

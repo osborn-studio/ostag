@@ -1,0 +1,13 @@
+{
+  "generated_at": "2026-06-28T14:24:38Z",
+  "status": "production_candidate",
+  "readiness_gate": "PASS",
+  "readiness_checks": "17 passed / 0 warnings / 0 failed",
+  "completion_gate": "PASS",
+  "mfs_mode": "excluded",
+  "live_validation_exit_code": 0,
+  "mfs_validation_exit_code": 3,
+  "effective_mfs_exit_code": 0,
+  "exit_code": 0,
+  "blocking_conditions": []
+}

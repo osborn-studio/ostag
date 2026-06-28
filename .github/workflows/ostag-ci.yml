@@ -1,0 +1,22 @@
+name: OS Tag CI
+
+on:
+  push:
+    branches: ["main", "ostag/**"]
+  pull_request:
+
+jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --extra dev --extra feishu
+      - name: Run release check
+        run: scripts/release_check.sh
+      - name: Run deployment and live-evidence gates
+        run: scripts/ci_release_gates.sh

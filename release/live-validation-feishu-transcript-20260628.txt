@@ -1,0 +1,17 @@
+OS Tag Feishu live validation transcript
+
+Chat id: oc_1ae82ede7eb6fe9a2cf644b43b97611b
+User message id: om_x100b6b26f5f0e0b8c39fb2c5768098e
+Bot reply message id: om_x100b6b26f5ad90a0c2b2918012c73c9
+Time: 2026-06-28 22:12 Asia/Shanghai
+
+User:
+@Z Studio FEISHU 请用一句话回复：live validation ok
+
+OS Tag:
+OS Tag mock reply:
+我已经收到你的消息：
+@_user_1 请用一句话回复：live validation ok
+
+当前平台：feishu
+当前频道：oc_1ae82ede7eb6fe9a2cf644b43b97611b

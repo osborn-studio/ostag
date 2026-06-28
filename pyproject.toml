@@ -1,0 +1,41 @@
+[project]
+name = "ostag"
+version = "0.1.0"
+description = "OS Tag: a Feishu/Lark AI group-chat context assistant inspired by Open Tag."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "OS Tag contributors" }]
+dependencies = [
+  "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+feishu = ["lark-oapi>=1.4.22"]
+slack = ["slack-bolt>=1.22.0"]
+openai = ["openai>=1.93.0"]
+dev = ["pytest>=8.2.0", "pytest-asyncio>=0.23.0"]
+
+[project.scripts]
+ostag = "ostag.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+  "tests/test_doctor.py",
+  "tests/test_event_normalization.py",
+  "tests/test_mfs_client.py",
+  "tests/test_memory.py",
+  "tests/test_mock_backend.py",
+  "tests/test_prompt.py",
+  "tests/test_safety.py",
+]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

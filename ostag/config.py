@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+
+
+Platform = Literal["slack", "feishu", "lark"]
+BackendName = Literal["mock", "codex_cli", "claude_cli", "openai_api"]
+
+
+def _bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+@dataclass(frozen=True)
+class Settings:
+    env: str = "dev"
+    log_level: str = "INFO"
+    dry_run: bool = True
+    bot_name: str = "OS Tag"
+    platform: Platform = "feishu"
+    backend: BackendName = "mock"
+    agent_timeout_seconds: int = 120
+    max_input_chars: int = 12000
+    max_context_chars: int = 30000
+    allow_shell: bool = False
+    audit_log: Path = Path("./logs/audit.log")
+    mfs_enabled: bool = False
+    mfs_bin: str = "mfs"
+    mfs_server_url: str = "http://127.0.0.1:8000"
+    mfs_allowed_scopes: tuple[str, ...] = ("file://./context",)
+    mfs_max_results: int = 8
+    codex_bin: str = "codex"
+    claude_bin: str = "claude"
+    codex_unsafe_mode: bool = False
+    claude_unsafe_mode: bool = False
+    openai_model: str = "gpt-5.5"
+    feishu_app_id: str = ""
+    feishu_app_secret: str = ""
+    feishu_verification_token: str = ""
+    feishu_encrypt_key: str = ""
+    feishu_use_websocket: bool = True
+    feishu_api_base_url: str = "https://open.feishu.cn"
+    lark_app_id: str = ""
+    lark_app_secret: str = ""
+    lark_verification_token: str = ""
+    lark_encrypt_key: str = ""
+    lark_use_websocket: bool = True
+    lark_api_base_url: str = "https://open.larksuite.com"
+    slack_bot_token: str = ""
+    slack_app_token: str = ""
+
+
+def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
+    if load_dotenv:
+        load_dotenv(config_path or ".env", override=False)
+
+    scopes = tuple(
+        scope.strip()
+        for scope in os.getenv("MFS_ALLOWED_SCOPES", "file://./context").split(",")
+        if scope.strip()
+    )
+    settings = Settings(
+        env=os.getenv("OSTAG_ENV", "dev"),
+        log_level=os.getenv("OSTAG_LOG_LEVEL", "INFO"),
+        dry_run=_bool("OSTAG_DRY_RUN", True),
+        bot_name=os.getenv("OSTAG_BOT_NAME", "OS Tag").strip('"'),
+        platform=os.getenv("OSTAG_PLATFORM", "feishu"),  # type: ignore[arg-type]
+        backend=os.getenv("OSTAG_BACKEND", "mock"),  # type: ignore[arg-type]
+        agent_timeout_seconds=_int("OSTAG_AGENT_TIMEOUT_SECONDS", 120),
+        max_input_chars=_int("OSTAG_MAX_INPUT_CHARS", 12000),
+        max_context_chars=_int("OSTAG_MAX_CONTEXT_CHARS", 30000),
+        allow_shell=_bool("OSTAG_ALLOW_SHELL", False),
+        audit_log=Path(os.getenv("OSTAG_AUDIT_LOG", "./logs/audit.log")),
+        mfs_enabled=_bool("MFS_ENABLED", False),
+        mfs_bin=os.getenv("MFS_BIN", "mfs"),
+        mfs_server_url=os.getenv("MFS_SERVER_URL", "http://127.0.0.1:8000"),
+        mfs_allowed_scopes=scopes,
+        mfs_max_results=_int("MFS_MAX_RESULTS", 8),
+        codex_bin=os.getenv("CODEX_BIN", "codex"),
+        claude_bin=os.getenv("CLAUDE_BIN", "claude"),
+        codex_unsafe_mode=_bool("OSTAG_CODEX_UNSAFE_MODE", False),
+        claude_unsafe_mode=_bool("OSTAG_CLAUDE_UNSAFE_MODE", False),
+        openai_model=os.getenv("OSTAG_OPENAI_MODEL", "gpt-5.5"),
+        feishu_app_id=os.getenv("FEISHU_APP_ID", ""),
+        feishu_app_secret=os.getenv("FEISHU_APP_SECRET", ""),
+        feishu_verification_token=os.getenv("FEISHU_VERIFICATION_TOKEN", ""),
+        feishu_encrypt_key=os.getenv("FEISHU_ENCRYPT_KEY", ""),
+        feishu_use_websocket=_bool("FEISHU_USE_WEBSOCKET", True),
+        feishu_api_base_url=os.getenv("FEISHU_API_BASE_URL", "https://open.feishu.cn"),
+        lark_app_id=os.getenv("LARK_APP_ID", ""),
+        lark_app_secret=os.getenv("LARK_APP_SECRET", ""),
+        lark_verification_token=os.getenv("LARK_VERIFICATION_TOKEN", ""),
+        lark_encrypt_key=os.getenv("LARK_ENCRYPT_KEY", ""),
+        lark_use_websocket=_bool("LARK_USE_WEBSOCKET", True),
+        lark_api_base_url=os.getenv("LARK_API_BASE_URL", "https://open.larksuite.com"),
+        slack_bot_token=os.getenv("SLACK_BOT_TOKEN", ""),
+        slack_app_token=os.getenv("SLACK_APP_TOKEN", ""),
+    )
+    if overrides:
+        data = settings.__dict__ | overrides
+        settings = Settings(**data)
+    return settings

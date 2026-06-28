@@ -1,0 +1,21 @@
+OS Tag launchd production validation transcript
+
+LaunchAgent: ai.ostag.feishu
+Service state: running
+Service pid: 58708
+Chat id: oc_1ae82ede7eb6fe9a2cf644b43b97611b
+User message id: om_x100b6b26971d54a0c31106829e5085f
+Bot reply message id: om_x100b6b26973e08a4c03bc167d84d75b
+Audit timestamp: 2026-06-28T14:20:13.538566+00:00
+Time: 2026-06-28 22:20 Asia/Shanghai
+
+User:
+@Z Studio FEISHU launchd production validation ok
+
+OS Tag:
+OS Tag mock reply:
+我已经收到你的消息：
+@_user_1 launchd production validation ok
+
+当前平台：feishu
+当前频道：oc_1ae82ede7eb6fe9a2cf644b43b97611b

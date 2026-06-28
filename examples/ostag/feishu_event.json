@@ -1,0 +1,31 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "evt_feishu_example",
+    "event_type": "im.message.receive_v1",
+    "tenant_key": "tenant_demo"
+  },
+  "event": {
+    "sender": {
+      "sender_id": {
+        "open_id": "ou_demo_sender"
+      },
+      "sender_type": "user"
+    },
+    "message": {
+      "message_id": "om_demo_message",
+      "root_id": "om_demo_root",
+      "chat_id": "oc_demo_chat",
+      "chat_type": "group",
+      "message_type": "text",
+      "content": "{\"text\":\"<at user_id=\\\"ou_bot\\\">OS Tag</at> 请总结这个项目下一步应该做什么\"}",
+      "mentions": [
+        {
+          "key": "@_user_1",
+          "id": { "open_id": "ou_bot" },
+          "name": "OS Tag"
+        }
+      ]
+    }
+  }
+}
