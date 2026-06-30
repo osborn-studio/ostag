@@ -59,6 +59,7 @@ class FieldInfo:
     name: str
     field_id: str | None
     field_type: str
+    options: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -573,44 +574,44 @@ def build_rows_for_fields(
     if not writable:
         raise AutoBaseError("目标表没有可写字段。")
 
-    selected_fields: list[str] = []
+    selected_fields: list[FieldInfo] = []
     rows: list[list[Any]] = []
     field_names = [field.name for field in writable]
 
     for field in writable:
         if field_value_for_record(
-            field.name,
+            field,
             {},
             source_file=source_file,
             source_message_id=source_message_id,
             now_text=now_text,
             include_defaults=False,
         ) is not None or any(field.name in record for record in records):
-            selected_fields.append(field.name)
+            selected_fields.append(field)
 
     if not selected_fields:
-        selected_fields = [field_names[0]]
+        selected_fields = [writable[0]]
 
     for record in records[:200]:
         row = [
             field_value_for_record(
-                field_name,
+                selected_field,
                 record,
                 source_file=source_file,
                 source_message_id=source_message_id,
                 now_text=now_text,
                 include_defaults=True,
             )
-            for field_name in selected_fields
+            for selected_field in selected_fields
         ]
         if any(value not in (None, "") for value in row):
             rows.append(row)
 
-    return {"fields": selected_fields, "rows": rows}
+    return {"fields": [field.name for field in selected_fields], "rows": rows}
 
 
 def field_value_for_record(
-    field_name: str,
+    field: FieldInfo | str,
     record: dict[str, str],
     *,
     source_file: str,
@@ -618,20 +619,23 @@ def field_value_for_record(
     now_text: str,
     include_defaults: bool,
 ) -> Any:
+    field_name = field.name if isinstance(field, FieldInfo) else field
     if field_name in record:
-        return record[field_name]
+        return coerce_field_value(field, record[field_name])
     normalized = normalize_doc_key(field_name)
     for key, value in record.items():
         if normalize_doc_key(key) == normalized:
-            return value
+            return coerce_field_value(field, value)
     if normalized in {"需求名称", "需求标题", "标题", "名称", "name", "title"}:
-        return record.get("需求名称") or record.get("标题")
+        return coerce_field_value(field, record.get("需求名称") or record.get("标题"))
     if normalized in {"需求描述", "需求内容", "描述", "内容", "说明", "背景", "description"}:
-        return record.get("需求描述") or record.get("描述") or record.get("需求背景")
+        return coerce_field_value(
+            field, record.get("需求描述") or record.get("描述") or record.get("需求背景")
+        )
     if normalized in {"优先级", "priority"}:
-        return record.get("优先级")
-    if normalized in {"状态", "status"}:
-        return "待处理" if include_defaults else "待处理"
+        return coerce_field_value(field, record.get("优先级"))
+    if normalized in {"状态", "需求状态", "status"}:
+        return coerce_field_value(field, "待处理" if include_defaults else "待处理")
     if normalized in {"来源", "来源文件", "文件名", "附件", "source"}:
         return source_file if include_defaults else source_file
     if normalized in {"来源消息", "消息id", "messageid", "message_id"}:
@@ -641,11 +645,55 @@ def field_value_for_record(
     return None
 
 
+def coerce_field_value(field: FieldInfo | str, value: Any) -> Any:
+    if not isinstance(field, FieldInfo) or field.field_type != "select":
+        return value
+    if value in (None, ""):
+        return value
+    text = str(value).strip()
+    if text in field.options:
+        return text
+    normalized = normalize_doc_key(text)
+    priority_aliases = {
+        "高": ("高p0", "p0"),
+        "高优先级": ("高p0", "p0"),
+        "p0": ("高p0", "p0"),
+        "中": ("中p1", "p1"),
+        "中优先级": ("中p1", "p1"),
+        "p1": ("中p1", "p1"),
+        "低": ("低p2", "p2"),
+        "低优先级": ("低p2", "p2"),
+        "p2": ("低p2", "p2"),
+    }
+    for candidate in field.options:
+        candidate_norm = normalize_doc_key(candidate)
+        if normalized and (candidate_norm.startswith(normalized) or normalized in candidate_norm):
+            return candidate
+    for marker in priority_aliases.get(normalized, ()):
+        for candidate in field.options:
+            if marker in normalize_doc_key(candidate):
+                return candidate
+    status_aliases = {
+        "待处理": ("待评估", "方案设计中"),
+        "处理中": ("开发交付中", "方案设计中"),
+        "已完成": ("已完成",),
+    }
+    for alias in status_aliases.get(normalized, ()):
+        if alias in field.options:
+            return alias
+    return text
+
+
 def field_info(item: dict[str, Any]) -> FieldInfo:
+    options = item.get("options")
+    option_names = ()
+    if isinstance(options, list):
+        option_names = tuple(str(option.get("name")) for option in options if option.get("name"))
     return FieldInfo(
         name=str(item.get("name") or item.get("field_name") or ""),
         field_id=item.get("field_id") or item.get("id"),
         field_type=str(item.get("type") or item.get("ui_type") or "").lower(),
+        options=option_names,
     )
 
 

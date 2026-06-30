@@ -184,6 +184,38 @@ def test_build_rows_for_fields_maps_known_fields_and_keeps_primary_title() -> No
     }
 
 
+def test_build_rows_for_fields_coerces_select_options_for_existing_requirement_base() -> None:
+    fields = [
+        FieldInfo(name="需求描述", field_id="fld_desc", field_type="text"),
+        FieldInfo(
+            name="优先级",
+            field_id="fld_priority",
+            field_type="select",
+            options=("高 - P0", "中 - P1", "低 - P2"),
+        ),
+        FieldInfo(
+            name="需求状态",
+            field_id="fld_status",
+            field_type="select",
+            options=("待评估", "方案设计中", "开发交付中", "验收中", "已完成"),
+        ),
+    ]
+    records = [{"需求描述": "自动收集需求", "优先级": "高"}]
+
+    payload = build_rows_for_fields(
+        records,
+        fields,
+        source_file="需求模板.docx",
+        source_message_id="om_file",
+        now_text="2026-06-29 22:30:00",
+    )
+
+    assert payload == {
+        "fields": ["需求描述", "优先级", "需求状态"],
+        "rows": [["自动收集需求", "高 - P0", "待评估"]],
+    }
+
+
 class FakeAutoBaseWorkflow:
     async def handle(self, event):
         return "自动入表完成"
