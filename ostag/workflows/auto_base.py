@@ -165,7 +165,7 @@ class AutoBaseWorkflow:
     async def handle(self, event: NormalizedEvent) -> str | None:
         if not self.config.auto_base_enabled:
             return None
-        if event.platform not in {"feishu", "lark"}:
+        if event.platform not in {"feishu", "lark", "slack"}:
             return None
         if is_auto_base_status_request(event.text):
             return (

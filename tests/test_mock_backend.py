@@ -183,6 +183,38 @@ async def test_runner_reports_channel_brain_without_backend(tmp_path: Path, monk
     assert "base=base_env" in reply
 
 
+async def test_runner_supports_slack_channel_brain(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+    runner = OSTagRunner(config)
+
+    reply = await runner.handle_event(
+        NormalizedEvent(
+            platform="slack",
+            event_id="evt",
+            chat_id="C123",
+            message_id="1710000000.000100",
+            sender_id="U123",
+            text="记住：这个 Slack 频道用于产品需求评审",
+            mention_bot=True,
+        )
+    )
+    status = await runner.handle_event(
+        NormalizedEvent(
+            platform="slack",
+            event_id="evt2",
+            chat_id="C123",
+            message_id="1710000000.000200",
+            sender_id="U123",
+            text="这个群你记住了什么",
+            mention_bot=True,
+        )
+    )
+
+    assert "已记住" in reply
+    assert "这个 Slack 频道用于产品需求评审" in status
+
+
 @pytest.mark.asyncio
 async def test_backend_error_reply_does_not_expose_private_cli_output(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log")

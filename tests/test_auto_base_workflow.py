@@ -835,6 +835,35 @@ async def test_auto_base_workflow_blocks_when_daily_budget_exhausted(
     assert "动作预算已用完" in reply
 
 
+async def test_slack_event_can_trigger_governed_requirement_status_update(
+    tmp_path: Path,
+) -> None:
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    workflow = AutoBaseWorkflow(config, cli=FakeCLIForSingleRequirement())
+    event = NormalizedEvent(
+        platform="slack",
+        event_id="evt",
+        chat_id="C123",
+        message_id="1710000000.000100",
+        sender_id="U123",
+        text="请把 交易盯盘 状态改为 开发交付中",
+        mention_bot=True,
+        thread_id="1710000000.000100",
+        raw={"type": "app_mention", "channel": "C123"},
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "需求运营完成" in reply
+    assert "阶段：已接收请求" in reply
+
+
 async def test_auto_base_workflow_loads_context_across_history_pages(tmp_path: Path) -> None:
     class FakeCLI:
         async def json(self, *args):

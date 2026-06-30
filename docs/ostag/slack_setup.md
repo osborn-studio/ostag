@@ -33,6 +33,28 @@ SLACK_APP_TOKEN=xapp-...
 OSTAG_BACKEND=mock
 ```
 
+## Channel Brain And Requirement Operations
+
+Slack channels use the same Channel Brain store as Feishu/Lark:
+
+```text
+@OS Tag 记住：这个频道用于产品需求评审
+@OS Tag 这个群你记住了什么
+```
+
+If `OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN` and
+`OSTAG_AUTO_BASE_DEFAULT_TABLE_ID` are configured, Slack can also trigger
+governed requirement-table operations against the configured Feishu/Lark Base:
+
+```text
+@OS Tag 请把 交易盯盘 状态改为 开发交付中
+@OS Tag 请将 市场周报 优先级改为 高
+```
+
+Slack user IDs are not automatically treated as Feishu/Lark `open_id`s. Owner
+assignment from Slack requires an explicit identity mapping in a later phase or
+a Feishu/Lark-side command.
+
 Install Slack dependencies:
 
 ```bash
