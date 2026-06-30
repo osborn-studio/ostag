@@ -533,6 +533,7 @@ async def test_auto_base_workflow_updates_requirement_owner_and_status(tmp_path:
 
     assert reply is not None
     assert "需求运营完成" in reply
+    assert "阶段：已接收请求 → 已加载频道策略 → 已读取需求表结构 → 已定位需求" in reply
     update_call = next(call for call in fake_cli.calls if call[:2] == ("base", "+record-batch-update"))
     payload = json.loads(update_call[update_call.index("--json") + 1])
     assert payload == {
@@ -613,6 +614,54 @@ async def test_auto_base_workflow_creates_lark_task_for_requirement(tmp_path: Pa
 
     assert reply is not None
     assert "飞书任务：已创建" in reply
+    assert "已执行写入" in reply
+
+
+async def test_auto_base_workflow_reports_stage_on_missing_requirement(tmp_path: Path) -> None:
+    class FakeCLI:
+        async def json(self, *args):
+            if args[:2] == ("base", "+table-list"):
+                return {
+                    "ok": True,
+                    "data": {"tables": [{"table_id": "tblDefault", "name": "需求收集管理"}]},
+                }
+            if args[:2] == ("base", "+field-list"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "fields": [
+                            {"name": "需求描述", "type": "text", "field_id": "fld_desc"},
+                            {"name": "需求状态", "type": "select", "field_id": "fld_status"},
+                        ]
+                    },
+                }
+            if args[:2] == ("base", "+record-search"):
+                return {"ok": True, "data": {"records": []}}
+            raise AssertionError(f"unexpected lark-cli call: {args}")
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    workflow = AutoBaseWorkflow(config, cli=FakeCLI())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请把 不存在的需求 状态改为 开发交付中",
+        mention_bot=True,
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert reply.startswith("需求运营未完成")
+    assert "没有在需求表中找到匹配" in reply
+    assert "阶段：已接收请求 → 已加载频道策略 → 已读取需求表结构" in reply
 
 
 async def test_auto_base_workflow_loads_context_across_history_pages(tmp_path: Path) -> None:

@@ -15,8 +15,8 @@ attempting dependent phases out of order.
 | Phase | osstack task id | Priority | Capability | Status | Required gate |
 |---|---:|---:|---|---|---|
 | Phase 1: Channel Brain | `task_5a0d4f86` | 100 | `code.feature` | completed | Channel brain store/policy resolver exist; channel isolation tests pass; memory status reply works. |
-| Phase 2: Stage Ledger | `task_c04abd42` | 95 | `code.feature` | active | Requirement operations emit staged success/failure ledger; tests pass. |
-| Phase 3: Connector Layer | `task_49e1f4d9` | 90 | `code.refactor` | queued | Base/task CLI calls are behind connector interfaces; contract tests pass; behavior preserved. |
+| Phase 2: Stage Ledger | `task_c04abd42` | 95 | `code.feature` | completed | Requirement operations emit staged success/failure ledger; tests pass. |
+| Phase 3: Connector Layer | `task_49e1f4d9` | 90 | `code.refactor` | active | Base/task CLI calls are behind connector interfaces; contract tests pass; behavior preserved. |
 | Phase 4: Governance Policy | `task_07fd8203` | 85 | `code.feature` | queued | Per-channel readable/writable fields, task creation, confirmation, budget, and tool/backend policy tests pass. |
 | Phase 5: Ambient Mode v1 | `task_6564e35f` | 80 | `code.feature` | queued | Ambient reminders are opt-in, rate-limited, proposal-only, and audited. |
 | Phase 6: Slack Parity | `task_227a5da7` | 75 | `code.feature` | queued | Slack can use Channel Brain and governed requirement operations in tested fixtures. |

@@ -16,6 +16,7 @@ from xml.etree import ElementTree
 from ostag.config import Settings
 from ostag.core.channel_brain import channel_policy_for_event
 from ostag.core.event import NormalizedEvent
+from ostag.core.stage_ledger import StageLedger
 
 
 BASE_URL_RE = re.compile(r"https?://[^\s<>\"]+\.feishu\.cn/(?:app|base)/[^\s<>\"]+")
@@ -158,14 +159,15 @@ class AutoBaseWorkflow:
             )
         management_command = parse_requirement_management_command(event, self.config)
         if management_command:
+            ledger = StageLedger()
             try:
-                return await self._handle_requirement_management(event, management_command)
+                return await self._handle_requirement_management(event, management_command, ledger)
             except TimeoutError as exc:
-                return f"需求运营未完成：调用 lark-cli 超时。{exc}"
+                return f"需求运营未完成：调用 lark-cli 超时。{exc}\n{ledger.format_user()}"
             except AutoBaseError as exc:
-                return f"需求运营未完成：{friendly_lark_error(str(exc))}"
+                return f"需求运营未完成：{friendly_lark_error(str(exc))}\n{ledger.format_user()}"
             except Exception as exc:  # noqa: BLE001
-                return f"需求运营未完成：{type(exc).__name__}: {exc}"
+                return f"需求运营未完成：{type(exc).__name__}: {exc}\n{ledger.format_user()}"
         if not is_auto_base_request(event.text):
             return None
 
@@ -202,16 +204,23 @@ class AutoBaseWorkflow:
         )
 
     async def _handle_requirement_management(
-        self, event: NormalizedEvent, command: RequirementManagementCommand
+        self,
+        event: NormalizedEvent,
+        command: RequirementManagementCommand,
+        ledger: StageLedger | None = None,
     ) -> str:
+        ledger = ledger or StageLedger()
+        ledger.complete("received", "已接收请求")
         base = command.base or default_base_context(self.config)
         if not base:
             raise AutoBaseError(
                 "还没有配置默认需求底表。请在命令里附上 Base 链接，或设置 "
                 "OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN 和 OSTAG_AUTO_BASE_DEFAULT_TABLE_ID。"
             )
+        ledger.complete("policy_loaded", "已加载频道策略")
         resolved = await self._resolve_or_create_table(base)
         fields = await self._list_fields(resolved.base_token, resolved.table.table_id)
+        ledger.complete("context_loaded", "已读取需求表结构")
         matches = await self._search_requirement_records(
             resolved.base_token, resolved.table.table_id, fields, command.target
         )
@@ -222,7 +231,9 @@ class AutoBaseWorkflow:
             raise AutoBaseError(f"找到多条匹配需求，请说得更具体：{labels}")
 
         record = matches[0]
+        ledger.complete("target_found", "已定位需求")
         patch = build_requirement_patch(command, fields)
+        ledger.complete("permission_checked", "已校验可执行动作")
         task_result: dict[str, Any] | None = None
         if command.create_task:
             task_result = await self._create_lark_task(command, record)
@@ -232,6 +243,7 @@ class AutoBaseWorkflow:
                 patch.update(field_patch_if_exists(fields, "任务链接", task_url))
         if patch:
             await self._update_record(resolved.base_token, resolved.table.table_id, record.record_id, patch)
+        ledger.complete("executed", "已执行写入")
         if not patch and not command.create_task:
             raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
 
@@ -245,7 +257,13 @@ class AutoBaseWorkflow:
         if command.create_task:
             task_url = extract_task_url(task_result or {})
             actions.append(f"飞书任务：已创建{f'（{task_url}）' if task_url else ''}")
-        return f"需求运营完成：已更新「{record_label(record)}」。" + "；".join(actions) + "。"
+        ledger.complete("replied", "已生成回执")
+        return (
+            f"需求运营完成：已更新「{record_label(record)}」。"
+            + "；".join(actions)
+            + "。\n"
+            + ledger.format_user()
+        )
 
     async def _load_context(self, event: NormalizedEvent) -> WorkflowContext:
         preferred_base = extract_base_context(event.text)
