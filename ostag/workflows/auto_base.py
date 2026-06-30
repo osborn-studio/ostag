@@ -167,22 +167,51 @@ class AutoBaseWorkflow:
         )
 
     async def _load_context(self, event: NormalizedEvent) -> WorkflowContext:
-        history = await self.cli.json(
-            "im",
-            "+chat-messages-list",
-            "--as",
-            self.config.auto_base_identity,
-            "--chat-id",
-            event.chat_id,
-            "--page-size",
-            str(self.config.auto_base_history_page_size),
-            "--json",
-        )
-        messages = history.get("data", {}).get("messages", [])
-        context = find_workflow_context(messages, strict_explicit_target=True)
-        if not context:
-            raise AutoBaseError("没有在最近群消息中找到 docx 文件和 Base 链接。")
-        return context
+        preferred_base = extract_base_context(event.text)
+        if (
+            preferred_base is None
+            and UNSUPPORTED_APPLINK_RE.search(event.text)
+            and is_auto_base_request(event.text)
+        ):
+            raise AutoBaseError(
+                "你发的是飞书客户端消息跳转链接，不是多维表格真实地址。"
+                "请复制多维表格的浏览器地址或分享地址，形如 "
+                "https://...feishu.cn/app/{base_token} 或 https://...feishu.cn/base/{base_token}"
+                "；我拿到真实 Base 链接后才能写入指定报表背后的数据表。"
+            )
+
+        messages: list[dict[str, Any]] = []
+        page_token: str | None = None
+        page_size = min(max(self.config.auto_base_history_page_size, 1), 50)
+        for _ in range(5):
+            args = [
+                "im",
+                "+chat-messages-list",
+                "--as",
+                self.config.auto_base_identity,
+                "--chat-id",
+                event.chat_id,
+                "--page-size",
+                str(page_size),
+                "--no-reactions",
+                "--json",
+            ]
+            if page_token:
+                args.extend(["--page-token", page_token])
+            history = await self.cli.json(*args)
+            data = history.get("data", {})
+            messages.extend(data.get("messages", []))
+            if preferred_base:
+                file = find_file_ref(messages)
+                if file:
+                    return WorkflowContext(base=preferred_base, file=file)
+            context = find_workflow_context(messages, strict_explicit_target=True)
+            if context:
+                return context
+            page_token = data.get("page_token")
+            if not data.get("has_more") or not page_token:
+                break
+        raise AutoBaseError("没有在最近群消息中找到 docx 文件和 Base 链接。")
 
     async def _resolve_or_create_table(self, base: BaseContext) -> ResolvedTable:
         if base.table_id:
@@ -356,7 +385,7 @@ def extract_base_context(text: str) -> BaseContext | None:
     match = BASE_URL_RE.search(text)
     if not match:
         return None
-    url = match.group(0)
+    url = match.group(0).rstrip("）。)，,，.;；、]")
     parsed = urlparse(url)
     parts = [part for part in parsed.path.split("/") if part]
     token = ""
@@ -364,7 +393,7 @@ def extract_base_context(text: str) -> BaseContext | None:
         if part in {"app", "base"} and idx + 1 < len(parts):
             token = parts[idx + 1]
             break
-    if not token:
+    if not token or "{" in token or "}" in token or token == "...":
         return None
     query = parse_qs(parsed.query)
     table_id = (query.get("table") or [None])[0]
@@ -397,6 +426,14 @@ def find_workflow_context(
         file = file or extract_file_ref(message)
         if base and file:
             return WorkflowContext(base=base, file=file)
+    return None
+
+
+def find_file_ref(messages: list[dict[str, Any]]) -> ChatFile | None:
+    for message in messages:
+        file = extract_file_ref(message)
+        if file:
+            return file
     return None
 
 

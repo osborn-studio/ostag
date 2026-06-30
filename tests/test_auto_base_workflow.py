@@ -58,6 +58,17 @@ def test_extract_base_context_ignores_non_table_resource_params() -> None:
     )
 
 
+def test_extract_base_context_trims_trailing_punctuation_and_ignores_placeholders() -> None:
+    context = extract_base_context("已写入 https://a2.feishu.cn/base/abc123）。")
+
+    assert context == BaseContext(
+        base_token="abc123",
+        table_id=None,
+        url="https://a2.feishu.cn/base/abc123",
+    )
+    assert extract_base_context("形如 https://...feishu.cn/app/{base_token}") is None
+
+
 def test_find_workflow_context_uses_recent_file_and_base_link() -> None:
     messages = [
         {
@@ -221,6 +232,107 @@ async def test_auto_base_workflow_answers_status_without_cli(tmp_path: Path) -> 
 
     assert reply is not None
     assert "已经上线" in reply
+
+
+async def test_auto_base_workflow_loads_context_across_history_pages(tmp_path: Path) -> None:
+    class FakeCLI:
+        async def json(self, *args):
+            if "--page-token" not in args:
+                return {
+                    "ok": True,
+                    "data": {
+                        "has_more": True,
+                        "page_token": "next-page",
+                        "messages": [
+                            {
+                                "message_id": "om_request",
+                                "msg_type": "text",
+                                "content": (
+                                    "请把这个 docx 文件中的需求写入"
+                                    "https://tenant.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy"
+                                ),
+                            }
+                        ],
+                    },
+                }
+            return {
+                "ok": True,
+                "data": {
+                    "has_more": False,
+                    "messages": [
+                        {
+                            "message_id": "om_file",
+                            "msg_type": "file",
+                            "content": '<file key="file_v3_docx" name="需求模板.docx"/>',
+                        }
+                    ],
+                },
+            }
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+    workflow = AutoBaseWorkflow(config, cli=FakeCLI())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_demo",
+        text="请把 docx 写入表格",
+        mention_bot=True,
+    )
+
+    context = await workflow._load_context(event)
+
+    assert context.base.base_token == "TqcVbKRiZa6YClshTqxcOzblncy"
+    assert context.file.message_id == "om_file"
+
+
+async def test_auto_base_workflow_prefers_current_event_base_over_history_reply(
+    tmp_path: Path,
+) -> None:
+    class FakeCLI:
+        async def json(self, *args):
+            return {
+                "ok": True,
+                "data": {
+                    "has_more": False,
+                    "messages": [
+                        {
+                            "message_id": "om_bot_reply",
+                            "msg_type": "text",
+                            "content": (
+                                "自动入表完成：已写入 Base "
+                                "https://tenant.feishu.cn/base/OldCompanionBase）。"
+                            ),
+                        },
+                        {
+                            "message_id": "om_file",
+                            "msg_type": "file",
+                            "content": '<file key="file_v3_docx" name="需求模板.docx"/>',
+                        },
+                    ],
+                },
+            }
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+    workflow = AutoBaseWorkflow(config, cli=FakeCLI())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_demo",
+        text=(
+            "请把 docx 写入"
+            "https://tenant.feishu.cn/app/CurrentTargetBase?pageId=pgeDemo"
+        ),
+        mention_bot=True,
+    )
+
+    context = await workflow._load_context(event)
+
+    assert context.base.base_token == "CurrentTargetBase"
+    assert context.file.message_id == "om_file"
 
 
 async def test_auto_base_workflow_creates_table_for_report_page_without_writable_table(
