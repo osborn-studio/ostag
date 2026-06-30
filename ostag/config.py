@@ -72,6 +72,8 @@ class Settings:
     auto_base_cli_timeout_seconds: int = 120
     auto_base_create_table_if_missing: bool = True
     auto_base_default_table_name: str = "需求池"
+    auto_base_default_base_token: str = ""
+    auto_base_default_table_id: str = ""
     auto_base_download_dir: str = "tmp/ostag-auto-base"
     auto_base_workdir: str = "."
     lark_cli_bin: str = "lark-cli"
@@ -128,6 +130,8 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         auto_base_cli_timeout_seconds=_int("OSTAG_AUTO_BASE_CLI_TIMEOUT_SECONDS", 120),
         auto_base_create_table_if_missing=_bool("OSTAG_AUTO_BASE_CREATE_TABLE_IF_MISSING", True),
         auto_base_default_table_name=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_NAME", "需求池"),
+        auto_base_default_base_token=os.getenv("OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN", ""),
+        auto_base_default_table_id=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_ID", ""),
         auto_base_download_dir=os.getenv(
             "OSTAG_AUTO_BASE_DOWNLOAD_DIR", "tmp/ostag-auto-base"
         ),

@@ -76,6 +76,28 @@ class ResolvedTable:
     base_url: str | None = None
 
 
+@dataclass(frozen=True)
+class MentionedUser:
+    open_id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class RequirementManagementCommand:
+    target: str
+    status: str | None = None
+    priority: str | None = None
+    assignee: MentionedUser | None = None
+    create_task: bool = False
+    base: BaseContext | None = None
+
+
+@dataclass(frozen=True)
+class MatchingRecord:
+    record_id: str
+    fields: dict[str, Any]
+
+
 class AutoBaseError(RuntimeError):
     pass
 
@@ -130,8 +152,19 @@ class AutoBaseWorkflow:
         if is_auto_base_status_request(event.text):
             return (
                 "自动入表能力已经上线：我可以从群历史中定位最近的 docx 和 Base 链接，"
-                "下载并解析需求文档，写入需求池。"
+                "下载并解析需求文档，写入需求池；也可以维护默认需求底表，"
+                "支持分配负责人、更新状态/优先级、创建飞书任务。"
             )
+        management_command = parse_requirement_management_command(event, self.config)
+        if management_command:
+            try:
+                return await self._handle_requirement_management(event, management_command)
+            except TimeoutError as exc:
+                return f"需求运营未完成：调用 lark-cli 超时。{exc}"
+            except AutoBaseError as exc:
+                return f"需求运营未完成：{friendly_lark_error(str(exc))}"
+            except Exception as exc:  # noqa: BLE001
+                return f"需求运营未完成：{type(exc).__name__}: {exc}"
         if not is_auto_base_request(event.text):
             return None
 
@@ -155,7 +188,7 @@ class AutoBaseWorkflow:
         except TimeoutError as exc:
             return f"自动入表未完成：调用 lark-cli 超时。{exc}"
         except AutoBaseError as exc:
-            return f"自动入表未完成：{exc}"
+            return f"自动入表未完成：{friendly_lark_error(str(exc))}"
         except Exception as exc:  # noqa: BLE001
             return f"自动入表未完成：{type(exc).__name__}: {exc}"
 
@@ -166,6 +199,52 @@ class AutoBaseWorkflow:
             f"自动入表完成：已从《{context.file.name}》提取 {count} 条需求，"
             f"写入 Base「{base_name}」的表「{resolved.table.name}」{suffix}。"
         )
+
+    async def _handle_requirement_management(
+        self, event: NormalizedEvent, command: RequirementManagementCommand
+    ) -> str:
+        base = command.base or default_base_context(self.config)
+        if not base:
+            raise AutoBaseError(
+                "还没有配置默认需求底表。请在命令里附上 Base 链接，或设置 "
+                "OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN 和 OSTAG_AUTO_BASE_DEFAULT_TABLE_ID。"
+            )
+        resolved = await self._resolve_or_create_table(base)
+        fields = await self._list_fields(resolved.base_token, resolved.table.table_id)
+        matches = await self._search_requirement_records(
+            resolved.base_token, resolved.table.table_id, fields, command.target
+        )
+        if not matches:
+            raise AutoBaseError(f"没有在需求表中找到匹配「{command.target}」的记录。")
+        if len(matches) > 1:
+            labels = "；".join(record_label(record) for record in matches[:5])
+            raise AutoBaseError(f"找到多条匹配需求，请说得更具体：{labels}")
+
+        record = matches[0]
+        patch = build_requirement_patch(command, fields)
+        task_result: dict[str, Any] | None = None
+        if command.create_task:
+            task_result = await self._create_lark_task(command, record)
+            task_url = extract_task_url(task_result)
+            if task_url:
+                patch.update(field_patch_if_exists(fields, "飞书任务", task_url))
+                patch.update(field_patch_if_exists(fields, "任务链接", task_url))
+        if patch:
+            await self._update_record(resolved.base_token, resolved.table.table_id, record.record_id, patch)
+        if not patch and not command.create_task:
+            raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
+
+        actions: list[str] = []
+        if command.assignee:
+            actions.append(f"负责人：{command.assignee.name or command.assignee.open_id}")
+        if command.status:
+            actions.append(f"状态：{coerce_named_field_value(fields, '需求状态', command.status)}")
+        if command.priority:
+            actions.append(f"优先级：{coerce_named_field_value(fields, '优先级', command.priority)}")
+        if command.create_task:
+            task_url = extract_task_url(task_result or {})
+            actions.append(f"飞书任务：已创建{f'（{task_url}）' if task_url else ''}")
+        return f"需求运营完成：已更新「{record_label(record)}」。" + "；".join(actions) + "。"
 
     async def _load_context(self, event: NormalizedEvent) -> WorkflowContext:
         preferred_base = extract_base_context(event.text)
@@ -372,6 +451,77 @@ class AutoBaseWorkflow:
         )
         return result.get("data", {}) if isinstance(result.get("data"), dict) else {}
 
+    async def _search_requirement_records(
+        self, base_token: str, table_id: str, fields: list[FieldInfo], keyword: str
+    ) -> list[MatchingRecord]:
+        search_fields = choose_search_fields(fields)
+        if not search_fields:
+            raise AutoBaseError("目标表缺少可搜索的需求文本字段。")
+        args = [
+            "base",
+            "+record-search",
+            "--as",
+            self.config.auto_base_identity,
+            "--base-token",
+            base_token,
+            "--table-id",
+            table_id,
+            "--keyword",
+            keyword,
+            "--limit",
+            "5",
+            "--format",
+            "json",
+        ]
+        for name in search_fields:
+            args.extend(["--search-field", name])
+            args.extend(["--field-id", name])
+        for name in ("需求状态", "优先级", "需求负责人"):
+            if find_field(fields, name) and name not in search_fields:
+                args.extend(["--field-id", name])
+        data = await self.cli.json(*args)
+        return extract_matching_records(data)
+
+    async def _update_record(
+        self, base_token: str, table_id: str, record_id: str, patch: dict[str, Any]
+    ) -> None:
+        payload = {"record_id_list": [record_id], "patch": patch}
+        await self.cli.json(
+            "base",
+            "+record-batch-update",
+            "--as",
+            self.config.auto_base_identity,
+            "--base-token",
+            base_token,
+            "--table-id",
+            table_id,
+            "--json",
+            json.dumps(payload, ensure_ascii=False),
+        )
+
+    async def _create_lark_task(
+        self, command: RequirementManagementCommand, record: MatchingRecord
+    ) -> dict[str, Any]:
+        summary = record_title(record) or command.target
+        description = record_description(record)
+        args = [
+            "task",
+            "+create",
+            "--as",
+            self.config.auto_base_identity,
+            "--summary",
+            summary[:200],
+            "--description",
+            description[:4000],
+            "--idempotency-key",
+            f"ostag-{record.record_id}",
+            "--json",
+        ]
+        if command.assignee:
+            args.extend(["--assignee", command.assignee.open_id])
+        result = await self.cli.json(*args)
+        return result.get("data", {}) if isinstance(result.get("data"), dict) else result
+
 
 def is_auto_base_request(text: str) -> bool:
     value = text.lower()
@@ -382,9 +532,132 @@ def is_auto_base_request(text: str) -> bool:
 
 def is_auto_base_status_request(text: str) -> bool:
     value = text.lower()
-    has_feature = any(key in value for key in ("自动入表", "入表能力", "入表功能"))
+    has_feature = any(key in value for key in ("自动入表", "入表能力", "入表功能", "需求运营", "需求管理"))
     has_status = any(key in value for key in ("是否", "已经", "上线", "能不能", "可以", "状态"))
     return has_feature and has_status
+
+
+def parse_requirement_management_command(
+    event: NormalizedEvent, config: Settings
+) -> RequirementManagementCommand | None:
+    text = event.text.strip()
+    value = text.lower()
+    is_management = any(
+        key in value
+        for key in (
+            "分配",
+            "指派",
+            "负责人",
+            "状态",
+            "优先级",
+            "创建任务",
+            "飞书任务",
+            "维护需求",
+            "管理需求",
+        )
+    ) and any(key in value for key in ("需求", "任务", "状态", "优先级", "负责人"))
+    if not is_management:
+        return None
+
+    base = extract_base_context(text) or default_base_context(config)
+    assignee = first_non_bot_mention(event, config.bot_name)
+    status = extract_status_update(text)
+    priority = extract_priority_update(text)
+    create_task = any(key in value for key in ("创建任务", "飞书任务", "新建任务", "分配任务"))
+    target = extract_requirement_target(text)
+    if not target:
+        return None
+    return RequirementManagementCommand(
+        target=target,
+        status=status,
+        priority=priority,
+        assignee=assignee,
+        create_task=create_task,
+        base=base,
+    )
+
+
+def default_base_context(config: Settings) -> BaseContext | None:
+    if not config.auto_base_default_base_token:
+        return None
+    url = f"configured://base/{config.auto_base_default_base_token}"
+    return BaseContext(
+        base_token=config.auto_base_default_base_token,
+        table_id=config.auto_base_default_table_id or None,
+        url=url,
+    )
+
+
+def first_non_bot_mention(event: NormalizedEvent, bot_name: str) -> MentionedUser | None:
+    raw = event.raw or {}
+    message = raw.get("event", raw).get("message", {}) if isinstance(raw, dict) else {}
+    mentions = message.get("mentions") or []
+    if not isinstance(mentions, list):
+        return None
+    for mention in mentions:
+        if not isinstance(mention, dict):
+            continue
+        name = str(mention.get("name") or mention.get("user_name") or mention.get("key") or "")
+        if bot_name and bot_name.lower() in name.lower():
+            continue
+        open_id = (
+            mention.get("id")
+            or mention.get("user_id")
+            or mention.get("open_id")
+            or mention.get("id", {})
+        )
+        if isinstance(open_id, dict):
+            open_id = open_id.get("open_id") or open_id.get("user_id")
+        if open_id:
+            return MentionedUser(open_id=str(open_id), name=name)
+    return None
+
+
+def extract_status_update(text: str) -> str | None:
+    patterns = (
+        r"(?:状态|需求状态)\s*(?:改为|更新为|设为|设置为|变成|到)\s*([\u4e00-\u9fffA-Za-z0-9 _-]+)",
+        r"(待评估|方案设计中|开发交付中|验收中|已完成|处理中|完成)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip(" 。；;，,")
+    return None
+
+
+def extract_priority_update(text: str) -> str | None:
+    patterns = (
+        r"(?:优先级|重要性)\s*(?:改为|更新为|设为|设置为|变成|到)?\s*([高高中低低Pp0-2 \-_]+|Need|Nice|Must|Should|Could)",
+        r"\b(P[0-2]|Need|Nice|Must|Should|Could)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" 。；;，,")
+    return None
+
+
+def extract_requirement_target(text: str) -> str:
+    cleaned = BASE_URL_RE.sub("", text)
+    cleaned = re.sub(r"<at[^>]*>.*?</at>", "", cleaned)
+    cleaned = re.sub(r"@[^\s，,。；;]+", "", cleaned)
+    code_match = re.search(r"[\u4e00-\u9fffA-Za-z]+-\d{3}", cleaned)
+    if code_match:
+        return code_match.group(0)
+    quoted = re.search(r"[「《\"]([^」》\"]{2,80})[」》\"]", cleaned)
+    if quoted:
+        return quoted.group(1).strip()
+    cleaned = re.sub(
+        r"(请|帮我|把|将|需求|任务|分配|指派|负责人|状态|优先级|创建|飞书|新建|改为|更新为|设为|设置为|变成|到|不要新建表|不要新建 Base)",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" ：:，,。；;")
+    for stop in (" 给 ", " 到 ", " 为 "):
+        if stop in cleaned:
+            cleaned = cleaned.split(stop, 1)[0].strip()
+    return cleaned[:80]
 
 
 def extract_base_context(text: str) -> BaseContext | None:
@@ -653,6 +926,9 @@ def field_value_for_record(
         return coerce_field_value(
             field, record.get("需求描述") or record.get("描述") or record.get("需求背景")
         )
+    if normalized in {"需求详细描述", "需求详细描述可附文档", "详细描述", "详情"}:
+        detail = requirement_detail_text(record)
+        return coerce_field_value(field, detail)
     if normalized in {"优先级", "priority"}:
         return coerce_field_value(field, record.get("优先级"))
     if normalized in {"状态", "需求状态", "status"}:
@@ -664,6 +940,27 @@ def field_value_for_record(
     if normalized in {"录入时间", "创建时间", "提交时间", "日期"}:
         return now_text if include_defaults else now_text
     return None
+
+
+def requirement_detail_text(record: dict[str, str]) -> str:
+    parts = []
+    for key in (
+        "需求编号",
+        "需求描述",
+        "当前做法 / 痛点",
+        "期望结果",
+        "使用场景",
+        "输入材料 / 数据来源",
+        "输出结果形式",
+        "使用频率",
+        "涉及系统 / 工具",
+        "权限或保密要求",
+        "补充说明",
+    ):
+        value = record.get(key)
+        if value:
+            parts.append(f"{key}：{value}")
+    return "\n".join(parts)
 
 
 def coerce_field_value(field: FieldInfo | str, value: Any) -> Any:
@@ -711,6 +1008,156 @@ def coerce_field_value(field: FieldInfo | str, value: Any) -> Any:
         if alias in field.options:
             return alias
     return text
+
+
+def build_requirement_patch(
+    command: RequirementManagementCommand, fields: list[FieldInfo]
+) -> dict[str, Any]:
+    patch: dict[str, Any] = {}
+    if command.assignee:
+        assignee_field = find_first_field(fields, ("需求负责人", "负责人", "Owner", "Assignee"))
+        if assignee_field:
+            patch[assignee_field.name] = [{"id": command.assignee.open_id}]
+    if command.status:
+        status_field = find_first_field(fields, ("需求状态", "状态", "Status"))
+        if status_field:
+            patch[status_field.name] = coerce_field_value(status_field, command.status)
+    if command.priority:
+        priority_field = find_first_field(fields, ("优先级", "重要性", "Priority"))
+        if priority_field:
+            patch[priority_field.name] = coerce_field_value(priority_field, command.priority)
+    return patch
+
+
+def field_patch_if_exists(fields: list[FieldInfo], field_name: str, value: Any) -> dict[str, Any]:
+    field = find_field(fields, field_name)
+    if not field:
+        return {}
+    return {field.name: coerce_field_value(field, value)}
+
+
+def coerce_named_field_value(fields: list[FieldInfo], field_name: str, value: str) -> str:
+    field = find_field(fields, field_name)
+    return str(coerce_field_value(field or field_name, value))
+
+
+def choose_search_fields(fields: list[FieldInfo]) -> list[str]:
+    preferred = (
+        "需求编号",
+        "需求名称",
+        "需求描述",
+        "需求详细描述（可附文档）",
+        "描述",
+        "标题",
+    )
+    result: list[str] = []
+    for name in preferred:
+        field = find_field(fields, name)
+        if field and field.field_type in {"text", "url", "phone"}:
+            result.append(field.name)
+    if result:
+        return result
+    return [field.name for field in fields if field.field_type == "text"][:3]
+
+
+def find_field(fields: list[FieldInfo], name: str) -> FieldInfo | None:
+    normalized = normalize_doc_key(name)
+    for field in fields:
+        if field.name == name or normalize_doc_key(field.name) == normalized:
+            return field
+    return None
+
+
+def find_first_field(fields: list[FieldInfo], names: tuple[str, ...]) -> FieldInfo | None:
+    for name in names:
+        field = find_field(fields, name)
+        if field:
+            return field
+    return None
+
+
+def extract_matching_records(data: dict[str, Any]) -> list[MatchingRecord]:
+    raw_records = data.get("data", {}).get("records") or data.get("data", {}).get("items") or []
+    result: list[MatchingRecord] = []
+    for item in raw_records:
+        if not isinstance(item, dict):
+            continue
+        record_id = str(item.get("record_id") or item.get("id") or "")
+        fields = item.get("fields") or item.get("record", {}).get("fields") or {}
+        if record_id and isinstance(fields, dict):
+            result.append(MatchingRecord(record_id=record_id, fields=fields))
+    return result
+
+
+def record_label(record: MatchingRecord) -> str:
+    return record_title(record) or record.record_id
+
+
+def record_title(record: MatchingRecord) -> str:
+    for name in ("需求编号", "需求名称", "需求描述", "标题", "Name"):
+        value = record.fields.get(name)
+        text = cell_to_text(value)
+        if text:
+            return text[:80]
+    return ""
+
+
+def record_description(record: MatchingRecord) -> str:
+    parts = []
+    for name in ("需求编号", "需求名称", "需求描述", "需求详细描述（可附文档）", "优先级", "需求状态"):
+        value = cell_to_text(record.fields.get(name))
+        if value:
+            parts.append(f"{name}: {value}")
+    return "\n".join(parts) or record.record_id
+
+
+def cell_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        return ", ".join(cell_to_text(item) for item in value if cell_to_text(item)).strip()
+    if isinstance(value, dict):
+        for key in ("text", "name", "title", "value", "id"):
+            if value.get(key):
+                return str(value[key]).strip()
+    return str(value).strip()
+
+
+def extract_task_url(data: dict[str, Any]) -> str | None:
+    candidates = [data]
+    if isinstance(data.get("task"), dict):
+        candidates.append(data["task"])
+    for item in candidates:
+        for key in ("url", "app_link", "link"):
+            value = item.get(key)
+            if value:
+                return str(value)
+    return None
+
+
+def friendly_lark_error(message: str) -> str:
+    try:
+        parsed = json.loads(message)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        missing = parsed.get("missing_scopes") or parsed.get("permission_violations")
+        if missing:
+            scopes = ", ".join(str(scope) for scope in missing)
+            return f"缺少飞书授权 scope：{scopes}。请完成授权后我会继续执行。"
+        hint = parsed.get("hint")
+        text = parsed.get("message") or parsed.get("error")
+        if hint:
+            return f"{text or '飞书接口返回错误'}；{hint}"
+        if text:
+            return str(text)
+    if "base:record:read" in message:
+        return "缺少飞书授权 scope：base:record:read。需求运营需要先读表定位记录。"
+    return message
 
 
 def field_info(item: dict[str, Any]) -> FieldInfo:
@@ -810,7 +1257,7 @@ def safe_filename(name: str) -> str:
 
 
 def normalize_doc_key(key: str) -> str:
-    return re.sub(r"[\s_：:（）()【】\\[\\]-]+", "", key.strip()).lower()
+    return re.sub(r"[\s_：:（）()\[\]【】\-]+", "", key.strip()).lower()
 
 
 def doc_key_alias(key: str) -> str:

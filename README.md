@@ -115,6 +115,29 @@ python -m ostag.main --platform feishu
 See [docs/ostag/deployment.md](docs/ostag/deployment.md) for local release and launchd
 deployment steps, plus Docker Compose.
 
+## Feishu Base Requirement Operations
+
+OS Tag can maintain an existing Feishu Base requirement table after the default
+target is configured:
+
+```bash
+OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=<base_token>
+OSTAG_AUTO_BASE_DEFAULT_TABLE_ID=<tbl_xxx>
+```
+
+Supported group commands include:
+
+```text
+@OS Tag 请把 交易-001 分配给 @张三，状态改为 开发交付中
+@OS Tag 请将 市场周报 优先级改为 高
+@OS Tag 请为 交易盯盘 创建飞书任务并分配给 @李四
+```
+
+The workflow only updates fields that already exist in the target table. It
+uses table search to locate one matching record, refuses ambiguous matches, and
+requires Feishu/Lark scopes for Base record read/write and Task write when task
+creation is requested.
+
 ## MFS
 
 MFS is disabled by default. To enable it:

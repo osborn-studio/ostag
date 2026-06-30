@@ -19,6 +19,7 @@ from ostag.workflows.auto_base import (
     find_workflow_context,
     is_auto_base_request,
     is_auto_base_status_request,
+    parse_requirement_management_command,
 )
 
 
@@ -30,8 +31,48 @@ def test_auto_base_request_detection_is_intentional() -> None:
 
 def test_auto_base_status_request_detection_is_intentional() -> None:
     assert is_auto_base_status_request("自动入表能力是否已经上线？")
+    assert is_auto_base_status_request("需求运营能力可以用了吗？")
     assert is_auto_base_status_request("请告诉我自动入表功能现在能不能用")
     assert not is_auto_base_status_request("请把docx里的需求填入表格")
+
+
+def test_requirement_management_command_uses_default_base_and_real_mention(tmp_path: Path) -> None:
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请把 交易-001 分配给 @张三，状态改为 开发交付中",
+        mention_bot=True,
+        raw={
+            "event": {
+                "message": {
+                    "mentions": [
+                        {"id": "ou_bot", "name": "OS Tag"},
+                        {"id": "ou_assignee", "name": "张三"},
+                    ]
+                }
+            }
+        },
+    )
+
+    command = parse_requirement_management_command(event, config)
+
+    assert command is not None
+    assert command.target == "交易-001"
+    assert command.status == "开发交付中"
+    assert command.assignee is not None
+    assert command.assignee.open_id == "ou_assignee"
+    assert command.base is not None
+    assert command.base.base_token == "base_token"
+    assert command.base.table_id == "tblDefault"
 
 
 def test_extract_base_context_supports_app_links_and_table_params() -> None:
@@ -275,6 +316,37 @@ def test_extract_requirement_table_records_supports_wrapped_description_and_need
     ]
 
 
+def test_build_rows_for_fields_writes_requirement_detail_context() -> None:
+    fields = [
+        FieldInfo(name="需求描述", field_id="fld_desc", field_type="text"),
+        FieldInfo(name="需求详细描述（可附文档）", field_id="fld_detail", field_type="text"),
+    ]
+    records = [
+        {
+            "需求编号": "交易-001",
+            "需求描述": "交易持仓表",
+            "当前做法 / 痛点": "人工做表",
+            "期望结果": "自动化处理",
+        }
+    ]
+
+    payload = build_rows_for_fields(
+        records,
+        fields,
+        source_file="需求模板.docx",
+        source_message_id="om_file",
+        now_text="2026-06-29 22:30:00",
+    )
+
+    assert payload["fields"] == ["需求描述", "需求详细描述（可附文档）"]
+    assert payload["rows"][0][1] == (
+        "需求编号：交易-001\n"
+        "需求描述：交易持仓表\n"
+        "当前做法 / 痛点：人工做表\n"
+        "期望结果：自动化处理"
+    )
+
+
 class FakeAutoBaseWorkflow:
     async def handle(self, event):
         return "自动入表完成"
@@ -323,6 +395,164 @@ async def test_auto_base_workflow_answers_status_without_cli(tmp_path: Path) -> 
 
     assert reply is not None
     assert "已经上线" in reply
+
+
+async def test_auto_base_workflow_updates_requirement_owner_and_status(tmp_path: Path) -> None:
+    class FakeCLI:
+        def __init__(self):
+            self.calls = []
+
+        async def json(self, *args):
+            self.calls.append(args)
+            if args[:2] == ("base", "+table-list"):
+                return {
+                    "ok": True,
+                    "data": {"tables": [{"table_id": "tblDefault", "name": "需求收集管理"}]},
+                }
+            if args[:2] == ("base", "+field-list"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "fields": [
+                            {"name": "需求描述", "type": "text", "field_id": "fld_desc"},
+                            {
+                                "name": "需求状态",
+                                "type": "select",
+                                "field_id": "fld_status",
+                                "options": [{"name": "待评估"}, {"name": "开发交付中"}],
+                            },
+                            {"name": "需求负责人", "type": "user", "field_id": "fld_owner"},
+                        ]
+                    },
+                }
+            if args[:2] == ("base", "+record-search"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "records": [
+                            {
+                                "record_id": "rec_001",
+                                "fields": {"需求描述": "交易盯盘：行情异动提醒"},
+                            }
+                        ]
+                    },
+                }
+            if args[:2] == ("base", "+record-batch-update"):
+                return {"ok": True, "data": {"record_id_list": ["rec_001"]}}
+            raise AssertionError(f"unexpected lark-cli call: {args}")
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    fake_cli = FakeCLI()
+    workflow = AutoBaseWorkflow(config, cli=fake_cli)
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请把 交易盯盘 分配给 @张三，状态改为 开发交付中",
+        mention_bot=True,
+        raw={
+            "event": {
+                "message": {
+                    "mentions": [
+                        {"id": "ou_bot", "name": "OS Tag"},
+                        {"id": "ou_assignee", "name": "张三"},
+                    ]
+                }
+            }
+        },
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "需求运营完成" in reply
+    update_call = next(call for call in fake_cli.calls if call[:2] == ("base", "+record-batch-update"))
+    payload = json.loads(update_call[update_call.index("--json") + 1])
+    assert payload == {
+        "record_id_list": ["rec_001"],
+        "patch": {
+            "需求负责人": [{"id": "ou_assignee"}],
+            "需求状态": "开发交付中",
+        },
+    }
+
+
+async def test_auto_base_workflow_creates_lark_task_for_requirement(tmp_path: Path) -> None:
+    class FakeCLI:
+        def __init__(self):
+            self.calls = []
+
+        async def json(self, *args):
+            self.calls.append(args)
+            if args[:2] == ("base", "+table-list"):
+                return {"ok": True, "data": {"tables": [{"table_id": "tblDefault", "name": "需求收集管理"}]}}
+            if args[:2] == ("base", "+field-list"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "fields": [
+                            {"name": "需求描述", "type": "text", "field_id": "fld_desc"},
+                            {"name": "需求负责人", "type": "user", "field_id": "fld_owner"},
+                            {"name": "任务链接", "type": "text", "field_id": "fld_task"},
+                        ]
+                    },
+                }
+            if args[:2] == ("base", "+record-search"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "records": [
+                            {
+                                "record_id": "rec_002",
+                                "fields": {"需求描述": "市场周报：自动生成周报"},
+                            }
+                        ]
+                    },
+                }
+            if args[:2] == ("task", "+create"):
+                return {"ok": True, "data": {"url": "https://todo.feishu.cn/task/demo"}}
+            if args[:2] == ("base", "+record-batch-update"):
+                return {"ok": True, "data": {"record_id_list": ["rec_002"]}}
+            raise AssertionError(f"unexpected lark-cli call: {args}")
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    workflow = AutoBaseWorkflow(config, cli=FakeCLI())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请为 市场周报 创建飞书任务并分配给 @李四",
+        mention_bot=True,
+        raw={
+            "event": {
+                "message": {
+                    "mentions": [
+                        {"id": "ou_bot", "name": "OS Tag"},
+                        {"id": "ou_assignee", "name": "李四"},
+                    ]
+                }
+            }
+        },
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "飞书任务：已创建" in reply
 
 
 async def test_auto_base_workflow_loads_context_across_history_pages(tmp_path: Path) -> None:

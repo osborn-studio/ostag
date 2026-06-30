@@ -38,6 +38,36 @@ scripts/release_check.sh
 It compiles the package, runs tests, runs doctor, and validates Feishu/Lark
 dry-run examples.
 
+## Requirement Table Operations
+
+To let OS Tag maintain an existing Feishu Base requirement table without a link
+in every group command, configure:
+
+```bash
+OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=<base_token>
+OSTAG_AUTO_BASE_DEFAULT_TABLE_ID=<tbl_xxx>
+OSTAG_AUTO_BASE_IDENTITY=user
+```
+
+Required capabilities:
+
+- Base record read: locate the target requirement before update.
+- Base record write: update owner, status, priority, and optional task link
+  fields that already exist in the table.
+- Task write: create Feishu tasks when the user asks OS Tag to create or assign
+  a task.
+
+Example group commands:
+
+```text
+@OS Tag 请把 交易-001 分配给 @张三，状态改为 开发交付中
+@OS Tag 请将 市场周报 优先级改为 高
+@OS Tag 请为 交易盯盘 创建飞书任务并分配给 @李四
+```
+
+If multiple records match, OS Tag refuses to update and asks for a more specific
+requirement keyword or code.
+
 ## Deployment Preflight
 
 Run the full deploy preflight before a pilot launch:
