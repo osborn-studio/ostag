@@ -16,6 +16,7 @@ from ostag.workflows.auto_base import (
     build_rows_for_fields,
     extract_base_context,
     extract_docx_records,
+    extract_matching_records,
     find_workflow_context,
     is_auto_base_request,
     is_auto_base_status_request,
@@ -73,6 +74,27 @@ def test_requirement_management_command_uses_default_base_and_real_mention(tmp_p
     assert command.base is not None
     assert command.base.base_token == "base_token"
     assert command.base.table_id == "tblDefault"
+
+
+def test_extract_matching_records_supports_lark_cli_search_matrix_shape() -> None:
+    records = extract_matching_records(
+        {
+            "ok": True,
+            "data": {
+                "fields": ["需求描述", "需求状态", "优先级"],
+                "data": [["交易盯盘", ["待评估"], ["高 - P0"]]],
+                "record_id_list": ["rec_demo"],
+            },
+        }
+    )
+
+    assert len(records) == 1
+    assert records[0].record_id == "rec_demo"
+    assert records[0].fields == {
+        "需求描述": "交易盯盘",
+        "需求状态": ["待评估"],
+        "优先级": ["高 - P0"],
+    }
 
 
 def test_extract_base_context_supports_app_links_and_table_params() -> None:

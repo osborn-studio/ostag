@@ -1077,7 +1077,28 @@ def find_first_field(fields: list[FieldInfo], names: tuple[str, ...]) -> FieldIn
 
 
 def extract_matching_records(data: dict[str, Any]) -> list[MatchingRecord]:
-    raw_records = data.get("data", {}).get("records") or data.get("data", {}).get("items") or []
+    blob = data.get("data", {})
+    shortcut_rows = blob.get("data") if isinstance(blob, dict) else None
+    shortcut_fields = blob.get("fields") if isinstance(blob, dict) else None
+    shortcut_record_ids = blob.get("record_id_list") if isinstance(blob, dict) else None
+    if (
+        isinstance(shortcut_rows, list)
+        and isinstance(shortcut_fields, list)
+        and isinstance(shortcut_record_ids, list)
+    ):
+        records: list[MatchingRecord] = []
+        for idx, row in enumerate(shortcut_rows):
+            if not isinstance(row, list) or idx >= len(shortcut_record_ids):
+                continue
+            fields = {
+                str(field): row[field_idx]
+                for field_idx, field in enumerate(shortcut_fields)
+                if field_idx < len(row)
+            }
+            records.append(MatchingRecord(record_id=str(shortcut_record_ids[idx]), fields=fields))
+        return records
+
+    raw_records = blob.get("records") or blob.get("items") or []
     result: list[MatchingRecord] = []
     for item in raw_records:
         if not isinstance(item, dict):
