@@ -3,6 +3,12 @@ from __future__ import annotations
 from ostag.backends.base import Backend, BackendError
 from ostag.backends.factory import create_backend
 from ostag.config import Settings
+from ostag.core.channel_brain import (
+    ChannelBrainStore,
+    extract_remember_fact,
+    format_channel_brain,
+    is_brain_status_request,
+)
 from ostag.core.context import trim_context
 from ostag.core.event import NormalizedEvent
 from ostag.core.logging import write_audit_log
@@ -19,11 +25,13 @@ class OSTagRunner:
         backend: Backend | None = None,
         mfs_client: MFSClient | None = None,
         auto_base_workflow: AutoBaseWorkflow | None = None,
+        channel_brain_store: ChannelBrainStore | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
         self.mfs = mfs_client or MFSClient(config)
         self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
+        self.channel_brain = channel_brain_store or ChannelBrainStore(config)
 
     async def handle_event(self, event: NormalizedEvent) -> str:
         if not event.mention_bot:
@@ -55,6 +63,37 @@ class OSTagRunner:
                 error=length.reason,
             )
             return f"OS Tag 已拒绝处理：{length.reason}"
+
+        remember_fact = extract_remember_fact(text)
+        if remember_fact is not None:
+            brain = self.channel_brain.remember_fact(event.platform, event.chat_id, remember_fact)
+            reply = f"已记住这个群的新事实：{remember_fact}"
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="channel_brain",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="ok",
+                env=self.config.env,
+            )
+            return reply
+
+        if is_brain_status_request(text):
+            brain = self.channel_brain.load(event.platform, event.chat_id)
+            reply = format_channel_brain(brain)
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="channel_brain",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="ok",
+                env=self.config.env,
+            )
+            return reply
 
         mfs_results = await self.mfs.search(text)
         context_text = trim_context(mfs_results, self.config)

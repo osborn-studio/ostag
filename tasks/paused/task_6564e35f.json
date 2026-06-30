@@ -1,0 +1,16 @@
+{
+  "task_id": "task_6564e35f",
+  "capability": "code.feature",
+  "prompt": "Phase 5 Ambient Mode v1: implement opt-in ambient reminders for unowned and stale requirements. No auto-write in v1. Add deterministic clock tests, rate-limit tests, policy-disable tests, and audit evidence.",
+  "priority": 80,
+  "source": "task_queue",
+  "context": {
+    "files": [
+      "docs/ostag/learning_benchmark_plan.md",
+      "ostag/workflows",
+      "ostag/core",
+      "tests"
+    ],
+    "benchmark": "P1 Ambient Proactive Mode"
+  }
+}

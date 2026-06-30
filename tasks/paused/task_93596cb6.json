@@ -1,0 +1,15 @@
+{
+  "task_id": "task_93596cb6",
+  "capability": "code.test",
+  "prompt": "Phase 7 Benchmark Gate: create scripts/osstack_learning_benchmark_verify.sh and release/learning-benchmark.md generation. Gate must run pytest, compileall, selected contract checks, and score the 100-point rubric with hard blockers.",
+  "priority": 70,
+  "source": "task_queue",
+  "context": {
+    "files": [
+      "docs/ostag/learning_benchmark_plan.md",
+      "scripts",
+      "release"
+    ],
+    "benchmark": "Benchmark Gate and Scorecard"
+  }
+}

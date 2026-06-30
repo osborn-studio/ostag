@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree
 
 from ostag.config import Settings
+from ostag.core.channel_brain import channel_policy_for_event
 from ostag.core.event import NormalizedEvent
 
 
@@ -559,7 +560,7 @@ def parse_requirement_management_command(
     if not is_management:
         return None
 
-    base = extract_base_context(text) or default_base_context(config)
+    base = extract_base_context(text) or default_base_context(config, event)
     assignee = first_non_bot_mention(event, config.bot_name)
     status = extract_status_update(text)
     priority = extract_priority_update(text)
@@ -577,13 +578,19 @@ def parse_requirement_management_command(
     )
 
 
-def default_base_context(config: Settings) -> BaseContext | None:
-    if not config.auto_base_default_base_token:
+def default_base_context(config: Settings, event: NormalizedEvent | None = None) -> BaseContext | None:
+    base_token = config.auto_base_default_base_token
+    table_id = config.auto_base_default_table_id
+    if event is not None:
+        policy = channel_policy_for_event(event, config)
+        base_token = policy.default_base_token or base_token
+        table_id = policy.default_table_id or table_id
+    if not base_token:
         return None
-    url = f"configured://base/{config.auto_base_default_base_token}"
+    url = f"configured://base/{base_token}"
     return BaseContext(
-        base_token=config.auto_base_default_base_token,
-        table_id=config.auto_base_default_table_id or None,
+        base_token=base_token,
+        table_id=table_id or None,
         url=url,
     )
 

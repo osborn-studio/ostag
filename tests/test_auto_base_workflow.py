@@ -76,6 +76,44 @@ def test_requirement_management_command_uses_default_base_and_real_mention(tmp_p
     assert command.base.table_id == "tblDefault"
 
 
+def test_requirement_management_command_prefers_channel_brain_policy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_env",
+        auto_base_default_table_id="tblEnv",
+    )
+    from ostag.core.channel_brain import ChannelBrainStore, ChannelBrain, ChannelPolicy
+
+    ChannelBrainStore(config).save(
+        ChannelBrain(
+            platform="feishu",
+            chat_id="oc_demo",
+            policy=ChannelPolicy(default_base_token="base_channel", default_table_id="tblChannel"),
+        )
+    )
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请把 交易-001 状态改为 开发交付中",
+        mention_bot=True,
+        raw={"event": {"message": {"mentions": [{"id": "ou_bot", "name": "OS Tag"}]}}},
+    )
+
+    command = parse_requirement_management_command(event, config)
+
+    assert command is not None
+    assert command.base is not None
+    assert command.base.base_token == "base_channel"
+    assert command.base.table_id == "tblChannel"
+
+
 def test_extract_matching_records_supports_lark_cli_search_matrix_shape() -> None:
     records = extract_matching_records(
         {

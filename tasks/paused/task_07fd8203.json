@@ -1,0 +1,17 @@
+{
+  "task_id": "task_07fd8203",
+  "capability": "code.feature",
+  "prompt": "Phase 4 Governance Policy: implement per-channel policy controls for readable/writable fields, task creation, confirmation mode, ambient enablement, daily budget, and backend/tool access. Add policy decision tests and blocker messages.",
+  "priority": 85,
+  "source": "task_queue",
+  "context": {
+    "files": [
+      "docs/ostag/learning_benchmark_plan.md",
+      "ostag/config.py",
+      "ostag/core",
+      "ostag/workflows",
+      "tests"
+    ],
+    "benchmark": "P1 Admin Governance"
+  }
+}

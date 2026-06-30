@@ -122,6 +122,67 @@ async def test_backend_exception_is_handled_and_audited(tmp_path: Path) -> None:
     assert '"status": "error"' in (tmp_path / "audit.log").read_text(encoding="utf-8")
 
 
+async def test_runner_remembers_channel_fact_without_backend(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+
+    class FailingBackend:
+        async def run(self, prompt):
+            raise AssertionError("backend should not run for memory command")
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log", backend="mock")
+    runner = OSTagRunner(config, backend=FailingBackend())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_demo",
+        text="记住：张三负责交易相关需求",
+        mention_bot=True,
+    )
+
+    reply = await runner.handle_event(event)
+
+    assert "已记住" in reply
+    assert "张三负责交易相关需求" in reply
+
+
+async def test_runner_reports_channel_brain_without_backend(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_env",
+        auto_base_default_table_id="tblEnv",
+    )
+    runner = OSTagRunner(config)
+    remember_event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt1",
+        chat_id="oc_demo",
+        message_id="om_1",
+        sender_id="ou_demo",
+        text="记住：张三负责交易相关需求",
+        mention_bot=True,
+    )
+    status_event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt2",
+        chat_id="oc_demo",
+        message_id="om_2",
+        sender_id="ou_demo",
+        text="这个群你记住了什么",
+        mention_bot=True,
+    )
+
+    await runner.handle_event(remember_event)
+    reply = await runner.handle_event(status_event)
+
+    assert "Channel Brain" in reply
+    assert "张三负责交易相关需求" in reply
+    assert "base=base_env" in reply
+
+
 @pytest.mark.asyncio
 async def test_backend_error_reply_does_not_expose_private_cli_output(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log")
