@@ -101,7 +101,7 @@ class FeishuAdapter:
         message = event.get("message", {})
         sender = event.get("sender", {})
         content = _parse_content(message.get("content"))
-        text = content.get("text") or message.get("text") or event.get("text") or ""
+        text = _content_text(content) or message.get("text") or event.get("text") or ""
         mentions = message.get("mentions") or content.get("mentions") or []
         mention_bot = bool(mentions) or _mentions_bot(text, self.config.bot_name)
         cleaned_text = strip_mentions(text, self.config.bot_name)
@@ -180,6 +180,32 @@ def _parse_content(content: Any) -> dict[str, Any]:
     return {}
 
 
+def _content_text(content: dict[str, Any]) -> str:
+    if content.get("text"):
+        return str(content["text"])
+    post_content = content.get("content")
+    if isinstance(post_content, list):
+        return _post_nodes_text(post_content)
+    return ""
+
+
+def _post_nodes_text(nodes: list[Any]) -> str:
+    parts: list[str] = []
+    for node in nodes:
+        if isinstance(node, list):
+            parts.append(_post_nodes_text(node))
+        elif isinstance(node, dict):
+            tag = node.get("tag")
+            if tag == "a":
+                parts.append(str(node.get("href") or node.get("text") or ""))
+            elif tag == "at":
+                name = node.get("user_name") or node.get("name") or ""
+                parts.append(f"@{name}" if name else "<at>")
+            else:
+                parts.append(str(node.get("text") or node.get("href") or ""))
+    return "".join(parts).strip()
+
+
 def _to_plain_data(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -199,12 +225,13 @@ def _to_plain_data(value: Any) -> Any:
 
 
 def _mentions_bot(text: str, bot_name: str) -> bool:
-    return f"@{bot_name}" in text or "<at " in text
+    return f"@{bot_name}" in text or "<at " in text or text.lstrip().startswith("@")
 
 
 def strip_mentions(text: str, bot_name: str) -> str:
     stripped = AT_TAG_RE.sub("", text)
     stripped = re.sub(rf"@{re.escape(bot_name)}\b", "", stripped, flags=re.IGNORECASE).strip()
+    stripped = re.sub(r"^@[A-Za-z0-9_. -]+\s+", "", stripped).strip()
     return stripped or "请根据当前上下文给出下一步建议。"
 
 

@@ -32,6 +32,45 @@ async def test_feishu_raw_event_normalizes_to_core_event() -> None:
     assert "下一步" in event.text
 
 
+@pytest.mark.asyncio
+async def test_feishu_post_message_normalizes_text_and_link() -> None:
+    config = load_settings(None, audit_log=Path("logs/test-audit.log"))
+    raw = {
+        "header": {"event_id": "evt_post"},
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_demo_sender"}},
+            "message": {
+                "chat_id": "oc_demo_chat",
+                "message_id": "om_post_message",
+                "message_type": "post",
+                "content": json.dumps(
+                    {
+                        "title": "",
+                        "content": [
+                            [
+                                {"tag": "at", "user_name": "Z Studio FEISHU", "user_id": "ou_bot"},
+                                {"tag": "text", "text": " 请把这个 docx 文件中的需求写入"},
+                                {
+                                    "tag": "a",
+                                    "text": "https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy?pageId=pgeWAf9mD4KtSJhA",
+                                    "href": "https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy?pageId=pgeWAf9mD4KtSJhA",
+                                },
+                            ]
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        },
+    }
+
+    event = await FeishuAdapter(config).normalize_event(raw)
+
+    assert event.mention_bot is True
+    assert "请把这个 docx 文件中的需求写入" in event.text
+    assert "https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy" in event.text
+
+
 def test_platform_adapters_implement_contract(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log")
 
