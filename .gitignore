@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .env
 logs/*.log
+tmp/
 LOOP-STATE.json
 STATE.md
 tasks/archive/

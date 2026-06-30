@@ -9,6 +9,7 @@ from ostag.core.logging import write_audit_log
 from ostag.core.prompt import PromptContext, build_chat_prompt
 from ostag.core.safety import check_message_length, sanitize_user_text
 from ostag.mfs.client import MFSClient
+from ostag.workflows.auto_base import AutoBaseWorkflow
 
 
 class OSTagRunner:
@@ -17,10 +18,12 @@ class OSTagRunner:
         config: Settings,
         backend: Backend | None = None,
         mfs_client: MFSClient | None = None,
+        auto_base_workflow: AutoBaseWorkflow | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
         self.mfs = mfs_client or MFSClient(config)
+        self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
 
     async def handle_event(self, event: NormalizedEvent) -> str:
         if not event.mention_bot:
@@ -55,6 +58,24 @@ class OSTagRunner:
 
         mfs_results = await self.mfs.search(text)
         context_text = trim_context(mfs_results, self.config)
+        try:
+            workflow_reply = await self.auto_base.handle(event)
+        except Exception as exc:  # noqa: BLE001
+            workflow_reply = f"自动入表未完成：{type(exc).__name__}: {exc}"
+        if workflow_reply is not None:
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="auto_base",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=workflow_reply,
+                status="ok" if not workflow_reply.startswith("自动入表未完成") else "error",
+                env=self.config.env,
+                error=None if not workflow_reply.startswith("自动入表未完成") else workflow_reply,
+            )
+            return workflow_reply
+
         prompt = build_chat_prompt(
             PromptContext(event=event, user_text=text, mfs_context=context_text)
         )

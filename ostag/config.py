@@ -66,6 +66,15 @@ class Settings:
     lark_api_base_url: str = "https://open.larksuite.com"
     slack_bot_token: str = ""
     slack_app_token: str = ""
+    auto_base_enabled: bool = True
+    auto_base_identity: str = "user"
+    auto_base_history_page_size: int = 30
+    auto_base_cli_timeout_seconds: int = 120
+    auto_base_create_table_if_missing: bool = True
+    auto_base_default_table_name: str = "需求池"
+    auto_base_download_dir: str = "tmp/ostag-auto-base"
+    auto_base_workdir: str = "."
+    lark_cli_bin: str = "lark-cli"
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -113,6 +122,17 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         lark_api_base_url=os.getenv("LARK_API_BASE_URL", "https://open.larksuite.com"),
         slack_bot_token=os.getenv("SLACK_BOT_TOKEN", ""),
         slack_app_token=os.getenv("SLACK_APP_TOKEN", ""),
+        auto_base_enabled=_bool("OSTAG_AUTO_BASE_ENABLED", True),
+        auto_base_identity=os.getenv("OSTAG_AUTO_BASE_IDENTITY", "user"),
+        auto_base_history_page_size=_int("OSTAG_AUTO_BASE_HISTORY_PAGE_SIZE", 30),
+        auto_base_cli_timeout_seconds=_int("OSTAG_AUTO_BASE_CLI_TIMEOUT_SECONDS", 120),
+        auto_base_create_table_if_missing=_bool("OSTAG_AUTO_BASE_CREATE_TABLE_IF_MISSING", True),
+        auto_base_default_table_name=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_NAME", "需求池"),
+        auto_base_download_dir=os.getenv(
+            "OSTAG_AUTO_BASE_DOWNLOAD_DIR", "tmp/ostag-auto-base"
+        ),
+        auto_base_workdir=os.getenv("OSTAG_AUTO_BASE_WORKDIR", "."),
+        lark_cli_bin=os.getenv("LARK_CLI_BIN", "lark-cli"),
     )
     if overrides:
         data = settings.__dict__ | overrides
