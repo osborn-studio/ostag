@@ -223,28 +223,36 @@ async def test_auto_base_workflow_answers_status_without_cli(tmp_path: Path) -> 
     assert "已经上线" in reply
 
 
-async def test_auto_base_workflow_rejects_report_page_without_writable_table(
+async def test_auto_base_workflow_creates_table_for_report_page_without_writable_table(
     tmp_path: Path,
 ) -> None:
     class FakeCLI:
+        def __init__(self):
+            self.calls = []
+
         async def json(self, *args):
+            self.calls.append(args)
             if args[:2] == ("base", "+table-list"):
                 return {"ok": True, "data": {"tables": []}}
+            if args[:2] == ("base", "+table-create"):
+                return {
+                    "ok": True,
+                    "data": {"table": {"table_id": "tblCreated", "name": "需求池"}},
+                }
             raise AssertionError(f"unexpected lark-cli call: {args}")
 
     config = load_settings(None, audit_log=tmp_path / "audit.log")
-    workflow = AutoBaseWorkflow(config, cli=FakeCLI())
+    fake_cli = FakeCLI()
+    workflow = AutoBaseWorkflow(config, cli=fake_cli)
 
-    try:
-        await workflow._resolve_or_create_table(
-            BaseContext(
-                base_token="TqcVbKRiZa6YClshTqxcOzblncy",
-                table_id=None,
-                url="https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy?pageId=pgeWAf9mD4KtSJhA",
-            )
+    resolved = await workflow._resolve_or_create_table(
+        BaseContext(
+            base_token="TqcVbKRiZa6YClshTqxcOzblncy",
+            table_id=None,
+            url="https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy?pageId=pgeWAf9mD4KtSJhA",
         )
-    except AutoBaseError as exc:
-        assert "报表" in str(exc)
-        assert "table=tbl" in str(exc)
-    else:
-        raise AssertionError("report page without tables should not create a companion base")
+    )
+
+    assert resolved.base_token == "TqcVbKRiZa6YClshTqxcOzblncy"
+    assert resolved.table.table_id == "tblCreated"
+    assert any(call[:2] == ("base", "+table-create") for call in fake_cli.calls)

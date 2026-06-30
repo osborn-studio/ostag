@@ -197,12 +197,6 @@ class AutoBaseWorkflow:
         tables = await self._list_tables(base.base_token)
         if tables:
             return ResolvedTable(base_token=base.base_token, table=choose_table(tables))
-        if "pageId=" in base.url:
-            raise AutoBaseError(
-                "你给的是多维报表/页面链接，不是可写数据表链接。"
-                "报表通常展示数据，不能直接写入；请打开报表背后的数据表，"
-                "复制带 table=tbl... 的多维表格链接后再发给我。"
-            )
         if not self.config.auto_base_create_table_if_missing:
             raise AutoBaseError("Base 内没有可写入的数据表。")
 
