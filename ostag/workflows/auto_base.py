@@ -251,8 +251,13 @@ class AutoBaseWorkflow:
                     table=TableInfo(table_id=table_id, name=self.config.auto_base_default_table_name),
                 )
         except AutoBaseError as exc:
-            if "800010808" not in str(exc):
-                raise
+            if "800010808" in str(exc):
+                raise AutoBaseError(
+                    "目标是多维表格高级应用/页面，不是 OpenAPI 可写的数据表。"
+                    "我不会另建需求表；请在页面中打开背后的真实数据表，复制带 "
+                    "table=tbl... 的链接，或将 OS Tag 接入该应用的数据源/自动化后再写入。"
+                ) from exc
+            raise
 
         created_base = await self.cli.json(
             "base",

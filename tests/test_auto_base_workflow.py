@@ -368,3 +368,43 @@ async def test_auto_base_workflow_creates_table_for_report_page_without_writable
     assert resolved.base_token == "TqcVbKRiZa6YClshTqxcOzblncy"
     assert resolved.table.table_id == "tblCreated"
     assert any(call[:2] == ("base", "+table-create") for call in fake_cli.calls)
+
+
+async def test_auto_base_workflow_rejects_advanced_app_when_table_create_is_invalid(
+    tmp_path: Path,
+) -> None:
+    class FakeCLI:
+        def __init__(self):
+            self.calls = []
+
+        async def json(self, *args):
+            self.calls.append(args)
+            if args[:2] == ("base", "+table-list"):
+                return {"ok": True, "data": {"tables": []}}
+            if args[:2] == ("base", "+table-create"):
+                raise AutoBaseError(
+                    '{"code":800010808,"message":"The request token is invalid"}'
+                )
+            if args[:2] == ("base", "+base-create"):
+                raise AssertionError("should not create a companion Base")
+            raise AssertionError(f"unexpected lark-cli call: {args}")
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+    fake_cli = FakeCLI()
+    workflow = AutoBaseWorkflow(config, cli=fake_cli)
+
+    try:
+        await workflow._resolve_or_create_table(
+            BaseContext(
+                base_token="TqcVbKRiZa6YClshTqxcOzblncy",
+                table_id=None,
+                url="https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy?pageId=pgevIUy4foBUeoQv",
+            )
+        )
+    except AutoBaseError as exc:
+        assert "高级应用" in str(exc)
+        assert "不会另建需求表" in str(exc)
+    else:
+        raise AssertionError("advanced app target should not fall back to a companion Base")
+
+    assert not any(call[:2] == ("base", "+base-create") for call in fake_cli.calls)
