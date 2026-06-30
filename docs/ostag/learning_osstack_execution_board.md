@@ -20,7 +20,7 @@ attempting dependent phases out of order.
 | Phase 4: Governance Policy | `task_07fd8203` | 85 | `code.feature` | completed | Per-channel readable/writable fields, task creation, confirmation, budget, and tool/backend policy tests pass. |
 | Phase 5: Ambient Mode v1 | `task_6564e35f` | 80 | `code.feature` | completed | Ambient reminders are opt-in, rate-limited, proposal-only, and audited. |
 | Phase 6: Slack Parity | `task_227a5da7` | 75 | `code.feature` | completed | Slack can use Channel Brain and governed requirement operations in tested fixtures. |
-| Phase 7: Benchmark Gate | `task_93596cb6` | 70 | `code.test` | active | `scripts/osstack_learning_benchmark_verify.sh` generates `release/learning-benchmark.md` with a score. |
+| Phase 7: Benchmark Gate | `task_93596cb6` | 70 | `code.test` | completed | `scripts/osstack_learning_benchmark_verify.sh` generates `release/learning-benchmark.md` with a score. |
 
 ## Global Verification
 
