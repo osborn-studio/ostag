@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ostag.config import load_settings
+from ostag.backends.base import BackendError
 from ostag.backends.claude_cli import build_claude_command
 from ostag.backends.codex_cli import build_codex_command
 from ostag.core.event import NormalizedEvent
@@ -97,6 +98,11 @@ class SlowBackend:
         raise TimeoutError("backend timeout")
 
 
+class FailingCLIBackend:
+    async def run(self, prompt: str) -> str:
+        raise BackendError("token_invalidated: secret stderr should stay private")
+
+
 @pytest.mark.asyncio
 async def test_backend_exception_is_handled_and_audited(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log")
@@ -112,5 +118,26 @@ async def test_backend_exception_is_handled_and_audited(tmp_path: Path) -> None:
 
     reply = await OSTagRunner(config, backend=SlowBackend()).handle_event(event)
 
-    assert "backend failed" in reply
+    assert "当前处理失败" in reply
     assert '"status": "error"' in (tmp_path / "audit.log").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_backend_error_reply_does_not_expose_private_cli_output(tmp_path: Path) -> None:
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="chat",
+        message_id="msg",
+        sender_id="sender",
+        text="hello",
+        mention_bot=True,
+    )
+
+    reply = await OSTagRunner(config, backend=FailingCLIBackend()).handle_event(event)
+    audit = (tmp_path / "audit.log").read_text(encoding="utf-8")
+
+    assert "通用问答后端暂时不可用" in reply
+    assert "token_invalidated" not in reply
+    assert "token_invalidated" in audit

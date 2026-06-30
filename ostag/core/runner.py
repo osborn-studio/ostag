@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ostag.backends.base import Backend
+from ostag.backends.base import Backend, BackendError
 from ostag.backends.factory import create_backend
 from ostag.config import Settings
 from ostag.core.context import trim_context
@@ -83,10 +83,14 @@ class OSTagRunner:
             reply = await self.backend.run(prompt)
             status = "ok"
             error = None
-        except Exception as exc:  # noqa: BLE001
-            reply = f"OS Tag backend failed: {type(exc).__name__}: {exc}"
+        except BackendError as exc:
+            reply = "OS Tag 当前通用问答后端暂时不可用；自动入表等内置工作流仍可继续使用。"
             status = "error"
             error = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            reply = "OS Tag 当前处理失败，我已经记录错误，请稍后再试。"
+            status = "error"
+            error = f"{type(exc).__name__}: {exc}"
 
         write_audit_log(
             self.config.audit_log,

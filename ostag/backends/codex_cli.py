@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from ostag.backends.base import BackendError
 from ostag.config import Settings
 
 
@@ -23,12 +24,16 @@ class CodexCLIBackend:
         except TimeoutError:
             proc.kill()
             await proc.communicate()
-            return f"OS Tag backend timed out after {self.config.agent_timeout_seconds}s."
+            raise BackendError(
+                f"Codex CLI timed out after {self.config.agent_timeout_seconds}s."
+            )
 
         out = stdout.decode("utf-8", errors="replace").strip()
         err = stderr.decode("utf-8", errors="replace").strip()
         if proc.returncode != 0:
-            return f"Codex CLI backend failed with exit code {proc.returncode}:\n{(err or out)[-3000:]}"
+            raise BackendError(
+                f"Codex CLI exited {proc.returncode}: {(err or out)[-3000:]}"
+            )
         return out or "Codex CLI finished without output."
 
 
