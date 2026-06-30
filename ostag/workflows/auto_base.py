@@ -14,6 +14,11 @@ from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree
 
 from ostag.config import Settings
+from ostag.connectors.requirements import (
+    LarkCLIRequirementTableConnector,
+    RequirementTableConnector,
+)
+from ostag.connectors.tasks import LarkCLITaskConnector, TaskConnector
 from ostag.core.channel_brain import channel_policy_for_event
 from ostag.core.event import NormalizedEvent
 from ostag.core.stage_ledger import StageLedger
@@ -142,9 +147,19 @@ class LarkCLI:
 
 
 class AutoBaseWorkflow:
-    def __init__(self, config: Settings, cli: LarkCLI | None = None):
+    def __init__(
+        self,
+        config: Settings,
+        cli: LarkCLI | None = None,
+        requirement_connector: RequirementTableConnector | None = None,
+        task_connector: TaskConnector | None = None,
+    ):
         self.config = config
         self.cli = cli or LarkCLI(config)
+        self.requirements = requirement_connector or LarkCLIRequirementTableConnector(
+            self.cli, config.auto_base_identity
+        )
+        self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
 
     async def handle(self, event: NormalizedEvent) -> str | None:
         if not self.config.auto_base_enabled:
@@ -389,15 +404,7 @@ class AutoBaseWorkflow:
         return ResolvedTable(base_token=base_token, table=table, base_name=base_name, base_url=base_url)
 
     async def _list_tables(self, base_token: str) -> list[TableInfo]:
-        data = await self.cli.json(
-            "base",
-            "+table-list",
-            "--as",
-            self.config.auto_base_identity,
-            "--base-token",
-            base_token,
-            "--json",
-        )
+        data = await self.requirements.list_tables(base_token)
         tables = data.get("data", {}).get("tables", [])
         return [
             TableInfo(
@@ -409,17 +416,7 @@ class AutoBaseWorkflow:
         ]
 
     async def _list_fields(self, base_token: str, table_id: str) -> list[FieldInfo]:
-        data = await self.cli.json(
-            "base",
-            "+field-list",
-            "--as",
-            self.config.auto_base_identity,
-            "--base-token",
-            base_token,
-            "--table-id",
-            table_id,
-            "--json",
-        )
+        data = await self.requirements.list_fields(base_token, table_id)
         raw_fields = data.get("data", {}).get("fields", [])
         fields = [field_info(item) for item in raw_fields]
         fields = [field for field in fields if field.name]
@@ -432,21 +429,7 @@ class AutoBaseWorkflow:
         download_root.mkdir(parents=True, exist_ok=True)
         suffix = ".docx" if not file.name.lower().endswith(".docx") else ""
         output = download_root / f"{file.message_id}-{safe_filename(file.name)}{suffix}"
-        data = await self.cli.json(
-            "im",
-            "+messages-resources-download",
-            "--as",
-            self.config.auto_base_identity,
-            "--message-id",
-            file.message_id,
-            "--file-key",
-            file.file_key,
-            "--type",
-            "file",
-            "--output",
-            str(output),
-            "--json",
-        )
+        data = await self.requirements.download_message_file(file.message_id, file.file_key, output)
         local = first_local_path(data) or output
         path = Path(self.config.auto_base_workdir) / local
         if not path.exists():
@@ -456,18 +439,7 @@ class AutoBaseWorkflow:
     async def _write_rows(
         self, base_token: str, table_id: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        result = await self.cli.json(
-            "base",
-            "+record-batch-create",
-            "--as",
-            self.config.auto_base_identity,
-            "--base-token",
-            base_token,
-            "--table-id",
-            table_id,
-            "--json",
-            json.dumps(payload, ensure_ascii=False),
-        )
+        result = await self.requirements.batch_create(base_token, table_id, payload)
         return result.get("data", {}) if isinstance(result.get("data"), dict) else {}
 
     async def _search_requirement_records(
@@ -476,69 +448,36 @@ class AutoBaseWorkflow:
         search_fields = choose_search_fields(fields)
         if not search_fields:
             raise AutoBaseError("目标表缺少可搜索的需求文本字段。")
-        args = [
-            "base",
-            "+record-search",
-            "--as",
-            self.config.auto_base_identity,
-            "--base-token",
-            base_token,
-            "--table-id",
-            table_id,
-            "--keyword",
-            keyword,
-            "--limit",
-            "5",
-            "--format",
-            "json",
-        ]
-        for name in search_fields:
-            args.extend(["--search-field", name])
-            args.extend(["--field-id", name])
+        projection_fields = list(search_fields)
         for name in ("需求状态", "优先级", "需求负责人"):
-            if find_field(fields, name) and name not in search_fields:
-                args.extend(["--field-id", name])
-        data = await self.cli.json(*args)
+            if find_field(fields, name) and name not in projection_fields:
+                projection_fields.append(name)
+        data = await self.requirements.search(
+            base_token,
+            table_id,
+            keyword,
+            search_fields=search_fields,
+            projection_fields=projection_fields,
+            limit=5,
+        )
         return extract_matching_records(data)
 
     async def _update_record(
         self, base_token: str, table_id: str, record_id: str, patch: dict[str, Any]
     ) -> None:
-        payload = {"record_id_list": [record_id], "patch": patch}
-        await self.cli.json(
-            "base",
-            "+record-batch-update",
-            "--as",
-            self.config.auto_base_identity,
-            "--base-token",
-            base_token,
-            "--table-id",
-            table_id,
-            "--json",
-            json.dumps(payload, ensure_ascii=False),
-        )
+        await self.requirements.batch_update(base_token, table_id, record_id, patch)
 
     async def _create_lark_task(
         self, command: RequirementManagementCommand, record: MatchingRecord
     ) -> dict[str, Any]:
         summary = record_title(record) or command.target
         description = record_description(record)
-        args = [
-            "task",
-            "+create",
-            "--as",
-            self.config.auto_base_identity,
-            "--summary",
-            summary[:200],
-            "--description",
-            description[:4000],
-            "--idempotency-key",
-            f"ostag-{record.record_id}",
-            "--json",
-        ]
-        if command.assignee:
-            args.extend(["--assignee", command.assignee.open_id])
-        result = await self.cli.json(*args)
+        result = await self.tasks.create_task(
+            summary=summary[:200],
+            description=description[:4000],
+            assignee_open_id=command.assignee.open_id if command.assignee else None,
+            idempotency_key=f"ostag-{record.record_id}",
+        )
         return result.get("data", {}) if isinstance(result.get("data"), dict) else result
 
 

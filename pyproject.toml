@@ -29,6 +29,7 @@ testpaths = [
   "tests/test_doctor.py",
   "tests/test_auto_base_workflow.py",
   "tests/test_channel_brain.py",
+  "tests/test_connectors.py",
   "tests/test_event_normalization.py",
   "tests/test_mfs_client.py",
   "tests/test_memory.py",
