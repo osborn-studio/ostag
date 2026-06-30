@@ -216,6 +216,65 @@ def test_build_rows_for_fields_coerces_select_options_for_existing_requirement_b
     }
 
 
+def test_extract_requirement_table_records_supports_wrapped_description_and_need_nice_priority() -> None:
+    records = extract_docx_records(
+        """
+        二、需求清单（逐项填写）
+        序号
+        需求描述
+        当前做法 / 痛点
+        期望结果
+        重要性
+        交易-001
+        交易持仓表:
+        汇总各渠道交易流水
+        和估值系统核对信息
+        簿记申赎款影响净值时间和提供模拟净值
+        人工做表及数据清洗/账户多/现存的excel表卡顿导致工作时间拉长
+        自动化处理
+        Need
+        交易-002
+        交易盯盘：
+        对持仓个股进行行情异动和特殊事件及时反馈/对期权到期提醒
+        花时间/人工占比高
+        自动化处理
+        Nice
+        三、重要程度说明
+        """,
+        source_name="需求模板.docx",
+    )
+    fields = [
+        FieldInfo(name="需求描述", field_id="fld_desc", field_type="text"),
+        FieldInfo(
+            name="优先级",
+            field_id="fld_priority",
+            field_type="select",
+            options=("高 - P0", "中 - P1", "低 - P2"),
+        ),
+    ]
+
+    payload = build_rows_for_fields(
+        records,
+        fields,
+        source_file="需求模板.docx",
+        source_message_id="om_file",
+        now_text="2026-06-29 22:30:00",
+    )
+
+    assert records[0]["需求描述"].startswith("交易持仓表:")
+    assert records[0]["优先级"] == "Need"
+    assert payload["rows"] == [
+        [
+            "交易持仓表:\n汇总各渠道交易流水\n和估值系统核对信息\n簿记申赎款影响净值时间和提供模拟净值",
+            "高 - P0",
+        ],
+        [
+            "交易盯盘：\n对持仓个股进行行情异动和特殊事件及时反馈/对期权到期提醒",
+            "低 - P2",
+        ],
+    ]
+
+
 class FakeAutoBaseWorkflow:
     async def handle(self, event):
         return "自动入表完成"

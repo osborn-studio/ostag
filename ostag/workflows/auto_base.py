@@ -521,24 +521,45 @@ def extract_requirement_table_records(lines: list[str]) -> list[dict[str, str]]:
             continue
         if in_table and line.startswith("三、"):
             break
-        if in_table and re.match(r"^[\u4e00-\u9fffA-Za-z]+-\d{3}$", line):
-            row = lines[idx : idx + 5]
-            if len(row) >= 5:
-                code, desc, pain, expected, priority = row[:5]
-                records.append(
-                    {
-                        "需求编号": code,
-                        "需求名称": desc.split("：", 1)[0].strip()[:80] or code,
-                        "需求描述": desc,
-                        "当前做法 / 痛点": pain,
-                        "期望结果": expected,
-                        "优先级": priority,
-                    }
-                )
-                idx += 5
-                continue
+        if in_table and is_requirement_code(line):
+            code = line
+            idx += 1
+            cells: list[str] = []
+            while idx < len(lines):
+                next_line = lines[idx]
+                if next_line.startswith("三、") or is_requirement_code(next_line):
+                    break
+                cells.append(next_line)
+                idx += 1
+            record = requirement_cells_to_record(code, cells)
+            if record:
+                records.append(record)
+            continue
         idx += 1
     return records
+
+
+def is_requirement_code(text: str) -> bool:
+    return bool(re.match(r"^[\u4e00-\u9fffA-Za-z]+-\d{3}$", text))
+
+
+def requirement_cells_to_record(code: str, cells: list[str]) -> dict[str, str] | None:
+    if len(cells) < 4:
+        return None
+    priority = cells[-1]
+    expected = cells[-2]
+    pain = cells[-3]
+    desc = "\n".join(cells[:-3]).strip()
+    if not desc:
+        return None
+    return {
+        "需求编号": code,
+        "需求名称": desc.split("：", 1)[0].strip()[:80] or code,
+        "需求描述": desc,
+        "当前做法 / 痛点": pain,
+        "期望结果": expected,
+        "优先级": priority,
+    }
 
 
 def enrich_records_with_supplements(records: list[dict[str, str]], lines: list[str]) -> None:
@@ -655,12 +676,20 @@ def coerce_field_value(field: FieldInfo | str, value: Any) -> Any:
         return text
     normalized = normalize_doc_key(text)
     priority_aliases = {
+        "must": ("高p0", "p0"),
+        "need": ("高p0", "p0"),
+        "needed": ("高p0", "p0"),
         "高": ("高p0", "p0"),
         "高优先级": ("高p0", "p0"),
         "p0": ("高p0", "p0"),
+        "should": ("中p1", "p1"),
+        "want": ("中p1", "p1"),
         "中": ("中p1", "p1"),
         "中优先级": ("中p1", "p1"),
         "p1": ("中p1", "p1"),
+        "could": ("低p2", "p2"),
+        "nice": ("低p2", "p2"),
+        "nicetohave": ("低p2", "p2"),
         "低": ("低p2", "p2"),
         "低优先级": ("低p2", "p2"),
         "p2": ("低p2", "p2"),
