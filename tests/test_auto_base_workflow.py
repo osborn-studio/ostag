@@ -6,9 +6,11 @@ from pathlib import Path
 from ostag.config import load_settings
 from ostag.core.event import NormalizedEvent
 from ostag.workflows.auto_base import (
+    AutoBaseError,
     BaseContext,
     ChatFile,
     FieldInfo,
+    LarkCLI,
     WorkflowContext,
     build_rows_for_fields,
     extract_base_context,
@@ -43,6 +45,18 @@ def test_extract_base_context_supports_app_links_and_table_params() -> None:
     )
 
 
+def test_extract_base_context_ignores_non_table_resource_params() -> None:
+    context = extract_base_context(
+        "https://a2ekucppds.feishu.cn/base/TqcVbKRiZa6YClshTqxcOzblncy?table=blkDashboard"
+    )
+
+    assert context == BaseContext(
+        base_token="TqcVbKRiZa6YClshTqxcOzblncy",
+        table_id=None,
+        url="https://a2ekucppds.feishu.cn/base/TqcVbKRiZa6YClshTqxcOzblncy?table=blkDashboard",
+    )
+
+
 def test_find_workflow_context_uses_recent_file_and_base_link() -> None:
     messages = [
         {
@@ -72,6 +86,46 @@ def test_find_workflow_context_uses_recent_file_and_base_link() -> None:
         ),
         file=ChatFile(message_id="om_file", file_key="file_v3_docx", name="需求模板.docx"),
     )
+
+
+def test_find_workflow_context_rejects_message_applink_target_in_strict_mode() -> None:
+    messages = [
+        {
+            "message_id": "om_request",
+            "msg_type": "text",
+            "content": (
+                "请把这个文档中的需求写入"
+                "https://applink.feishu.cn/client/message/link/open?token=AmpBKBWtQAzdakMXaZJcTMU%3D "
+                "这个需求收集与管理的多维表格"
+            ),
+        },
+        {
+            "message_id": "om_old_base",
+            "msg_type": "text",
+            "content": "https://tenant.feishu.cn/app/OldBaseToken",
+        },
+    ]
+
+    try:
+        find_workflow_context(messages, strict_explicit_target=True)
+    except AutoBaseError as exc:
+        assert "飞书客户端消息跳转链接" in str(exc)
+    else:
+        raise AssertionError("message applink target should be rejected")
+
+
+def test_lark_cli_env_prepends_node_bin_for_absolute_cli(tmp_path: Path) -> None:
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        lark_cli_bin="/opt/node/bin/lark-cli",
+        auto_base_workdir=str(tmp_path),
+    )
+    cli = LarkCLI(config)
+
+    env = cli.subprocess_env({"PATH": "/usr/bin:/bin"})
+
+    assert env["PATH"].startswith("/opt/node/bin:")
 
 
 def test_extract_docx_records_falls_back_to_single_requirement() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import tempfile
 import zipfile
@@ -17,6 +18,9 @@ from ostag.core.event import NormalizedEvent
 
 
 BASE_URL_RE = re.compile(r"https?://[^\s<>\"]+\.feishu\.cn/(?:app|base)/[^\s<>\"]+")
+UNSUPPORTED_APPLINK_RE = re.compile(
+    r"https?://applink\.feishu\.cn/client/message/link/open\?[^\s<>\"]+"
+)
 FILE_REF_RE = re.compile(r'<file\s+[^>]*key="(?P<key>[^"]+)"[^>]*name="(?P<name>[^"]+)"')
 READONLY_FIELD_TYPES = {
     "formula",
@@ -80,11 +84,19 @@ class LarkCLI:
         self.config = config
         self.cwd = Path(config.auto_base_workdir)
 
+    def subprocess_env(self, base_env: dict[str, str] | None = None) -> dict[str, str]:
+        env = dict(base_env or os.environ)
+        if Path(self.config.lark_cli_bin).is_absolute():
+            bin_dir = str(Path(self.config.lark_cli_bin).parent)
+            env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+        return env
+
     async def json(self, *args: str) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
             self.config.lark_cli_bin,
             *args,
             cwd=self.cwd,
+            env=self.subprocess_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -167,7 +179,7 @@ class AutoBaseWorkflow:
             "--json",
         )
         messages = history.get("data", {}).get("messages", [])
-        context = find_workflow_context(messages)
+        context = find_workflow_context(messages, strict_explicit_target=True)
         if not context:
             raise AutoBaseError("没有在最近群消息中找到 docx 文件和 Base 链接。")
         return context
@@ -356,14 +368,30 @@ def extract_base_context(text: str) -> BaseContext | None:
         return None
     query = parse_qs(parsed.query)
     table_id = (query.get("table") or [None])[0]
+    if table_id and not table_id.startswith("tbl"):
+        table_id = None
     return BaseContext(base_token=token, table_id=table_id, url=url)
 
 
-def find_workflow_context(messages: list[dict[str, Any]]) -> WorkflowContext | None:
+def find_workflow_context(
+    messages: list[dict[str, Any]], *, strict_explicit_target: bool = False
+) -> WorkflowContext | None:
     base: BaseContext | None = None
     file: ChatFile | None = None
     for message in messages:
         content = str(message.get("content") or "")
+        if (
+            strict_explicit_target
+            and UNSUPPORTED_APPLINK_RE.search(content)
+            and is_auto_base_request(content)
+            and extract_base_context(content) is None
+        ):
+            raise AutoBaseError(
+                "你发的是飞书客户端消息跳转链接，不是多维表格真实地址。"
+                "请复制多维表格的浏览器地址或分享地址，形如 "
+                "https://...feishu.cn/app/{base_token} 或 https://...feishu.cn/base/{base_token}"
+                "；我拿到真实 Base 链接后才能写入指定报表背后的数据表。"
+            )
         base = base or extract_base_context(content)
         file = file or extract_file_ref(message)
         if base and file:
