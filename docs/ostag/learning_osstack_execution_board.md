@@ -18,8 +18,8 @@ attempting dependent phases out of order.
 | Phase 2: Stage Ledger | `task_c04abd42` | 95 | `code.feature` | completed | Requirement operations emit staged success/failure ledger; tests pass. |
 | Phase 3: Connector Layer | `task_49e1f4d9` | 90 | `code.refactor` | completed | Base/task CLI calls are behind connector interfaces; contract tests pass; behavior preserved. |
 | Phase 4: Governance Policy | `task_07fd8203` | 85 | `code.feature` | completed | Per-channel readable/writable fields, task creation, confirmation, budget, and tool/backend policy tests pass. |
-| Phase 5: Ambient Mode v1 | `task_6564e35f` | 80 | `code.feature` | active | Ambient reminders are opt-in, rate-limited, proposal-only, and audited. |
-| Phase 6: Slack Parity | `task_227a5da7` | 75 | `code.feature` | queued | Slack can use Channel Brain and governed requirement operations in tested fixtures. |
+| Phase 5: Ambient Mode v1 | `task_6564e35f` | 80 | `code.feature` | completed | Ambient reminders are opt-in, rate-limited, proposal-only, and audited. |
+| Phase 6: Slack Parity | `task_227a5da7` | 75 | `code.feature` | active | Slack can use Channel Brain and governed requirement operations in tested fixtures. |
 | Phase 7: Benchmark Gate | `task_93596cb6` | 70 | `code.test` | queued | `scripts/osstack_learning_benchmark_verify.sh` generates `release/learning-benchmark.md` with a score. |
 
 ## Global Verification

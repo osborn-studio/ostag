@@ -3,6 +3,7 @@ from __future__ import annotations
 from ostag.backends.base import Backend, BackendError
 from ostag.backends.factory import create_backend
 from ostag.config import Settings
+from ostag.core.ambient import is_ambient_status_request
 from ostag.core.channel_brain import (
     ChannelBrainStore,
     extract_remember_fact,
@@ -87,6 +88,24 @@ class OSTagRunner:
                 self.config.audit_log,
                 event=event,
                 backend="channel_brain",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="ok",
+                env=self.config.env,
+            )
+            return reply
+
+        if is_ambient_status_request(text):
+            brain = self.channel_brain.load(event.platform, event.chat_id)
+            mode = "已开启" if brain.policy.ambient_enabled else "未开启"
+            reply = (
+                f"Ambient 主动模式{mode}。当前 v1 只会提出提醒建议，不会自动写表或创建任务。"
+            )
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="ambient",
                 mfs_enabled=self.config.mfs_enabled,
                 input_text=text,
                 output_text=reply,
