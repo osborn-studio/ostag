@@ -17,6 +17,8 @@ class ChannelPolicy:
     default_table_id: str = ""
     ambient_enabled: bool = False
     task_create_allowed: bool = True
+    task_create_requires_confirmation: bool = False
+    daily_action_budget: int = 0
     writable_fields: tuple[str, ...] = ()
     readable_fields: tuple[str, ...] = ()
 
@@ -28,6 +30,7 @@ class ChannelBrain:
     facts: tuple[str, ...] = ()
     preferences: tuple[str, ...] = ()
     policy: ChannelPolicy = field(default_factory=ChannelPolicy)
+    action_counts: dict[str, int] = field(default_factory=dict)
     updated_at: str = ""
 
 
@@ -71,9 +74,17 @@ class ChannelBrainStore:
                 ),
                 ambient_enabled=bool(policy_data.get("ambient_enabled", False)),
                 task_create_allowed=bool(policy_data.get("task_create_allowed", True)),
+                task_create_requires_confirmation=bool(
+                    policy_data.get("task_create_requires_confirmation", False)
+                ),
+                daily_action_budget=int(policy_data.get("daily_action_budget") or 0),
                 writable_fields=tuple(policy_data.get("writable_fields", []) or ()),
                 readable_fields=tuple(policy_data.get("readable_fields", []) or ()),
             ),
+            action_counts={
+                str(key): int(value)
+                for key, value in (data.get("action_counts") or {}).items()
+            },
             updated_at=str(data.get("updated_at") or ""),
         )
 
@@ -93,6 +104,7 @@ class ChannelBrainStore:
             facts=tuple(facts),
             preferences=brain.preferences,
             policy=brain.policy,
+            action_counts=brain.action_counts,
             updated_at=(now or datetime.now(timezone.utc))
             .astimezone(timezone.utc)
             .isoformat(timespec="seconds"),
@@ -113,13 +125,40 @@ class ChannelBrainStore:
                 "default_table_id": brain.policy.default_table_id,
                 "ambient_enabled": brain.policy.ambient_enabled,
                 "task_create_allowed": brain.policy.task_create_allowed,
+                "task_create_requires_confirmation": brain.policy.task_create_requires_confirmation,
+                "daily_action_budget": brain.policy.daily_action_budget,
                 "writable_fields": list(brain.policy.writable_fields),
                 "readable_fields": list(brain.policy.readable_fields),
             },
+            "action_counts": brain.action_counts,
             "updated_at": brain.updated_at,
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
+
+    def actions_today(self, platform: str, chat_id: str, today: str | None = None) -> int:
+        brain = self.load(platform, chat_id)
+        key = today or datetime.now(timezone.utc).date().isoformat()
+        return int(brain.action_counts.get(key, 0))
+
+    def record_action(
+        self, platform: str, chat_id: str, today: str | None = None
+    ) -> ChannelBrain:
+        key = today or datetime.now(timezone.utc).date().isoformat()
+        brain = self.load(platform, chat_id)
+        counts = dict(brain.action_counts)
+        counts[key] = int(counts.get(key, 0)) + 1
+        updated = ChannelBrain(
+            platform=brain.platform,
+            chat_id=brain.chat_id,
+            facts=brain.facts,
+            preferences=brain.preferences,
+            policy=brain.policy,
+            action_counts=counts,
+            updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        self.save(updated)
+        return updated
 
 
 def channel_policy_for_event(event: NormalizedEvent, config: Settings) -> ChannelPolicy:

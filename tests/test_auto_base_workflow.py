@@ -412,6 +412,33 @@ class FakeAutoBaseWorkflow:
         return "自动入表完成"
 
 
+class FakeCLIForSingleRequirement:
+    async def json(self, *args):
+        if args[:2] == ("base", "+table-list"):
+            return {"ok": True, "data": {"tables": [{"table_id": "tblDefault", "name": "需求表"}]}}
+        if args[:2] == ("base", "+field-list"):
+            return {
+                "ok": True,
+                "data": {
+                    "fields": [
+                        {"name": "需求描述", "type": "text"},
+                        {"name": "需求状态", "type": "select", "options": [{"name": "开发交付中"}]},
+                        {"name": "任务链接", "type": "text"},
+                    ]
+                },
+            }
+        if args[:2] == ("base", "+record-search"):
+            return {
+                "ok": True,
+                "data": {"records": [{"record_id": "rec1", "fields": {"需求描述": "交易盯盘"}}]},
+            }
+        if args[:2] == ("base", "+record-batch-update"):
+            return {"ok": True, "data": {"record_id_list": ["rec1"]}}
+        if args[:2] == ("task", "+create"):
+            return {"ok": True, "data": {"url": "https://todo.feishu.cn/task/demo"}}
+        raise AssertionError(f"unexpected lark-cli call: {args}")
+
+
 async def test_runner_uses_auto_base_workflow_before_backend(tmp_path: Path) -> None:
     from ostag.core.runner import OSTagRunner
 
@@ -662,6 +689,150 @@ async def test_auto_base_workflow_reports_stage_on_missing_requirement(tmp_path:
     assert reply.startswith("需求运营未完成")
     assert "没有在需求表中找到匹配" in reply
     assert "阶段：已接收请求 → 已加载频道策略 → 已读取需求表结构" in reply
+
+
+async def test_auto_base_workflow_blocks_disallowed_writable_field(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+    from ostag.core.channel_brain import ChannelBrainStore, ChannelBrain, ChannelPolicy
+
+    class FakeCLI:
+        async def json(self, *args):
+            if args[:2] == ("base", "+table-list"):
+                return {"ok": True, "data": {"tables": [{"table_id": "tblDefault", "name": "需求表"}]}}
+            if args[:2] == ("base", "+field-list"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "fields": [
+                            {"name": "需求描述", "type": "text"},
+                            {"name": "需求状态", "type": "select", "options": [{"name": "开发交付中"}]},
+                        ]
+                    },
+                }
+            if args[:2] == ("base", "+record-search"):
+                return {"ok": True, "data": {"records": [{"record_id": "rec1", "fields": {"需求描述": "交易盯盘"}}]}}
+            if args[:2] == ("base", "+record-batch-update"):
+                raise AssertionError("policy should block before write")
+            raise AssertionError(f"unexpected lark-cli call: {args}")
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    ChannelBrainStore(config).save(
+        ChannelBrain(
+            platform="feishu",
+            chat_id="oc_demo",
+            policy=ChannelPolicy(
+                default_base_token="base_token",
+                default_table_id="tblDefault",
+                writable_fields=("优先级",),
+            ),
+        )
+    )
+    workflow = AutoBaseWorkflow(config, cli=FakeCLI())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请把 交易盯盘 状态改为 开发交付中",
+        mention_bot=True,
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "频道策略禁止写入字段：需求状态" in reply
+
+
+async def test_auto_base_workflow_blocks_task_creation_by_policy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+    from ostag.core.channel_brain import ChannelBrainStore, ChannelBrain, ChannelPolicy
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    ChannelBrainStore(config).save(
+        ChannelBrain(
+            platform="feishu",
+            chat_id="oc_demo",
+            policy=ChannelPolicy(
+                default_base_token="base_token",
+                default_table_id="tblDefault",
+                task_create_allowed=False,
+            ),
+        )
+    )
+
+    workflow = AutoBaseWorkflow(config, cli=FakeCLIForSingleRequirement())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请为 交易盯盘 创建飞书任务",
+        mention_bot=True,
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "频道策略禁止 OS Tag 创建飞书任务" in reply
+
+
+async def test_auto_base_workflow_blocks_when_daily_budget_exhausted(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "memory"))
+    from ostag.core.channel_brain import ChannelBrainStore, ChannelBrain, ChannelPolicy
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    store = ChannelBrainStore(config)
+    store.save(
+        ChannelBrain(
+            platform="feishu",
+            chat_id="oc_demo",
+            policy=ChannelPolicy(
+                default_base_token="base_token",
+                default_table_id="tblDefault",
+                daily_action_budget=1,
+            ),
+        )
+    )
+    store.record_action("feishu", "oc_demo")
+
+    workflow = AutoBaseWorkflow(config, cli=FakeCLIForSingleRequirement())
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="请把 交易盯盘 状态改为 开发交付中",
+        mention_bot=True,
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "动作预算已用完" in reply
 
 
 async def test_auto_base_workflow_loads_context_across_history_pages(tmp_path: Path) -> None:

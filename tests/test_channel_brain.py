@@ -83,3 +83,14 @@ def test_format_channel_brain_reports_memory_and_default_table(tmp_path: Path) -
     assert "张三负责交易相关需求" in text
     assert "base=base_env" in text
     assert "table=tblEnv" in text
+
+
+def test_channel_brain_records_daily_action_counts(tmp_path: Path) -> None:
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+    store = ChannelBrainStore(config, root=tmp_path)
+
+    store.record_action("feishu", "oc_demo", today="2026-06-30")
+    store.record_action("feishu", "oc_demo", today="2026-06-30")
+
+    assert store.actions_today("feishu", "oc_demo", today="2026-06-30") == 2
+    assert store.actions_today("feishu", "oc_demo", today="2026-07-01") == 0

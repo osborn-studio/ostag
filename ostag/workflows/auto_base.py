@@ -19,7 +19,7 @@ from ostag.connectors.requirements import (
     RequirementTableConnector,
 )
 from ostag.connectors.tasks import LarkCLITaskConnector, TaskConnector
-from ostag.core.channel_brain import channel_policy_for_event
+from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy, channel_policy_for_event
 from ostag.core.event import NormalizedEvent
 from ostag.core.stage_ledger import StageLedger
 
@@ -160,6 +160,7 @@ class AutoBaseWorkflow:
             self.cli, config.auto_base_identity
         )
         self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
+        self.channel_brain = ChannelBrainStore(config)
 
     async def handle(self, event: NormalizedEvent) -> str | None:
         if not self.config.auto_base_enabled:
@@ -248,6 +249,9 @@ class AutoBaseWorkflow:
         record = matches[0]
         ledger.complete("target_found", "已定位需求")
         patch = build_requirement_patch(command, fields)
+        policy = channel_policy_for_event(event, self.config)
+        enforce_requirement_policy(command, patch, policy)
+        self._enforce_action_budget(event, policy)
         ledger.complete("permission_checked", "已校验可执行动作")
         task_result: dict[str, Any] | None = None
         if command.create_task:
@@ -258,6 +262,8 @@ class AutoBaseWorkflow:
                 patch.update(field_patch_if_exists(fields, "任务链接", task_url))
         if patch:
             await self._update_record(resolved.base_token, resolved.table.table_id, record.record_id, patch)
+        if patch or command.create_task:
+            self.channel_brain.record_action(event.platform, event.chat_id)
         ledger.complete("executed", "已执行写入")
         if not patch and not command.create_task:
             raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
@@ -479,6 +485,15 @@ class AutoBaseWorkflow:
             idempotency_key=f"ostag-{record.record_id}",
         )
         return result.get("data", {}) if isinstance(result.get("data"), dict) else result
+
+    def _enforce_action_budget(self, event: NormalizedEvent, policy: ChannelPolicy) -> None:
+        if policy.daily_action_budget <= 0:
+            return
+        used = self.channel_brain.actions_today(event.platform, event.chat_id)
+        if used >= policy.daily_action_budget:
+            raise AutoBaseError(
+                f"这个群今天的 OS Tag 动作预算已用完：{used}/{policy.daily_action_budget}。"
+            )
 
 
 def is_auto_base_request(text: str) -> bool:
@@ -991,6 +1006,23 @@ def build_requirement_patch(
         if priority_field:
             patch[priority_field.name] = coerce_field_value(priority_field, command.priority)
     return patch
+
+
+def enforce_requirement_policy(
+    command: RequirementManagementCommand, patch: dict[str, Any], policy: ChannelPolicy
+) -> None:
+    if command.create_task and not policy.task_create_allowed:
+        raise AutoBaseError("频道策略禁止 OS Tag 创建飞书任务。")
+    if command.create_task and policy.task_create_requires_confirmation:
+        raise AutoBaseError("频道策略要求创建任务前先人工确认。请明确回复：确认创建任务。")
+    if policy.writable_fields:
+        blocked = [field for field in patch if field not in policy.writable_fields]
+        if blocked:
+            allowed = "、".join(policy.writable_fields)
+            blocked_text = "、".join(blocked)
+            raise AutoBaseError(
+                f"频道策略禁止写入字段：{blocked_text}。当前允许写入：{allowed}。"
+            )
 
 
 def field_patch_if_exists(fields: list[FieldInfo], field_name: str, value: Any) -> dict[str, Any]:
