@@ -32,6 +32,14 @@ class RequirementTableConnector(Protocol):
         self, base_token: str, table_id: str, record_id: str, patch: dict[str, Any]
     ) -> dict[str, Any]: ...
 
+    async def list_records(
+        self,
+        base_token: str,
+        table_id: str,
+        projection_fields: list[str],
+        limit: int = 50,
+    ) -> dict[str, Any]: ...
+
 
 class LarkCLIRequirementTableConnector:
     def __init__(self, cli: Any, identity: str):
@@ -144,3 +152,28 @@ class LarkCLIRequirementTableConnector:
             "--json",
             json.dumps(payload, ensure_ascii=False),
         )
+
+    async def list_records(
+        self,
+        base_token: str,
+        table_id: str,
+        projection_fields: list[str],
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        args = [
+            "base",
+            "+record-list",
+            "--as",
+            self.identity,
+            "--base-token",
+            base_token,
+            "--table-id",
+            table_id,
+            "--limit",
+            str(limit),
+            "--format",
+            "json",
+        ]
+        for name in projection_fields:
+            args.extend(["--field-id", name])
+        return await self.cli.json(*args)

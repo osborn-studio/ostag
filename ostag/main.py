@@ -9,6 +9,7 @@ from ostag.adapters.feishu import FeishuAdapter
 from ostag.adapters.lark import LarkAdapter
 from ostag.adapters.slack import SlackAdapter
 from ostag.config import load_settings
+from ostag.core.ambient import AmbientScheduler
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
 from ostag.core.runner import OSTagRunner
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
@@ -83,7 +84,17 @@ async def main_async(argv: list[str] | None = None) -> int:
         await adapter.dry_run(args.event, runner)
         return 0
 
-    await adapter.start(runner)
+    ambient_task = None
+    if config.ambient_enabled:
+        ambient_task = asyncio.create_task(
+            AmbientScheduler(config, adapter=adapter).run_forever(),
+            name="ostag-ambient-scheduler",
+        )
+    try:
+        await adapter.start(runner)
+    finally:
+        if ambient_task is not None:
+            ambient_task.cancel()
     return 0
 
 

@@ -84,6 +84,16 @@ class SlackAdapter:
             text=text,
         )
 
+    async def send_message(self, chat_id: str, text: str) -> None:
+        if not text:
+            return
+        if self.config.dry_run:
+            print(text)
+            return
+        if self._client is None:
+            raise RuntimeError("Slack client is not initialized.")
+        self._client.chat_postMessage(channel=chat_id, text=text)
+
 
 def _normalize_slack_event(event: dict[str, Any], bot_name: str) -> NormalizedEvent:
     text = event.get("text", "")

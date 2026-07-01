@@ -99,8 +99,11 @@ class OSTagRunner:
         if is_ambient_status_request(text):
             brain = self.channel_brain.load(event.platform, event.chat_id)
             mode = "已开启" if brain.policy.ambient_enabled else "未开启"
+            scheduler = "已开启" if self.config.ambient_enabled else "未开启"
             reply = (
-                f"Ambient 主动模式{mode}。当前 v1 只会提出提醒建议，不会自动写表或创建任务。"
+                f"Ambient 主动模式{mode}。后台调度{scheduler}。"
+                f"巡检间隔：{self.config.ambient_interval_seconds} 秒。"
+                "当前只会提出提醒建议，不会自动写表或创建任务。"
             )
             write_audit_log(
                 self.config.audit_log,

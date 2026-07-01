@@ -148,6 +148,32 @@ class FeishuAdapter:
         )
         await asyncio.to_thread(_urlopen_json, req)
 
+    async def send_message(self, chat_id: str, text: str) -> None:
+        if not text:
+            return
+        if self.config.dry_run:
+            print(text)
+            return
+        token = await self._tenant_access_token()
+        payload = json.dumps(
+            {
+                "receive_id": chat_id,
+                "msg_type": "text",
+                "content": json.dumps({"text": text}, ensure_ascii=False),
+            }
+        ).encode()
+        url = f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type=chat_id"
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        await asyncio.to_thread(_urlopen_json, req)
+
     async def _tenant_access_token(self) -> str:
         body = json.dumps(
             {

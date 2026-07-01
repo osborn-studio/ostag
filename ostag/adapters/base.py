@@ -21,3 +21,6 @@ class Adapter(Protocol):
 
     async def reply(self, event: NormalizedEvent, text: str) -> None:
         """Send a reply through the platform transport."""
+
+    async def send_message(self, chat_id: str, text: str) -> None:
+        """Send a proactive message through the platform transport."""

@@ -69,6 +69,39 @@ async def test_requirement_connector_batch_update_uses_record_id_list_payload() 
     }
 
 
+async def test_requirement_connector_list_records_builds_lark_cli_arguments() -> None:
+    cli = CapturingCLI()
+    connector = LarkCLIRequirementTableConnector(cli, "user")
+
+    await connector.list_records(
+        "base_token",
+        "tblDemo",
+        projection_fields=["需求名称", "负责人"],
+        limit=20,
+    )
+
+    assert cli.calls == [
+        (
+            "base",
+            "+record-list",
+            "--as",
+            "user",
+            "--base-token",
+            "base_token",
+            "--table-id",
+            "tblDemo",
+            "--limit",
+            "20",
+            "--format",
+            "json",
+            "--field-id",
+            "需求名称",
+            "--field-id",
+            "负责人",
+        )
+    ]
+
+
 async def test_requirement_connector_download_uses_relative_output_path() -> None:
     cli = CapturingCLI()
     connector = LarkCLIRequirementTableConnector(cli, "user")
