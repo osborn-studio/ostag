@@ -5,7 +5,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .env
-logs/*.log
+.env.*
+!.env.example
+logs/*
 tmp/
 LOOP-STATE.json
 STATE.md

@@ -5,6 +5,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import re
 import time
 import urllib.parse
@@ -70,6 +71,7 @@ class DingTalkAdapter:
 
     async def normalize_event(self, raw_event: dict[str, Any]) -> NormalizedEvent:
         data = raw_event.get("data", raw_event)
+        _debug_raw_event(data)
         text = _message_text(data)
         cleaned_text = strip_mentions(text, self.config.bot_name)
         mention_bot = _mentions_bot(data, text, self.config.bot_name)
@@ -160,14 +162,10 @@ def signed_webhook_url(webhook: str, secret: str, timestamp_ms: int | None = Non
 
 
 def _message_text(data: dict[str, Any]) -> str:
-    text = data.get("text")
-    if isinstance(text, dict):
-        return str(text.get("content") or text.get("text") or "").strip()
-    if isinstance(text, str):
-        return text.strip()
-    content = data.get("content")
-    if isinstance(content, str):
-        return content.strip()
+    for key in ("text", "content", "msgContent", "messageContent"):
+        text = _extract_text(data.get(key))
+        if text:
+            return text
     return ""
 
 
@@ -177,7 +175,48 @@ def _mentions_bot(data: dict[str, Any], text: str, bot_name: str) -> bool:
     at_users = data.get("atUsers")
     if isinstance(at_users, list) and at_users:
         return True
+    if _is_direct_chat(data):
+        return True
     return f"@{bot_name}" in text
+
+
+def _extract_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        parsed = _parse_json_string(value)
+        if parsed is not None:
+            return _extract_text(parsed)
+        return value.strip()
+    if isinstance(value, dict):
+        for key in ("content", "text", "richText", "title"):
+            text = _extract_text(value.get(key))
+            if text:
+                return text
+    if isinstance(value, list):
+        return " ".join(text for item in value if (text := _extract_text(item))).strip()
+    return ""
+
+
+def _parse_json_string(value: str) -> Any:
+    stripped = value.strip()
+    if not stripped or stripped[0] not in "[{":
+        return None
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return None
+
+
+def _is_direct_chat(data: dict[str, Any]) -> bool:
+    value = str(
+        data.get("conversationType")
+        or data.get("conversation_type")
+        or data.get("chatType")
+        or data.get("chat_type")
+        or ""
+    ).strip().lower()
+    return value in {"1", "single", "single_chat", "private", "private_chat", "p2p"}
 
 
 def _text_payload(text: str) -> dict[str, Any]:
@@ -190,3 +229,11 @@ def _urlopen_json(req: urllib.request.Request) -> dict[str, Any]:
     if not raw:
         return {}
     return json.loads(raw)
+
+
+def _debug_raw_event(data: dict[str, Any]) -> None:
+    if os.getenv("OSTAG_DINGTALK_DEBUG_RAW", "").lower() not in {"1", "true", "yes", "on"}:
+        return
+    Path("logs/dingtalk-raw-debug.jsonl").parent.mkdir(parents=True, exist_ok=True)
+    with Path("logs/dingtalk-raw-debug.jsonl").open("a", encoding="utf-8") as fp:
+        fp.write(json.dumps(data, ensure_ascii=False, default=str) + "\n")

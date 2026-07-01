@@ -115,6 +115,45 @@ async def test_dingtalk_robot_message_normalizes_to_core_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dingtalk_direct_message_normalizes_nested_json_text() -> None:
+    config = load_settings(None, audit_log=Path("logs/test-audit.log"))
+    raw = {
+        "conversationId": "cid_direct",
+        "conversationType": "1",
+        "msgId": "msg_direct",
+        "senderStaffId": "staff_demo_sender",
+        "text": {"content": json.dumps({"text": "请用一句话回复：ok"}, ensure_ascii=False)},
+    }
+
+    event = await DingTalkAdapter(config).normalize_event(raw)
+
+    assert event.platform == "dingtalk"
+    assert event.chat_id == "cid_direct"
+    assert event.message_id == "msg_direct"
+    assert event.sender_id == "staff_demo_sender"
+    assert event.mention_bot is True
+    assert event.text == "请用一句话回复：ok"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_direct_message_normalizes_rich_text() -> None:
+    config = load_settings(None, audit_log=Path("logs/test-audit.log"))
+    raw = {
+        "conversationId": "cid_direct",
+        "conversationType": "1",
+        "msgId": "msg_rich",
+        "senderStaffId": "staff_demo_sender",
+        "msgtype": "richText",
+        "content": {"richText": [{"text": "请用一句话回复：rich ok"}, {"text": "\n"}]},
+    }
+
+    event = await DingTalkAdapter(config).normalize_event(raw)
+
+    assert event.mention_bot is True
+    assert event.text == "请用一句话回复：rich ok"
+
+
+@pytest.mark.asyncio
 async def test_lark_mention_does_not_strip_english_prompt() -> None:
     config = load_settings(None, audit_log=Path("logs/test-audit.log"))
     raw = json.loads(Path("examples/lark_event.json").read_text(encoding="utf-8"))

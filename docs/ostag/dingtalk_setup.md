@@ -34,6 +34,16 @@ DINGTALK_ROBOT_SECRET=SEC...
 OSTAG_BACKEND=mock
 ```
 
+Keep production DingTalk credentials in `.env.dingtalk`; this file is ignored
+by git. The current production app metadata is:
+
+```text
+unifiedAppId: 5a83bd9f-1fdb-4da9-b3aa-5090f7f57947
+robotCode/clientId: dingmradv5eeaywwkj4o
+robotName: OS Tag
+launchd label: ai.ostag.dingtalk
+```
+
 Install DingTalk dependencies:
 
 ```bash
@@ -49,7 +59,23 @@ uv run python -m ostag.main --platform dingtalk --live --doctor
 Run:
 
 ```bash
-uv run python -m ostag.main --platform dingtalk --live
+uv run python -m ostag.main --config .env.dingtalk --platform dingtalk --live
+```
+
+Render and install the macOS launchd service:
+
+```bash
+scripts/render_dingtalk_launchd_plist.sh
+cp release/ai.ostag.dingtalk.plist ~/Library/LaunchAgents/ai.ostag.dingtalk.plist
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.ostag.dingtalk.plist
+launchctl kickstart -k "gui/$(id -u)/ai.ostag.dingtalk"
+```
+
+Check service status:
+
+```bash
+launchctl list | rg 'ai\.ostag\.dingtalk'
+tail -80 logs/launchd-dingtalk.err.log
 ```
 
 Dry-run fixture:
@@ -72,3 +98,18 @@ same governed requirement-table operations:
 DingTalk user IDs are not automatically treated as Feishu/Lark `open_id`s.
 Owner assignment across tools requires an explicit identity mapping in a later
 phase or a Feishu/Lark-side command.
+
+## Live Validation
+
+On 2026-07-01, the OS Tag DingTalk app was created, released, and launched via
+launchd. A controlled single-chat validation message was sent to the robot and
+processed through DingTalk Stream:
+
+```text
+input_preview: 请用一句话回复：dingtalk inbound validation ok
+status: ok
+```
+
+Adding the robot to one existing single-member group through DWS returned
+`bot and group not match`; group installation may still require the DingTalk
+client's group robot picker or a group type that allows this internal robot.
