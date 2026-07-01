@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import re
+import shlex
 import time
 import urllib.parse
 import urllib.request
@@ -120,11 +121,13 @@ class DingTalkAdapter:
     async def send_message(self, chat_id: str, text: str) -> None:
         if not text:
             return
+        text = dingtalk_text(text)
         if self.config.dry_run:
             print(text)
             return
         if not self.config.dingtalk_robot_webhook:
-            raise RuntimeError("DINGTALK_ROBOT_WEBHOOK is required for proactive DingTalk messages.")
+            await self._send_by_dws_bot(chat_id, text)
+            return
         await self._post_json(
             signed_webhook_url(
                 self.config.dingtalk_robot_webhook,
@@ -132,6 +135,46 @@ class DingTalkAdapter:
             ),
             _text_payload(text),
         )
+
+    async def _send_by_dws_bot(self, chat_id: str, text: str) -> None:
+        argv = shlex.split(self.config.dws_cli_bin)
+        if not argv:
+            raise RuntimeError("DWS_CLI_BIN is empty.")
+        if not self.config.dingtalk_client_id:
+            raise RuntimeError("DINGTALK_CLIENT_ID is required for DingTalk bot sends.")
+        proc = await asyncio.create_subprocess_exec(
+            *argv,
+            "chat",
+            "message",
+            "send-by-bot",
+            "--robot-code",
+            self.config.dingtalk_client_id,
+            "--group",
+            chat_id,
+            "--title",
+            "OS Tag 主动巡检",
+            "--text",
+            text,
+            "--format",
+            "json",
+            cwd=str(Path(self.config.auto_base_workdir)),
+            env=dict(os.environ),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=self.config.auto_base_cli_timeout_seconds
+        )
+        out = stdout.decode("utf-8", errors="replace").strip()
+        err = stderr.decode("utf-8", errors="replace").strip()
+        if proc.returncode != 0:
+            raise RuntimeError((err or out or f"dws exited {proc.returncode}")[-3000:])
+        try:
+            data = json.loads(out or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"dws returned non-JSON output: {out[-1000:]}") from exc
+        if data.get("success") is False or data.get("status") == "error":
+            raise RuntimeError(json.dumps(data.get("error", data), ensure_ascii=False)[-3000:])
 
     async def _post_json(self, url: str, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode()
@@ -221,6 +264,10 @@ def _is_direct_chat(data: dict[str, Any]) -> bool:
 
 def _text_payload(text: str) -> dict[str, Any]:
     return {"msgtype": "text", "text": {"content": text}}
+
+
+def dingtalk_text(text: str) -> str:
+    return re.sub(r'<at\s+user_id="[^"]+">([^<]+)</at>', r"@\1", text)
 
 
 def _urlopen_json(req: urllib.request.Request) -> dict[str, Any]:

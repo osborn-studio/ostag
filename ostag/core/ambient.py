@@ -8,6 +8,8 @@ from typing import Any, Callable
 from ostag.adapters.base import Adapter
 from ostag.config import Settings
 from ostag.connectors.requirements import (
+    DwsCLI,
+    DwsRequirementTableConnector,
     LarkCLIRequirementTableConnector,
     RequirementTableConnector,
 )
@@ -150,9 +152,7 @@ class AmbientScheduler:
         self.config = config
         self.adapter = adapter
         self.store = channel_brain_store or ChannelBrainStore(config)
-        self.requirements = requirement_connector or LarkCLIRequirementTableConnector(
-            LarkCLI(config), config.auto_base_identity
-        )
+        self.requirements = requirement_connector or _requirement_connector_for_platform(config)
         self.monitor = AmbientMonitor(self.store)
         self.now = now or datetime.now
         self.today = today or (lambda: self.now().date())
@@ -380,15 +380,25 @@ def format_daily_digest(
 def _field_names(data: dict[str, Any]) -> set[str]:
     blob = data.get("data", {})
     raw_fields = blob.get("fields") or blob.get("items") or []
+    if not raw_fields and isinstance(blob.get("tables"), list):
+        for table in blob["tables"]:
+            if isinstance(table, dict) and isinstance(table.get("fields"), list):
+                raw_fields.extend(table["fields"])
     names: set[str] = set()
     if not isinstance(raw_fields, list):
         return names
     for item in raw_fields:
         if isinstance(item, dict):
-            value = item.get("field_name") or item.get("name")
+            value = item.get("field_name") or item.get("fieldName") or item.get("name")
             if value:
                 names.add(str(value))
     return names
+
+
+def _requirement_connector_for_platform(config: Settings) -> RequirementTableConnector:
+    if config.platform == "dingtalk":
+        return DwsRequirementTableConnector(DwsCLI(config))
+    return LarkCLIRequirementTableConnector(LarkCLI(config), config.auto_base_identity)
 
 
 def _first_text(fields: dict[str, Any], names: tuple[str, ...]) -> str:

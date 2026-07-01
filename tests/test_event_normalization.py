@@ -309,6 +309,92 @@ async def test_dingtalk_reply_uses_session_webhook(monkeypatch, tmp_path: Path) 
     }
 
 
+@pytest.mark.asyncio
+async def test_dingtalk_proactive_send_falls_back_to_dws_bot(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured = {}
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"success":true}', b""
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=False,
+        platform="dingtalk",
+        dingtalk_client_id="dingrobot",
+        dingtalk_robot_webhook="",
+        dws_cli_bin="dws",
+    )
+    adapter = DingTalkAdapter(config)
+    monkeypatch.setattr(
+        "ostag.adapters.dingtalk.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await adapter.send_message("cid_demo", "OS Tag 18 点需求复盘")
+
+    assert captured["args"] == (
+        "dws",
+        "chat",
+        "message",
+        "send-by-bot",
+        "--robot-code",
+        "dingrobot",
+        "--group",
+        "cid_demo",
+        "--title",
+        "OS Tag 主动巡检",
+        "--text",
+        "OS Tag 18 点需求复盘",
+        "--format",
+        "json",
+    )
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_proactive_send_normalizes_at_tags(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"success":true}', b""
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        captured["args"] = args
+        return FakeProcess()
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=False,
+        platform="dingtalk",
+        dingtalk_client_id="dingrobot",
+        dingtalk_robot_webhook="",
+        dws_cli_bin="dws",
+    )
+    adapter = DingTalkAdapter(config)
+    monkeypatch.setattr(
+        "ostag.adapters.dingtalk.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    await adapter.send_message("cid_demo", '<at user_id="ou_manager">管理者</at> 早上好')
+
+    assert captured["args"][11] == "@管理者 早上好"
+
+
 def test_dingtalk_signed_webhook_url_uses_timestamp_and_secret() -> None:
     url = signed_webhook_url(
         "https://oapi.dingtalk.com/robot/send?access_token=token",

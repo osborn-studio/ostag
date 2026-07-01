@@ -469,6 +469,63 @@ async def test_ambient_scheduler_projects_only_existing_fields(
     )
 
 
+async def test_ambient_scheduler_projects_dingtalk_field_names(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("OSTAG_AMBIENT_ENABLED", "true")
+    monkeypatch.setenv("OSTAG_AMBIENT_CHAT_IDS", "cid_demo")
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        platform="dingtalk",
+        auto_base_default_base_token="base_demo",
+        auto_base_default_table_id="tblDemo",
+        ambient_daily_digest_enabled=False,
+    )
+    store = ChannelBrainStore(config, root=tmp_path)
+    store.save(
+        ChannelBrain(
+            platform="dingtalk",
+            chat_id="cid_demo",
+            policy=ChannelPolicy(ambient_enabled=True),
+        )
+    )
+    connector = FakeRequirementConnector(
+        {"data": {"records": []}},
+        fields_response={
+            "data": {
+                "tables": [
+                    {
+                        "tableId": "tblDemo",
+                        "fields": [
+                            {"fieldName": "需求描述"},
+                            {"fieldName": "需求负责人"},
+                            {"fieldName": "需求状态"},
+                            {"fieldName": "优先级"},
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+    scheduler = AmbientScheduler(
+        config,
+        adapter=CapturingAmbientAdapter(),
+        channel_brain_store=store,
+        requirement_connector=connector,
+    )
+
+    await scheduler.run_once()
+
+    assert connector.calls[-1] == (
+        "records",
+        "base_demo",
+        "tblDemo",
+        ("需求描述", "需求负责人", "需求状态", "优先级"),
+        50,
+    )
+
+
 async def test_ambient_scheduler_sends_morning_digest_once_per_day(
     tmp_path: Path, monkeypatch
 ) -> None:
