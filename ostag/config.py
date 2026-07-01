@@ -85,6 +85,7 @@ class Settings:
     auto_base_download_dir: str = "tmp/ostag-auto-base"
     auto_base_workdir: str = "."
     lark_cli_bin: str = "lark-cli"
+    dws_cli_bin: str = "npx -y dingtalk-workspace-cli"
     ambient_enabled: bool = False
     ambient_interval_seconds: int = 1800
     ambient_chat_ids: tuple[str, ...] = ()
@@ -158,6 +159,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         ),
         auto_base_workdir=os.getenv("OSTAG_AUTO_BASE_WORKDIR", "."),
         lark_cli_bin=os.getenv("LARK_CLI_BIN", "lark-cli"),
+        dws_cli_bin=os.getenv("DWS_CLI_BIN", "npx -y dingtalk-workspace-cli"),
         ambient_enabled=_bool("OSTAG_AMBIENT_ENABLED", False),
         ambient_interval_seconds=_int("OSTAG_AMBIENT_INTERVAL_SECONDS", 1800),
         ambient_chat_ids=tuple(

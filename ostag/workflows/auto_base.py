@@ -15,6 +15,8 @@ from xml.etree import ElementTree
 
 from ostag.config import Settings
 from ostag.connectors.requirements import (
+    DwsCLI,
+    DwsRequirementTableConnector,
     LarkCLIRequirementTableConnector,
     RequirementTableConnector,
 )
@@ -156,11 +158,14 @@ class AutoBaseWorkflow:
     ):
         self.config = config
         self.cli = cli or LarkCLI(config)
-        self.requirements = requirement_connector or LarkCLIRequirementTableConnector(
-            self.cli, config.auto_base_identity
-        )
+        self.requirements = requirement_connector or self._default_requirement_connector(config)
         self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
         self.channel_brain = ChannelBrainStore(config)
+
+    def _default_requirement_connector(self, config: Settings) -> RequirementTableConnector:
+        if config.platform == "dingtalk":
+            return DwsRequirementTableConnector(DwsCLI(config))
+        return LarkCLIRequirementTableConnector(self.cli, config.auto_base_identity)
 
     async def handle(self, event: NormalizedEvent) -> str | None:
         if not self.config.auto_base_enabled:
@@ -414,16 +419,27 @@ class AutoBaseWorkflow:
         tables = data.get("data", {}).get("tables", [])
         return [
             TableInfo(
-                table_id=str(item.get("table_id") or item.get("id") or ""),
-                name=str(item.get("name") or item.get("table_name") or item.get("id") or ""),
+                table_id=str(item.get("table_id") or item.get("tableId") or item.get("id") or ""),
+                name=str(
+                    item.get("name")
+                    or item.get("table_name")
+                    or item.get("tableName")
+                    or item.get("id")
+                    or ""
+                ),
             )
             for item in tables
-            if item.get("table_id") or item.get("id")
+            if item.get("table_id") or item.get("tableId") or item.get("id")
         ]
 
     async def _list_fields(self, base_token: str, table_id: str) -> list[FieldInfo]:
         data = await self.requirements.list_fields(base_token, table_id)
         raw_fields = data.get("data", {}).get("fields", [])
+        if not raw_fields:
+            for table in data.get("data", {}).get("tables", []):
+                if table.get("table_id") == table_id or table.get("tableId") == table_id:
+                    raw_fields = table.get("fields", [])
+                    break
         fields = [field_info(item) for item in raw_fields]
         fields = [field for field in fields if field.name]
         if not fields:
@@ -1182,10 +1198,17 @@ def field_info(item: dict[str, Any]) -> FieldInfo:
     option_names = ()
     if isinstance(options, list):
         option_names = tuple(str(option.get("name")) for option in options if option.get("name"))
+    field_type = str(item.get("type") or item.get("ui_type") or "").lower()
+    if field_type == "singleselect":
+        field_type = "select"
+    elif field_type == "multipleselect":
+        field_type = "multi_select"
+    elif field_type == "date":
+        field_type = "datetime"
     return FieldInfo(
-        name=str(item.get("name") or item.get("field_name") or ""),
-        field_id=item.get("field_id") or item.get("id"),
-        field_type=str(item.get("type") or item.get("ui_type") or "").lower(),
+        name=str(item.get("name") or item.get("field_name") or item.get("fieldName") or ""),
+        field_id=item.get("field_id") or item.get("fieldId") or item.get("id"),
+        field_type=field_type,
         options=option_names,
     )
 

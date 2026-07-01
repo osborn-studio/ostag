@@ -132,6 +132,10 @@ class OSTagRunner:
         except Exception as exc:  # noqa: BLE001
             workflow_reply = f"自动入表未完成：{type(exc).__name__}: {exc}"
         if workflow_reply is not None:
+            workflow_ok = not (
+                workflow_reply.startswith("自动入表未完成")
+                or workflow_reply.startswith("需求运营未完成")
+            )
             write_audit_log(
                 self.config.audit_log,
                 event=event,
@@ -139,9 +143,9 @@ class OSTagRunner:
                 mfs_enabled=self.config.mfs_enabled,
                 input_text=text,
                 output_text=workflow_reply,
-                status="ok" if not workflow_reply.startswith("自动入表未完成") else "error",
+                status="ok" if workflow_ok else "error",
                 env=self.config.env,
-                error=None if not workflow_reply.startswith("自动入表未完成") else workflow_reply,
+                error=None if workflow_ok else workflow_reply,
             )
             return workflow_reply
 

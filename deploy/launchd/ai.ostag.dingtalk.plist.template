@@ -5,6 +5,10 @@
 <dict>
   <key>Label</key><string>ai.ostag.dingtalk</string>
   <key>WorkingDirectory</key><string>__OSTAG_ROOT__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/Users/gilbertchen/.nvm/versions/node/v22.19.0/bin:/Users/gilbertchen/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>ProgramArguments</key>
   <array>
     <string>/Users/gilbertchen/.local/bin/uv</string>

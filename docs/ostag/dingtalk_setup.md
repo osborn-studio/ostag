@@ -32,6 +32,10 @@ DINGTALK_CLIENT_SECRET=...
 DINGTALK_ROBOT_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=...
 DINGTALK_ROBOT_SECRET=SEC...
 OSTAG_BACKEND=codex_cli
+OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=vNG4YZ7JnPmQKkapTN6DDzzeW2LD0oRE
+OSTAG_AUTO_BASE_DEFAULT_TABLE_ID=EMSgbTd
+OSTAG_AUTO_BASE_DEFAULT_TABLE_NAME=需求收集管理
+DWS_CLI_BIN=/Users/gilbertchen/.nvm/versions/node/v22.19.0/bin/npx -y dingtalk-workspace-cli
 ```
 
 Keep production DingTalk credentials in `.env.dingtalk`; this file is ignored
@@ -87,17 +91,43 @@ uv run python -m ostag.main --platform dingtalk --dry-run --event examples/dingt
 ## Requirement Operations
 
 DingTalk messages use the same `NormalizedEvent` contract as Feishu, Lark, and
-Slack. If a default Feishu/Lark Base is configured, DingTalk can trigger the
-same governed requirement-table operations:
+Slack. In DingTalk mode, OS Tag uses the DWS AI Table connector to manage the
+configured DingTalk AI Table:
+
+```text
+Base: OS Tag 需求管理
+Table: 需求收集管理
+URL: https://alidocs.dingtalk.com/i/nodes/vNG4YZ7JnPmQKkapTN6DDzzeW2LD0oRE?iframeQuery=sheetId%3DEMSgbTd
+Source parity target: 飞书「🛠️ 需求收集与管理 底表」/「需求收集管理」
+```
+
+The table mirrors the Feishu source schema as closely as DingTalk AI Table
+allows: field names, status and priority options, user/group/date fields, form
+view, grid views, and kanban status view are present. Compatibility fields:
+`建群按钮`, `工作日天数`, and `需求持续时长` are stored as maintainable text/number
+fields because the exact Feishu button/formula field behavior is not available
+through the current DingTalk DWS CLI.
+
+The following roles were created with advanced permissions enabled:
+
+```text
+需求协作编辑者: edit-own on 需求收集管理
+需求只读观察者: read on 需求收集管理
+```
+
+DWS currently does not support binding members to AI Table roles. Assign people
+in the AI Table Web UI: Base 设置 -> 高级权限 -> 角色管理.
+
+Supported commands:
 
 ```text
 @OS Tag 请把 交易盯盘 状态改为 开发交付中
 @OS Tag 主动巡检状态
 ```
 
-DingTalk user IDs are not automatically treated as Feishu/Lark `open_id`s.
-Owner assignment across tools requires an explicit identity mapping in a later
-phase or a Feishu/Lark-side command.
+DingTalk user IDs are not automatically interchangeable with Feishu/Lark
+`open_id`s. Owner assignment in DingTalk should use DingTalk identities; cross
+tool assignment requires an explicit identity mapping.
 
 ## Live Validation
 
@@ -122,3 +152,22 @@ status: ok
 Adding the robot to one existing single-member group through DWS returned
 `bot and group not match`; group installation may still require the DingTalk
 client's group robot picker or a group type that allows this internal robot.
+
+Requirement table smoke validation also passed on 2026-07-01:
+
+```text
+created: 1 record in 需求收集管理
+searched: OS Tag 钉钉需求表 smoke validation
+updated: 需求状态 -> 方案设计中
+tests: 102 passed
+```
+
+End-to-end DingTalk robot validation also passed after launchd was configured
+with a Node/NPM PATH:
+
+```text
+input_preview: 请把「OS Tag 钉钉需求表 smoke validation」状态改为 方案设计中
+backend: auto_base
+status: ok
+verified table value: 需求状态 = 方案设计中
+```
