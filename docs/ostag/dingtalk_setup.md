@@ -31,7 +31,7 @@ DINGTALK_CLIENT_ID=ding...
 DINGTALK_CLIENT_SECRET=...
 DINGTALK_ROBOT_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=...
 DINGTALK_ROBOT_SECRET=SEC...
-OSTAG_BACKEND=mock
+OSTAG_BACKEND=codex_cli
 ```
 
 Keep production DingTalk credentials in `.env.dingtalk`; this file is ignored
@@ -107,6 +107,15 @@ processed through DingTalk Stream:
 
 ```text
 input_preview: 请用一句话回复：dingtalk inbound validation ok
+status: ok
+```
+
+The production service was then switched from `mock` to `codex_cli` and
+validated again:
+
+```text
+backend: codex_cli
+input_preview: 请用一句话回复：dingtalk codex backend validation ok
 status: ok
 ```
 
