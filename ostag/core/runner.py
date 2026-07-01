@@ -100,9 +100,17 @@ class OSTagRunner:
             brain = self.channel_brain.load(event.platform, event.chat_id)
             mode = "已开启" if brain.policy.ambient_enabled else "未开启"
             scheduler = "已开启" if self.config.ambient_enabled else "未开启"
+            digest = (
+                f"每日提醒：{self.config.ambient_morning_digest_hour:02d}:00 / "
+                f"{self.config.ambient_evening_digest_hour:02d}:00。"
+                f"管理者：{len(self.config.ambient_manager_open_ids)} 人。"
+                if self.config.ambient_daily_digest_enabled
+                else "每日提醒未开启。"
+            )
             reply = (
                 f"Ambient 主动模式{mode}。后台调度{scheduler}。"
                 f"巡检间隔：{self.config.ambient_interval_seconds} 秒。"
+                f"{digest}"
                 "当前只会提出提醒建议，不会自动写表或创建任务。"
             )
             write_audit_log(

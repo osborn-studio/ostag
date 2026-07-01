@@ -29,6 +29,10 @@ def _int(name: str, default: int) -> int:
     return int(value)
 
 
+def _csv(name: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     env: str = "dev"
@@ -81,6 +85,11 @@ class Settings:
     ambient_interval_seconds: int = 1800
     ambient_chat_ids: tuple[str, ...] = ()
     ambient_record_limit: int = 50
+    ambient_daily_digest_enabled: bool = False
+    ambient_morning_digest_hour: int = 9
+    ambient_evening_digest_hour: int = 18
+    ambient_digest_window_minutes: int = 90
+    ambient_manager_open_ids: tuple[str, ...] = ()
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -149,6 +158,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
             if item.strip()
         ),
         ambient_record_limit=_int("OSTAG_AMBIENT_RECORD_LIMIT", 50),
+        ambient_daily_digest_enabled=_bool("OSTAG_AMBIENT_DAILY_DIGEST_ENABLED", False),
+        ambient_morning_digest_hour=_int("OSTAG_AMBIENT_MORNING_DIGEST_HOUR", 9),
+        ambient_evening_digest_hour=_int("OSTAG_AMBIENT_EVENING_DIGEST_HOUR", 18),
+        ambient_digest_window_minutes=_int("OSTAG_AMBIENT_DIGEST_WINDOW_MINUTES", 90),
+        ambient_manager_open_ids=_csv("OSTAG_AMBIENT_MANAGER_OPEN_IDS"),
     )
     if overrides:
         data = settings.__dict__ | overrides
