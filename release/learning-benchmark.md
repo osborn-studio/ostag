@@ -1,6 +1,6 @@
 # OS Tag Learning Benchmark
 
-Generated: 2026-07-01T00:39:52Z
+Generated: 2026-07-01T08:03:40Z
 Source: docs/ostag/learning_benchmark_plan.md
 Status: PRODUCTION_CANDIDATE
 Score: 95/100
@@ -23,8 +23,8 @@ Score: 95/100
 | Ambient mode safety | 12/12 | Opt-in background scheduler, 9:00/18:00 daily digests, proposal-only monitor, audit trail, and rate limit implemented. |
 | Admin governance | 12/14 | Per-channel field/task/budget policy implemented; richer admin commands deferred. |
 | Tool connector architecture | 10/10 | Requirement and task connectors with contract tests implemented. |
-| Multi-platform parity | 7/8 | Slack Channel Brain and governed Base operations covered; Slack-to-Feishu identity mapping deferred. |
-| TDD and regression coverage | 8/8 | 94+ tests pass through the release test command. |
+| Multi-platform parity | 8/8 | Feishu, Lark, Slack, and DingTalk adapters have tested dry-run parity; live credentials remain gated. |
+| TDD and regression coverage | 8/8 | 98+ tests pass through the release test command. |
 | Security and audit | 4/4 | Default ambient writes disabled; audit and secret-redaction tests remain passing. |
 | Documentation and osstack readiness | 2/2 | Benchmark plan, execution board, task queue, and handoff docs exist. |
 
@@ -40,5 +40,5 @@ Score: 95/100
 
 ## Remaining Non-Blocking Gaps
 
-- Slack owner assignment requires a future Slack user to Feishu/Lark open_id mapping.
+- Slack/DingTalk owner assignment requires a future user to Feishu/Lark open_id mapping.
 - Full MFS connector breadth remains behind the existing MFS interface and is not all live-validated.

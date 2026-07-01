@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from ostag.adapters.base import Adapter
+from ostag.adapters.dingtalk import DingTalkAdapter, signed_webhook_url
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.adapters.lark import LarkAdapter
 from ostag.adapters.slack import SlackAdapter
@@ -77,6 +78,7 @@ def test_platform_adapters_implement_contract(tmp_path: Path) -> None:
     assert isinstance(FeishuAdapter(config), Adapter)
     assert isinstance(LarkAdapter(config), Adapter)
     assert isinstance(SlackAdapter(config), Adapter)
+    assert isinstance(DingTalkAdapter(config), Adapter)
 
 
 @pytest.mark.asyncio
@@ -94,6 +96,22 @@ async def test_slack_app_mention_normalizes_to_core_event() -> None:
     assert event.mention_bot is True
     assert event.thread_id == "1710000000.000100"
     assert event.text == "Summarize the launch blockers and next action."
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_robot_message_normalizes_to_core_event() -> None:
+    config = load_settings(None, audit_log=Path("logs/test-audit.log"))
+    raw = json.loads(Path("examples/dingtalk_event.json").read_text(encoding="utf-8"))
+
+    event = await DingTalkAdapter(config).normalize_event(raw)
+
+    assert event.platform == "dingtalk"
+    assert event.event_id == "msg_demo_message"
+    assert event.chat_id == "cid_demo_conversation"
+    assert event.message_id == "msg_demo_message"
+    assert event.sender_id == "staff_demo_sender"
+    assert event.mention_bot is True
+    assert event.text == "请总结这个项目下一步应该做什么"
 
 
 @pytest.mark.asyncio
@@ -217,3 +235,47 @@ async def test_feishu_reply_includes_required_message_type(monkeypatch, tmp_path
     payload = json.loads(captured["body"].decode())
     assert payload["msg_type"] == "text"
     assert json.loads(payload["content"]) == {"text": "live validation ok"}
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_reply_uses_session_webhook(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    async def fake_to_thread(func, req):
+        captured["url"] = req.full_url
+        captured["body"] = req.data
+        return {"errcode": 0}
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False)
+    adapter = DingTalkAdapter(config)
+    monkeypatch.setattr("ostag.adapters.dingtalk.asyncio.to_thread", fake_to_thread)
+
+    event = NormalizedEvent(
+        platform="dingtalk",
+        event_id="msg",
+        chat_id="cid",
+        message_id="msg",
+        sender_id="staff",
+        text="hello",
+        mention_bot=True,
+        raw={"sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=demo"},
+    )
+
+    await adapter.reply(event, "live validation ok")
+
+    assert captured["url"].startswith("https://oapi.dingtalk.com/robot/sendBySession")
+    assert json.loads(captured["body"].decode()) == {
+        "msgtype": "text",
+        "text": {"content": "live validation ok"},
+    }
+
+
+def test_dingtalk_signed_webhook_url_uses_timestamp_and_secret() -> None:
+    url = signed_webhook_url(
+        "https://oapi.dingtalk.com/robot/send?access_token=token",
+        "secret",
+        timestamp_ms=1700000000000,
+    )
+
+    assert "timestamp=1700000000000" in url
+    assert "sign=" in url

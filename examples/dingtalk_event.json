@@ -1,0 +1,17 @@
+{
+  "conversationId": "cid_demo_conversation",
+  "msgId": "msg_demo_message",
+  "senderStaffId": "staff_demo_sender",
+  "senderNick": "陈斌",
+  "isInAtList": true,
+  "sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=demo",
+  "text": {
+    "content": "@OS Tag 请总结这个项目下一步应该做什么"
+  },
+  "atUsers": [
+    {
+      "dingtalkId": "bot_demo",
+      "staffId": "bot_staff_demo"
+    }
+  ]
+}

@@ -127,6 +127,15 @@ def _check_live_adapter(config: Settings) -> DoctorCheck:
             }.items()
             if not value
         ]
+    elif config.platform == "dingtalk":
+        missing = [
+            name
+            for name, value in {
+                "DINGTALK_CLIENT_ID": config.dingtalk_client_id,
+                "DINGTALK_CLIENT_SECRET": config.dingtalk_client_secret,
+            }.items()
+            if not value
+        ]
     else:
         return DoctorCheck("adapter", False, "error", f"unsupported live platform: {config.platform}")
     if missing:
@@ -135,6 +144,15 @@ def _check_live_adapter(config: Settings) -> DoctorCheck:
         if importlib.util.find_spec("slack_bolt") is None:
             return DoctorCheck("adapter", False, "error", "slack-bolt missing; run `uv sync --extra slack`")
         return DoctorCheck("adapter", True, "error", "slack live adapter dependencies found")
+    if config.platform == "dingtalk":
+        if importlib.util.find_spec("dingtalk_stream") is None:
+            return DoctorCheck(
+                "adapter",
+                False,
+                "error",
+                "dingtalk-stream missing; run `uv sync --extra dingtalk`",
+            )
+        return DoctorCheck("adapter", True, "error", "dingtalk live adapter dependencies found")
     if importlib.util.find_spec("lark_oapi") is None:
         return DoctorCheck("adapter", False, "error", "lark-oapi missing; run `uv sync --extra feishu`")
     return DoctorCheck("adapter", True, "error", f"{config.platform} live adapter dependencies found")

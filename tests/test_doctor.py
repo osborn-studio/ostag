@@ -14,6 +14,8 @@ LIVE_CREDENTIAL_ENV = (
     "LARK_APP_SECRET",
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
+    "DINGTALK_CLIENT_ID",
+    "DINGTALK_CLIENT_SECRET",
 )
 
 
@@ -66,5 +68,16 @@ def test_slack_live_cli_doctor_requires_credentials(monkeypatch, tmp_path: Path)
     monkeypatch.chdir(tmp_path)
 
     exit_code = __import__("asyncio").run(main_async(["--platform", "slack", "--live", "--doctor"]))
+
+    assert exit_code == 1
+
+
+def test_dingtalk_live_cli_doctor_requires_credentials(monkeypatch, tmp_path: Path) -> None:
+    clear_live_credentials(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = __import__("asyncio").run(
+        main_async(["--platform", "dingtalk", "--live", "--doctor"])
+    )
 
     assert exit_code == 1

@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover
     load_dotenv = None
 
 
-Platform = Literal["slack", "feishu", "lark"]
+Platform = Literal["slack", "feishu", "lark", "dingtalk"]
 BackendName = Literal["mock", "codex_cli", "claude_cli", "openai_api"]
 
 
@@ -70,6 +70,10 @@ class Settings:
     lark_api_base_url: str = "https://open.larksuite.com"
     slack_bot_token: str = ""
     slack_app_token: str = ""
+    dingtalk_client_id: str = ""
+    dingtalk_client_secret: str = ""
+    dingtalk_robot_webhook: str = ""
+    dingtalk_robot_secret: str = ""
     auto_base_enabled: bool = True
     auto_base_identity: str = "user"
     auto_base_history_page_size: int = 30
@@ -137,6 +141,10 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         lark_api_base_url=os.getenv("LARK_API_BASE_URL", "https://open.larksuite.com"),
         slack_bot_token=os.getenv("SLACK_BOT_TOKEN", ""),
         slack_app_token=os.getenv("SLACK_APP_TOKEN", ""),
+        dingtalk_client_id=os.getenv("DINGTALK_CLIENT_ID", ""),
+        dingtalk_client_secret=os.getenv("DINGTALK_CLIENT_SECRET", ""),
+        dingtalk_robot_webhook=os.getenv("DINGTALK_ROBOT_WEBHOOK", ""),
+        dingtalk_robot_secret=os.getenv("DINGTALK_ROBOT_SECRET", ""),
         auto_base_enabled=_bool("OSTAG_AUTO_BASE_ENABLED", True),
         auto_base_identity=os.getenv("OSTAG_AUTO_BASE_IDENTITY", "user"),
         auto_base_history_page_size=_int("OSTAG_AUTO_BASE_HISTORY_PAGE_SIZE", 30),

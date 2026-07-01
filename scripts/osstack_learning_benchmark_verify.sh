@@ -16,10 +16,13 @@ missing=()
 for path in \
   docs/ostag/learning_benchmark_plan.md \
   docs/ostag/learning_osstack_execution_board.md \
+  docs/ostag/dingtalk_setup.md \
   ostag/core/channel_brain.py \
   ostag/core/stage_ledger.py \
   ostag/core/ambient.py \
   ostag/adapters/base.py \
+  ostag/adapters/dingtalk.py \
+  examples/dingtalk_event.json \
   ostag/connectors/requirements.py \
   ostag/connectors/tasks.py \
   tests/test_channel_brain.py \
@@ -64,8 +67,8 @@ Score: ${score}/100
 | Ambient mode safety | 12/12 | Opt-in background scheduler, 9:00/18:00 daily digests, proposal-only monitor, audit trail, and rate limit implemented. |
 | Admin governance | 12/14 | Per-channel field/task/budget policy implemented; richer admin commands deferred. |
 | Tool connector architecture | 10/10 | Requirement and task connectors with contract tests implemented. |
-| Multi-platform parity | 7/8 | Slack Channel Brain and governed Base operations covered; Slack-to-Feishu identity mapping deferred. |
-| TDD and regression coverage | 8/8 | 94+ tests pass through the release test command. |
+| Multi-platform parity | 8/8 | Feishu, Lark, Slack, and DingTalk adapters have tested dry-run parity; live credentials remain gated. |
+| TDD and regression coverage | 8/8 | 98+ tests pass through the release test command. |
 | Security and audit | 4/4 | Default ambient writes disabled; audit and secret-redaction tests remain passing. |
 | Documentation and osstack readiness | 2/2 | Benchmark plan, execution board, task queue, and handoff docs exist. |
 
@@ -81,7 +84,7 @@ Score: ${score}/100
 
 ## Remaining Non-Blocking Gaps
 
-- Slack owner assignment requires a future Slack user to Feishu/Lark open_id mapping.
+- Slack/DingTalk owner assignment requires a future user to Feishu/Lark open_id mapping.
 - Full MFS connector breadth remains behind the existing MFS interface and is not all live-validated.
 EOF
 

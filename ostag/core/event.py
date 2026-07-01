@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-Platform = Literal["slack", "feishu", "lark"]
+Platform = Literal["slack", "feishu", "lark", "dingtalk"]
 
 
 @dataclass(frozen=True)

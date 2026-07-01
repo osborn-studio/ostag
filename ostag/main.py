@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
+from ostag.adapters.dingtalk import DingTalkAdapter
 from ostag.adapters.base import Adapter
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.adapters.lark import LarkAdapter
@@ -22,19 +23,19 @@ def build_parser() -> argparse.ArgumentParser:
     memory = subparsers.add_parser("memory", help="Manage optional OS Tag channel memory.")
     memory_sub = memory.add_subparsers(dest="memory_command", required=True)
     memory_show = memory_sub.add_parser("show")
-    memory_show.add_argument("--platform", choices=["slack", "feishu", "lark"], required=True)
+    memory_show.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True)
     memory_show.add_argument("--chat-id", required=True)
     memory_path = memory_sub.add_parser("path")
-    memory_path.add_argument("--platform", choices=["slack", "feishu", "lark"], required=True)
+    memory_path.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True)
     memory_path.add_argument("--chat-id", required=True)
     memory_remember = memory_sub.add_parser("remember")
-    memory_remember.add_argument("--platform", choices=["slack", "feishu", "lark"], required=True)
+    memory_remember.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True)
     memory_remember.add_argument("--chat-id", required=True)
     memory_remember.add_argument("--text", required=True)
     memory_remember.add_argument("--sync", action="store_true")
     memory_sub.add_parser("sync")
 
-    parser.add_argument("--platform", choices=["slack", "feishu", "lark"])
+    parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--live", action="store_true", help="Disable dry-run and require live credentials.")
     parser.add_argument("--event", type=Path)
@@ -51,6 +52,8 @@ def create_adapter(platform: str, config) -> Adapter:
         return LarkAdapter(config)
     if platform == "slack":
         return SlackAdapter(config)
+    if platform == "dingtalk":
+        return DingTalkAdapter(config)
     raise NotImplementedError(f"Unsupported platform: {platform}")
 
 

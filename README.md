@@ -1,6 +1,6 @@
 # OS Tag
 
-OS Tag is a Feishu/Lark/Slack AI group-chat context assistant inspired by Open Tag.
+OS Tag is a Feishu/Lark/Slack/DingTalk AI group-chat context assistant inspired by Open Tag.
 Mention `@OS Tag` in a group, the adapter normalizes the event, the core runner
 applies safety checks, optional MFS context is retrieved from allowlisted scopes,
 and a backend such as mock, Codex CLI, Claude CLI, or OpenAI API returns a reply.
@@ -10,8 +10,8 @@ OS Tag is not a Zilliz official product.
 ## Architecture
 
 ```text
-Feishu/Lark/Slack group @OS Tag
-  -> Feishu/Lark/Slack Adapter
+Feishu/Lark/Slack/DingTalk group @OS Tag
+  -> Feishu/Lark/Slack/DingTalk Adapter
   -> NormalizedEvent
   -> OSTagRunner
   -> Safety + MFS Context
@@ -26,7 +26,7 @@ See [docs/ostag/architecture.md](docs/ostag/architecture.md) for details.
 This project is inspired by and may include adapted concepts from
 `zilliztech/mfs` open-tag-skill, licensed under the Apache License 2.0.
 Original project: https://github.com/zilliztech/mfs
-Modifications: adapted and renamed as OS Tag / ostag with Feishu/Lark/Slack
+Modifications: adapted and renamed as OS Tag / ostag with Feishu/Lark/Slack/DingTalk
 integration.
 
 The upstream example is Slack-first. OS Tag keeps the Brain/Memory/Tools idea
@@ -39,6 +39,7 @@ cp .env.example .env
 uv sync --extra dev
 python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
 python -m ostag.main --platform slack --dry-run --event examples/slack_event.json
+python -m ostag.main --platform dingtalk --dry-run --event examples/dingtalk_event.json
 ```
 
 Expected output starts with:
@@ -114,6 +115,12 @@ python -m ostag.main --platform feishu
 
 See [docs/ostag/deployment.md](docs/ostag/deployment.md) for local release and launchd
 deployment steps, plus Docker Compose.
+
+## Slack And DingTalk
+
+Read [docs/ostag/slack_setup.md](docs/ostag/slack_setup.md) or
+[docs/ostag/dingtalk_setup.md](docs/ostag/dingtalk_setup.md) for non-Feishu
+platform setup.
 
 ## Feishu Base Requirement Operations
 
