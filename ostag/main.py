@@ -16,6 +16,7 @@ from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
 from ostag.core.event import NormalizedEvent
+from ostag.core.followups import FollowUpService
 from ostag.core.permissions import LOCAL_ADMIN_ACTOR
 from ostag.core.receipts import ReceiptCommand
 from ostag.core.run_ledger import RunLedger
@@ -143,6 +144,18 @@ def build_parser() -> argparse.ArgumentParser:
     receipts_propose.add_argument("--json", action="store_true")
     receipts_propose.add_argument("--config")
 
+    followups = subparsers.add_parser("followups", help="Manage scheduled continuations.")
+    followups_sub = followups.add_subparsers(dest="followups_command", required=True)
+    followups_list = followups_sub.add_parser("list", help="List pending continuations.")
+    followups_list.add_argument("--all", action="store_true", help="Include fired/cancelled.")
+    followups_list.add_argument("--json", action="store_true")
+    followups_list.add_argument("--config")
+    followups_run = followups_sub.add_parser(
+        "run-once", help="Fire due continuations now (renders reminders to stdout)."
+    )
+    followups_run.add_argument("--json", action="store_true")
+    followups_run.add_argument("--config")
+
     parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--live", action="store_true", help="Disable dry-run and require live credentials.")
@@ -175,6 +188,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return run_inspection_command(args)
     if args.command in ("approve", "reject", "apply", "continue", "receipts"):
         return await run_receipt_command(args)
+    if args.command == "followups":
+        return await run_followups_command(args)
 
     overrides = {}
     if args.platform:
@@ -298,6 +313,20 @@ async def run_submit_command(args: argparse.Namespace) -> int:
         return 1
     _emit({"run": snapshot, "reply": reply}, as_json=as_json)
     return 0 if snapshot.get("status") == "succeeded" else 1
+
+
+async def run_followups_command(args: argparse.Namespace) -> int:
+    as_json = getattr(args, "json", False)
+    config = load_settings(getattr(args, "config", None))
+    ledger = RunLedger(config.run_ledger_path)
+    if args.followups_command == "list":
+        _emit(ledger.list_continuations(pending_only=not args.all), as_json=as_json)
+        return 0
+    if args.followups_command == "run-once":
+        outcomes = await FollowUpService(config, ledger).run_once()
+        _emit(outcomes, as_json=as_json)
+        return 0
+    raise AssertionError(args.followups_command)
 
 
 async def run_receipt_command(args: argparse.Namespace) -> int:

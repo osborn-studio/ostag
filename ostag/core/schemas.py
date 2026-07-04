@@ -59,6 +59,9 @@ LEDGER_EVENT_TYPES = (
     "apply_started",
     "apply_finished",
     "run_finished",
+    "continuation_scheduled",
+    "continuation_fired",
+    "continuation_cancelled",
     "security_event",
 )
 

@@ -133,7 +133,10 @@ class OSTagRunner:
         receipt_command = parse_receipt_command(text)
         if receipt_command is not None:
             reply = await self.approvals.handle_text_command(
-                receipt_command, actor_id=event.sender_id, chat_id=event.chat_id
+                receipt_command,
+                actor_id=event.sender_id,
+                chat_id=event.chat_id,
+                platform=event.platform,
             )
             write_audit_log(
                 self.config.audit_log,

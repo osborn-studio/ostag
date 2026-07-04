@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added durable scheduled continuations (`docs/async_runs.md`): ledger-backed
+  follow-ups that survive restarts, fire at most once, cancel when the
+  subject is already resolved, and always cite why they triggered.
+- Governed-write proposals auto-schedule a pending-approval reminder
+  (`OSTAG_FOLLOWUP_ENABLED` default on, `OSTAG_FOLLOWUP_AFTER_SECONDS`
+  default 4h); the `continue <run_id>` verb now schedules a real follow-up
+  and reports its due time.
+- Ambient scheduler runs the follow-up sweep each tick; new CLI:
+  `ostag followups list [--all]` and `ostag followups run-once`.
+
 - Added `ostag run`: submit a task through the full pipeline from the CLI
   (safety, receipts, channel brain, workflow, backend) with the reply
   returned to the caller — nothing is posted to platforms; exit code tracks

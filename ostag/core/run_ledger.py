@@ -149,6 +149,81 @@ class RunLedger:
         snapshot["event_count"] = len(records)
         return snapshot
 
+    def schedule_continuation(
+        self,
+        run_id: str,
+        *,
+        due_at: str,
+        kind: str,
+        reason: str,
+        chat_id: str = "",
+        platform: str = "",
+        action_id: str = "",
+    ) -> str:
+        """Record a durable scheduled continuation; returns its id."""
+        continuation_id = new_id("cont")
+        payload: dict[str, Any] = {
+            "continuation_id": continuation_id,
+            "due_at": due_at,
+            "kind": kind,
+            "reason": reason,
+        }
+        if chat_id:
+            payload["chat_id"] = chat_id
+        if platform:
+            payload["platform"] = platform
+        if action_id:
+            payload["action_id"] = action_id
+        self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=run_id,
+                event_type="continuation_scheduled",
+                payload=payload,
+            )
+        )
+        return continuation_id
+
+    def record_continuation_done(
+        self, continuation_id: str, run_id: str, *, fired: bool, result: str
+    ) -> LedgerEvent:
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=run_id,
+                event_type="continuation_fired" if fired else "continuation_cancelled",
+                payload={"continuation_id": continuation_id, "result": result[:500]},
+            )
+        )
+
+    def list_continuations(self, *, pending_only: bool = True) -> list[dict[str, Any]]:
+        """Continuations in schedule order; pending ones exclude fired/cancelled."""
+        scheduled: dict[str, dict[str, Any]] = {}
+        done: set[str] = set()
+        for record in self._read_all():
+            payload = record.get("payload", {})
+            continuation_id = payload.get("continuation_id", "")
+            if not continuation_id:
+                continue
+            if record.get("event_type") == "continuation_scheduled":
+                scheduled[continuation_id] = dict(payload) | {"run_id": record.get("run_id", "")}
+            elif record.get("event_type") in ("continuation_fired", "continuation_cancelled"):
+                done.add(continuation_id)
+        items = [
+            entry
+            for continuation_id, entry in scheduled.items()
+            if not pending_only or continuation_id not in done
+        ]
+        items.sort(key=lambda entry: entry.get("due_at", ""))
+        return items
+
+    def due_continuations(self, now_iso: str) -> list[dict[str, Any]]:
+        return [
+            entry
+            for entry in self.list_continuations(pending_only=True)
+            if entry.get("due_at", "") <= now_iso
+        ]
+
     def get_context_packet(self, run_id: str) -> dict[str, Any]:
         """Latest context packet recorded for a run, including its audit hash."""
         packets = [

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from ostag.config import Settings
+from ostag.core.followups import FollowUpService
 from ostag.core.permissions import ensure_verb_allowed, resolve_permission
 from ostag.core.receipts import (
     ReceiptCommand,
@@ -104,6 +105,7 @@ class ApprovalService:
         *,
         actor_id: str,
         chat_id: str | None = None,
+        platform: str = "",
     ) -> dict[str, Any]:
         """Execute a receipt verb. Raises SchemaError on any violation."""
         level = resolve_permission(self.config, actor_id)
@@ -131,9 +133,23 @@ class ApprovalService:
                 receipt = self._resolve_receipt(command.reference, chat_id)
                 run_id = receipt.run_id
             snapshot = self.ledger.run_status(run_id)
+            followups = FollowUpService(self.config, self.ledger)
+            continuation_id = followups.schedule_run_follow_up(
+                run_id, chat_id=chat_id or "", platform=platform
+            )
+            due = self.ledger.list_continuations(pending_only=True)
+            due_at = next(
+                (
+                    entry.get("due_at", "")
+                    for entry in due
+                    if entry.get("continuation_id") == continuation_id
+                ),
+                "",
+            )
             return {
                 "run": snapshot,
-                "note": "scheduled continuation is not implemented yet; run state returned",
+                "continuation_id": continuation_id,
+                "note": f"follow-up scheduled at {due_at}",
             }
 
         receipt = self._resolve_receipt(command.reference, chat_id)
@@ -217,10 +233,13 @@ class ApprovalService:
         *,
         actor_id: str,
         chat_id: str,
+        platform: str = "",
     ) -> str:
         """Chat-facing wrapper: always returns a reply string."""
         try:
-            result = await self.execute(command, actor_id=actor_id, chat_id=chat_id)
+            result = await self.execute(
+                command, actor_id=actor_id, chat_id=chat_id, platform=platform
+            )
         except SchemaError as exc:
             return f"OS Tag 无法执行 {command.verb}：{exc}。{exc.recovery_hint}"
         if "run" in result:

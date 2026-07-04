@@ -90,6 +90,17 @@ ostag receipts propose --file receipt.json [--chat C1] [--source-platform feishu
 `docs/action_receipt_protocol.md`) — this is the agent-facing entry point for
 putting a mutation under governance from outside a chat thread.
 
+## Follow-ups (scheduled continuations)
+
+```bash
+ostag followups list [--all] --json   # pending continuations, soonest first
+ostag followups run-once --json       # fire due continuations now
+```
+
+`continue <run_id>` (chat or CLI) schedules a durable follow-up; governed
+proposals auto-schedule a pending-approval reminder. See
+`docs/async_runs.md`.
+
 ## Channel memory (existing)
 
 ```bash

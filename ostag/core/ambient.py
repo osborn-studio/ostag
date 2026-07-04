@@ -15,6 +15,8 @@ from ostag.connectors.requirements import (
 )
 from ostag.core.channel_brain import ChannelBrainStore
 from ostag.core.event import NormalizedEvent
+from ostag.core.followups import FollowUpService
+from ostag.core.run_ledger import RunLedger
 from ostag.core.logging import write_audit_log
 from ostag.workflows.auto_base import LarkCLI, cell_to_text, extract_matching_records
 
@@ -156,6 +158,7 @@ class AmbientScheduler:
         self.monitor = AmbientMonitor(self.store)
         self.now = now or datetime.now
         self.today = today or (lambda: self.now().date())
+        self.followups = FollowUpService(config, RunLedger(config.run_ledger_path))
 
     async def run_forever(self) -> None:
         while True:
@@ -163,6 +166,11 @@ class AmbientScheduler:
             await asyncio.sleep(max(60, self.config.ambient_interval_seconds))
 
     async def run_once(self) -> AmbientRunResult:
+        if self.config.followup_enabled:
+            try:
+                await self.followups.run_once(self.adapter.send_message)
+            except Exception:  # noqa: BLE001 - follow-up sweep must never kill the scheduler
+                pass
         if not self.config.ambient_enabled:
             return AmbientRunResult(skipped=max(1, len(self.config.ambient_chat_ids)))
         if not self.config.ambient_chat_ids:

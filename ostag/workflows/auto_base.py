@@ -24,6 +24,7 @@ from ostag.connectors.apply import target_system_for_platform
 from ostag.connectors.tasks import LarkCLITaskConnector, TaskConnector
 from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy, channel_policy_for_event
 from ostag.core.event import NormalizedEvent
+from ostag.core.followups import FollowUpService
 from ostag.core.receipts import render_receipt_text
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import ActionReceipt, new_id
@@ -196,6 +197,10 @@ class AutoBaseWorkflow:
             apply_payload=apply_payload,
         )
         self.run_ledger.record_receipt(receipt, chat_id=event.chat_id, platform=event.platform)
+        if self.config.followup_enabled:
+            FollowUpService(self.config, self.run_ledger).schedule_receipt_follow_up(
+                receipt, chat_id=event.chat_id, platform=event.platform
+            )
         pending = self.run_ledger.list_receipts(
             chat_id=event.chat_id,
             states=("proposed", "needs_approval", "ready_to_apply"),
