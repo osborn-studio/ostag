@@ -91,6 +91,14 @@ class ApprovalService:
             recovery_hint="Use a pending index (e.g. 1) or an action_... id.",
         )
 
+    def _required_quorum(self, receipt: ActionReceipt, policy: ChannelPolicy | None) -> int:
+        """High-risk receipts may require several distinct approvers; others need one."""
+        if receipt.risk != "high":
+            return 1
+        if policy is not None and policy.approval_quorum_high_risk is not None:
+            return max(1, policy.approval_quorum_high_risk)
+        return max(1, self.config.approval_quorum_high_risk)
+
     def _check_stale(self, receipt: ActionReceipt, actor_id: str) -> None:
         if receipt.state in PENDING_STATES and is_stale(
             receipt, ttl_seconds=self.config.receipt_ttl_seconds
@@ -165,8 +173,36 @@ class ApprovalService:
         receipt = self._resolve_receipt(command.reference, chat_id)
         self._check_stale(receipt, actor_id)
 
-        if command.verb in ("approve", "reject"):
-            updated = transition_receipt(receipt, command.verb)
+        if command.verb == "approve":
+            quorum = self._required_quorum(receipt, policy)
+            if receipt.state not in ("proposed", "needs_approval"):
+                # let the state machine produce its usual invalid-transition error
+                transition_receipt(receipt, "approve")
+            self.ledger.record_approval(
+                ApprovalDecision(
+                    decision_id=new_id("dec"),
+                    action_id=receipt.action_id,
+                    run_id=receipt.run_id,
+                    actor_id=actor_id,
+                    decision="approve",
+                )
+            )
+            approvers = self.ledger.list_approvers(receipt.action_id)
+            quorum_info = {
+                "required": quorum,
+                "approved": len(approvers),
+                "approvers": list(approvers),
+            }
+            if len(approvers) < quorum:
+                return {"action": receipt.to_dict(), "quorum": quorum_info}
+            updated = transition_receipt(receipt, "approve")
+            self.ledger.record_receipt_state(
+                updated, previous_state=receipt.state, actor_id=actor_id
+            )
+            return {"action": updated.to_dict(), "quorum": quorum_info}
+
+        if command.verb == "reject":
+            updated = transition_receipt(receipt, "reject")
             self.ledger.record_receipt_state(
                 updated, previous_state=receipt.state, actor_id=actor_id
             )
@@ -176,7 +212,7 @@ class ApprovalService:
                     action_id=receipt.action_id,
                     run_id=receipt.run_id,
                     actor_id=actor_id,
-                    decision=command.verb,
+                    decision="reject",
                 )
             )
             return {"action": updated.to_dict()}
@@ -266,6 +302,18 @@ class ApprovalService:
             )
             return f"{reply}{note and '（' + note + '）'}"
         receipt = ActionReceipt.from_dict(result["action"])
+        quorum = result.get("quorum")
+        if (
+            command.verb == "approve"
+            and quorum
+            and quorum["approved"] < quorum["required"]
+        ):
+            remaining = quorum["required"] - quorum["approved"]
+            return (
+                f"已记录你的批准（{quorum['approved']}/{quorum['required']}）。"
+                f"这是高风险操作，还需 {remaining} 位其他审批人回复 "
+                f"approve {receipt.action_id}。\n{render_receipt_text(receipt)}"
+            )
         verb_labels = {"approve": "已批准", "reject": "已拒绝", "apply": "已执行"}
         prefix = verb_labels.get(command.verb, command.verb)
         return f"{prefix} {receipt.action_id}。\n{render_receipt_text(receipt)}"

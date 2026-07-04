@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Approval quorum for high-risk receipts: `risk: high` actions stay in
+  `needs_approval` until `OSTAG_APPROVAL_QUORUM_HIGH_RISK` distinct
+  write-level actors approve (default 1 = unchanged behavior); duplicate
+  approvals don't advance the count; reject is always immediate. Channel
+  override via `ostag channel policy set --quorum-high-risk N|inherit`;
+  partial approvals reply with progress (1/2) in the source thread.
+
 - Environment scrub: Codex/Claude CLI backends and the MFS client now spawn
   with chat-platform secrets (Feishu/Lark/Slack/DingTalk tokens and keys)
   removed from their environment; model-provider keys are preserved.

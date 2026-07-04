@@ -298,6 +298,22 @@ class RunLedger:
             )
         )
 
+    def list_approvers(self, action_id: str) -> tuple[str, ...]:
+        """Distinct actor ids that recorded an 'approve' decision for an action."""
+        approvers: list[str] = []
+        for record in self._read_all():
+            if record.get("event_type") != "approval_recorded":
+                continue
+            decision = record.get("payload", {}).get("decision", {})
+            if (
+                decision.get("action_id") == action_id
+                and decision.get("decision") == "approve"
+                and decision.get("actor_id")
+                and decision["actor_id"] not in approvers
+            ):
+                approvers.append(decision["actor_id"])
+        return tuple(approvers)
+
     def record_security_event(self, run_id: str, reason: str) -> LedgerEvent:
         return self.append(
             LedgerEvent(

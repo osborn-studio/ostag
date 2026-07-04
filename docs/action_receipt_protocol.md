@@ -105,6 +105,12 @@ Example text rendering:
    verb is refused.
 5. `approve`/`reject` record both `action_state_changed` and an
    `ApprovalDecision` (`approval_recorded`) with the deciding actor.
+   **High-risk receipts may require a quorum**: with
+   `OSTAG_APPROVAL_QUORUM_HIGH_RISK` (or the channel policy override)
+   above 1, a `risk: high` receipt stays in `needs_approval` until that
+   many *distinct* write-level actors have approved — duplicate approvals
+   from the same actor do not advance the count, and any `reject` is
+   immediate regardless of collected approvals.
 6. `apply` is double-gated: `OSTAG_APPLY_ENABLED` (default false) **and** an
    `ApplyExecutor` registered for the receipt's `target_system`. Success
    records evidence; executor errors mark the receipt `failed` with ledger

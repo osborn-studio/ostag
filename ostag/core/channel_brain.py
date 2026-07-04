@@ -24,6 +24,7 @@ class ChannelPolicy:
     # Governance overrides: None means "inherit the global config value".
     governed_writes: bool | None = None
     apply_enabled: bool | None = None
+    approval_quorum_high_risk: int | None = None
     # Channel-scoped "actor_id:level" grants; take precedence over the global
     # OSTAG_ACTOR_PERMISSIONS mapping inside this channel only.
     actor_permissions: tuple[str, ...] = ()
@@ -88,6 +89,9 @@ class ChannelBrainStore:
                 readable_fields=tuple(policy_data.get("readable_fields", []) or ()),
                 governed_writes=_optional_bool(policy_data.get("governed_writes")),
                 apply_enabled=_optional_bool(policy_data.get("apply_enabled")),
+                approval_quorum_high_risk=_optional_int(
+                    policy_data.get("approval_quorum_high_risk")
+                ),
                 actor_permissions=tuple(policy_data.get("actor_permissions", []) or ()),
             ),
             action_counts={
@@ -140,6 +144,7 @@ class ChannelBrainStore:
                 "readable_fields": list(brain.policy.readable_fields),
                 "governed_writes": brain.policy.governed_writes,
                 "apply_enabled": brain.policy.apply_enabled,
+                "approval_quorum_high_risk": brain.policy.approval_quorum_high_risk,
                 "actor_permissions": list(brain.policy.actor_permissions),
             },
             "action_counts": brain.action_counts,
@@ -226,6 +231,12 @@ def _optional_bool(value: object) -> bool | None:
     if value is None:
         return None
     return bool(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    return int(value)  # type: ignore[call-overload]
 
 
 def _safe_segment(value: str) -> str:

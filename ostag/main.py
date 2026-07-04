@@ -191,6 +191,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     policy_set.add_argument("--ambient", choices=["true", "false"])
     policy_set.add_argument(
+        "--quorum-high-risk",
+        dest="quorum_high_risk",
+        help="Distinct approvers required for high-risk receipts: a number or 'inherit'.",
+    )
+    policy_set.add_argument(
         "--grant",
         action="append",
         default=[],
@@ -403,6 +408,7 @@ def _policy_payload(config, policy) -> dict:
     channel = {
         "governed_writes": policy.governed_writes,
         "apply_enabled": policy.apply_enabled,
+        "approval_quorum_high_risk": policy.approval_quorum_high_risk,
         "ambient_enabled": policy.ambient_enabled,
         "actor_permissions": list(policy.actor_permissions),
         "task_create_allowed": policy.task_create_allowed,
@@ -417,6 +423,11 @@ def _policy_payload(config, policy) -> dict:
         "apply_enabled": effective_flag(policy.apply_enabled, config.apply_enabled),
         "ambient_enabled": policy.ambient_enabled,
         "default_permission_level": config.default_permission_level,
+        "approval_quorum_high_risk": (
+            policy.approval_quorum_high_risk
+            if policy.approval_quorum_high_risk is not None
+            else config.approval_quorum_high_risk
+        ),
     }
     return {"channel": channel, "effective": effective}
 
@@ -440,6 +451,23 @@ def run_channel_command(args: argparse.Namespace) -> int:
             changes["apply_enabled"] = tristate[args.apply_enabled]
         if args.ambient is not None:
             changes["ambient_enabled"] = args.ambient == "true"
+        if args.quorum_high_risk is not None:
+            if args.quorum_high_risk == "inherit":
+                changes["approval_quorum_high_risk"] = None
+            elif args.quorum_high_risk.isdigit() and int(args.quorum_high_risk) >= 1:
+                changes["approval_quorum_high_risk"] = int(args.quorum_high_risk)
+            else:
+                _emit(
+                    {
+                        "error": {
+                            "code": "invalid_quorum",
+                            "message": f"Quorum {args.quorum_high_risk!r} is not valid",
+                            "recovery_hint": "Use a positive integer or 'inherit'.",
+                        }
+                    },
+                    as_json=as_json,
+                )
+                return 1
         if args.grant or args.revoke:
             policy = store.load(args.platform, args.chat).policy
             grants = {
