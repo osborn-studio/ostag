@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- GitHub connector (`docs/github_connector.md`): governed issue creation and
+  commenting via the `gh` CLI (`OSTAG_GH_BIN`, `OSTAG_GITHUB_DEFAULT_REPO`).
+  There is no direct-write path — GitHub is reached only through
+  propose → approve → apply receipts (target `github_issues`); no close or
+  delete operations exist. Capability declaration flipped from planned to
+  available; GitLab remains a stub.
+- CLI receipt verbs (`ostag approve/reject/apply/continue`, `receipts`) now
+  run with the full apply-executor registry, so `ostag apply` can execute
+  approved table, task, and GitHub receipts (previously no executors were
+  registered in the CLI path).
+
 - Four-eyes rule (`OSTAG_FOUR_EYES_ENABLED`, default off; channel override
   `--four-eyes true|false|inherit`): the recorded proposer of a receipt
   cannot approve it; violations raise `four_eyes_violation` and are ledgered

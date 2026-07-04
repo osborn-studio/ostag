@@ -17,7 +17,7 @@ aspirational.
 | lark | base | available | read/create/update records, batch 30, no delete |
 | dingtalk | chat | available | reply/proactive text |
 | dingtalk | ai_table | available | read/create/update records, batch 30, no delete |
-| github | issues_prs | planned | stub — no capabilities enabled |
+| github | issues | available | create/comment via gh CLI; no close/delete (`docs/github_connector.md`) |
 | gitlab | issues_mrs | planned | stub — no capabilities enabled |
 
 Policy defaults for every connector: `default_mode: propose`,

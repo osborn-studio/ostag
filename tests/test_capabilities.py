@@ -28,10 +28,19 @@ def test_table_connectors_never_allow_delete() -> None:
         assert not capability.can("can_delete_records")
 
 
-def test_github_gitlab_are_planned_stubs() -> None:
-    assert get_capability("github", "issues_prs").status == "planned"
+def test_github_issues_available_without_destructive_ops() -> None:
+    capability = get_capability("github", "issues")
+    assert capability.status == "available"
+    assert capability.can("can_create_issues")
+    assert capability.can("can_comment_issues")
+    assert capability.can("can_apply_action")
+    assert not capability.can("can_close_issues")
+    assert not capability.can("can_delete_issues")
+    assert capability.destructive_requires_approval is True
+
+
+def test_gitlab_is_planned_stub() -> None:
     assert get_capability("gitlab", "issues_mrs").status == "planned"
-    assert not get_capability("github", "issues_prs").can("can_apply_action")
 
 
 def test_list_capabilities_filters_by_platform() -> None:

@@ -11,6 +11,7 @@ from ostag.adapters.feishu import FeishuAdapter
 from ostag.adapters.lark import LarkAdapter
 from ostag.adapters.slack import SlackAdapter
 from ostag.config import load_settings
+from ostag.connectors.apply import build_apply_executors
 from ostag.core.ambient import AmbientScheduler
 from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
@@ -23,6 +24,7 @@ from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
 from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
+from ostag.workflows.auto_base import AutoBaseWorkflow
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -547,7 +549,9 @@ async def run_receipt_command(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
     config = load_settings(getattr(args, "config", None))
     ledger = RunLedger(config.run_ledger_path)
-    service = ApprovalService(config, ledger)
+    service = ApprovalService(
+        config, ledger, build_apply_executors(AutoBaseWorkflow(config))
+    )
     try:
         if args.command == "receipts":
             if args.receipts_command == "list":

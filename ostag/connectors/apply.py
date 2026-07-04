@@ -145,4 +145,10 @@ def build_apply_executors(workflow: Any) -> dict[str, Any]:
         task_executor = TaskCreateApplyExecutor(workflow.tasks, workflow.requirements)
         registry["feishu_task"] = task_executor
         registry["lark_task"] = task_executor
+    if hasattr(workflow, "config"):
+        from ostag.connectors.github import GhCLI, GitHubApplyExecutor, GitHubIssuesConnector
+
+        registry["github_issues"] = GitHubApplyExecutor(
+            GitHubIssuesConnector(GhCLI(workflow.config)), workflow.config
+        )
     return registry

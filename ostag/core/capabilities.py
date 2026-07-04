@@ -78,13 +78,16 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ),
     ConnectorCapability(
         platform="github",
-        connector="issues_prs",
+        connector="issues",
         capabilities={
+            "can_create_issues": True,
+            "can_comment_issues": True,
+            "can_close_issues": False,
+            "can_delete_issues": False,
             "can_read_thread": False,
-            "can_reply_thread": False,
-            "can_apply_action": False,
+            "can_apply_action": True,
         },
-        status="planned",
+        limits={"transport": "gh CLI (must be installed and authenticated)"},
     ),
     ConnectorCapability(
         platform="gitlab",
