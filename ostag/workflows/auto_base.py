@@ -20,9 +20,13 @@ from ostag.connectors.requirements import (
     LarkCLIRequirementTableConnector,
     RequirementTableConnector,
 )
+from ostag.connectors.apply import target_system_for_platform
 from ostag.connectors.tasks import LarkCLITaskConnector, TaskConnector
 from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy, channel_policy_for_event
 from ostag.core.event import NormalizedEvent
+from ostag.core.receipts import render_receipt_text
+from ostag.core.run_ledger import RunLedger
+from ostag.core.schemas import ActionReceipt, new_id
 from ostag.core.stage_ledger import StageLedger
 
 
@@ -161,6 +165,48 @@ class AutoBaseWorkflow:
         self.requirements = requirement_connector or self._default_requirement_connector(config)
         self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
         self.channel_brain = ChannelBrainStore(config)
+        self.run_ledger = RunLedger(config.run_ledger_path)
+        # Set by the runner before each handle() call so proposed receipts
+        # anchor to the current run.
+        self.current_run_id = ""
+
+    def _propose_write_receipt(
+        self,
+        event: NormalizedEvent,
+        *,
+        title: str,
+        target_object: str,
+        mutation_type: str,
+        summary: str,
+        risk: str,
+        apply_payload: dict[str, Any],
+    ) -> str:
+        """Record a receipt for a deferred table write and render the approval reply."""
+        receipt = ActionReceipt(
+            action_id=new_id("action"),
+            run_id=self.current_run_id or new_id("run"),
+            title=title,
+            target_system=target_system_for_platform(event.platform),
+            target_object=target_object,
+            mutation_type=mutation_type,
+            summary=summary,
+            risk=risk,
+            required_permissions=("write",),
+            state="needs_approval",
+            apply_payload=apply_payload,
+        )
+        self.run_ledger.record_receipt(receipt, chat_id=event.chat_id, platform=event.platform)
+        pending = self.run_ledger.list_receipts(
+            chat_id=event.chat_id,
+            states=("proposed", "needs_approval", "ready_to_apply"),
+        )
+        index = next(
+            (n for n, item in enumerate(pending, start=1) if item.action_id == receipt.action_id),
+            None,
+        )
+        return "已生成待审批操作（本群已开启写入审批）：\n" + render_receipt_text(
+            receipt, index=index
+        )
 
     def _default_requirement_connector(self, config: Settings) -> RequirementTableConnector:
         if config.platform == "dingtalk":
@@ -208,6 +254,22 @@ class AutoBaseWorkflow:
             )
             if not payload["rows"]:
                 raise AutoBaseError("docx 中没有识别到可写入的需求内容。")
+            if self.config.governed_writes:
+                count = len(payload["rows"])
+                return self._propose_write_receipt(
+                    event,
+                    title=f"从《{context.file.name}》写入 {count} 条需求",
+                    target_object=resolved.table.table_id,
+                    mutation_type="create",
+                    summary=f"目标表：{resolved.table.name}；新增 {count} 行",
+                    risk="medium",
+                    apply_payload={
+                        "operation": "batch_create",
+                        "base_token": resolved.base_token,
+                        "table_id": resolved.table.table_id,
+                        "payload": payload,
+                    },
+                )
             result = await self._write_rows(resolved.base_token, resolved.table.table_id, payload)
         except TimeoutError as exc:
             return f"自动入表未完成：调用 lark-cli 超时。{exc}"
@@ -265,13 +327,32 @@ class AutoBaseWorkflow:
             if task_url:
                 patch.update(field_patch_if_exists(fields, "飞书任务", task_url))
                 patch.update(field_patch_if_exists(fields, "任务链接", task_url))
+        if not patch and not command.create_task:
+            raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
+        if patch and self.config.governed_writes:
+            self.channel_brain.record_action(event.platform, event.chat_id)
+            ledger.complete("proposed", "已生成审批回执")
+            reply = self._propose_write_receipt(
+                event,
+                title=f"更新需求「{record_label(record)}」",
+                target_object=record.record_id,
+                mutation_type="update",
+                summary="；".join(f"{name}：{value}" for name, value in patch.items()) or "字段更新",
+                risk="low",
+                apply_payload={
+                    "operation": "batch_update",
+                    "base_token": resolved.base_token,
+                    "table_id": resolved.table.table_id,
+                    "record_id": record.record_id,
+                    "patch": patch,
+                },
+            )
+            return f"{reply}\n{ledger.format_user()}"
         if patch:
             await self._update_record(resolved.base_token, resolved.table.table_id, record.record_id, patch)
         if patch or command.create_task:
             self.channel_brain.record_action(event.platform, event.chat_id)
         ledger.complete("executed", "已执行写入")
-        if not patch and not command.create_task:
-            raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
 
         actions: list[str] = []
         if command.assignee:

@@ -20,6 +20,7 @@ destructive action without approval, no secret logging, full audit trail.
 | Apply double-gated | `OSTAG_APPLY_ENABLED=false` by default **and** apply requires a registered executor for the target system; failures leave `failed` state with ledger detail |
 | Approval audit | Every approve/reject records an `ApprovalDecision` (`approval_recorded`) with the deciding actor |
 | Stale approvals rejected in live flows | TTL (`OSTAG_RECEIPT_TTL_SECONDS`, default 24h) enforced on access; expired receipts marked `stale` in the ledger |
+| Governed writes | `OSTAG_GOVERNED_WRITES=true` turns table mutations into receipts; the approved `apply_payload` is exactly what executes — see `docs/governed_writes.md` |
 
 ## Governance data model
 

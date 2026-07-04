@@ -38,6 +38,7 @@ testpaths = [
   "tests/test_permissions.py",
   "tests/test_connectors.py",
   "tests/test_event_normalization.py",
+  "tests/test_governed_writes.py",
   "tests/test_mfs_client.py",
   "tests/test_memory.py",
   "tests/test_mock_backend.py",

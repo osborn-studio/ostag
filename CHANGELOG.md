@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added governed writes (`OSTAG_GOVERNED_WRITES`, default off): requirement
+  patches and docx bulk imports become action receipts that require
+  approve + apply instead of writing directly; the exact mutation is frozen
+  in the receipt's `apply_payload` (`docs/governed_writes.md`).
+- Added real apply executors (`ostag/connectors/apply.py`): approved receipts
+  for `feishu_base`/`lark_base`/`dingtalk_ai_table` execute through the same
+  connector paths as direct writes; wired into the runner's ApprovalService.
+- Added `apply_payload` field to `ActionReceipt` (additive, round-trips).
+
 - Wired receipt verbs into live flows: chat messages `approve/reject/apply/
   continue/status <ref>` are parsed by the runner and executed by the new
   `ApprovalService` (`ostag/core/approvals.py`), with replies in the source

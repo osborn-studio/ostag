@@ -354,6 +354,7 @@ class ActionReceipt:
     required_permissions: tuple[str, ...] = ("propose",)
     state: str = "proposed"
     verification: tuple[VerificationCheck, ...] = ()
+    apply_payload: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
 
@@ -396,6 +397,7 @@ class ActionReceipt:
             required_permissions=self.required_permissions,
             state=state,
             verification=self.verification,
+            apply_payload=self.apply_payload,
             created_at=self.created_at,
             updated_at=utc_now_iso(),
         )
@@ -415,6 +417,7 @@ class ActionReceipt:
                 "required_permissions": list(self.required_permissions),
                 "state": self.state,
                 "verification": [check.to_dict() for check in self.verification],
+                "apply_payload": self.apply_payload,
                 "commands": self.commands,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
@@ -438,6 +441,7 @@ class ActionReceipt:
             verification=tuple(
                 VerificationCheck.from_dict(check) for check in data.get("verification", ())
             ),
+            apply_payload=dict(data.get("apply_payload", {})),
             created_at=data.get("created_at", utc_now_iso()),
             updated_at=data.get("updated_at", utc_now_iso()),
         )

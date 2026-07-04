@@ -13,6 +13,7 @@ from ostag.core.channel_brain import (
 from ostag.core.context import trim_context
 from ostag.core.event import NormalizedEvent
 from ostag.core.logging import write_audit_log
+from ostag.connectors.apply import build_apply_executors
 from ostag.core.approvals import ApprovalService
 from ostag.core.prompt import PromptContext, build_chat_prompt
 from ostag.core.receipts import parse_receipt_command
@@ -40,7 +41,12 @@ class OSTagRunner:
         self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
         self.channel_brain = channel_brain_store or ChannelBrainStore(config)
         self.run_ledger = run_ledger or RunLedger(config.run_ledger_path)
-        self.approvals = approvals or ApprovalService(config, self.run_ledger)
+        executors = (
+            build_apply_executors(self.auto_base)
+            if hasattr(self.auto_base, "requirements")
+            else {}
+        )
+        self.approvals = approvals or ApprovalService(config, self.run_ledger, executors)
 
     def _finish(self, run: Run, reply: str, *, ok: bool, detail: str = "") -> str:
         self.run_ledger.record_status(
@@ -167,6 +173,7 @@ class OSTagRunner:
         mfs_results = await self.mfs.search(text)
         context_text = trim_context(mfs_results, self.config)
         try:
+            self.auto_base.current_run_id = run.run_id
             workflow_reply = await self.auto_base.handle(event)
         except Exception as exc:  # noqa: BLE001
             workflow_reply = f"自动入表未完成：{type(exc).__name__}: {exc}"
