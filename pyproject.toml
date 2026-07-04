@@ -29,6 +29,7 @@ asyncio_mode = "auto"
 testpaths = [
   "tests/test_doctor.py",
   "tests/test_ambient.py",
+  "tests/test_ambient_v2.py",
   "tests/test_approvals.py",
   "tests/test_auto_base_workflow.py",
   "tests/test_capabilities.py",

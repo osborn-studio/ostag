@@ -101,6 +101,15 @@ ostag followups run-once --json       # fire due continuations now
 proposals auto-schedule a pending-approval reminder. See
 `docs/async_runs.md`.
 
+## Ambient
+
+```bash
+ostag ambient run-once --json          # dry sweep: prints would-be messages
+ostag ambient run-once --send --json   # deliver via platform adapter
+```
+
+See `docs/ambient_v2.md` for monitors and noise controls.
+
 ## Channel policy
 
 ```bash

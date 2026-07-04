@@ -103,6 +103,9 @@ class Settings:
     ambient_evening_digest_hour: int = 18
     ambient_digest_window_minutes: int = 90
     ambient_manager_open_ids: tuple[str, ...] = ()
+    ambient_stale_days: int = 7
+    ambient_suppress_days: int = 3
+    ambient_max_decisions: int = 3
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -189,6 +192,9 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         ambient_evening_digest_hour=_int("OSTAG_AMBIENT_EVENING_DIGEST_HOUR", 18),
         ambient_digest_window_minutes=_int("OSTAG_AMBIENT_DIGEST_WINDOW_MINUTES", 90),
         ambient_manager_open_ids=_csv("OSTAG_AMBIENT_MANAGER_OPEN_IDS"),
+        ambient_stale_days=_int("OSTAG_AMBIENT_STALE_DAYS", 7),
+        ambient_suppress_days=_int("OSTAG_AMBIENT_SUPPRESS_DAYS", 3),
+        ambient_max_decisions=_int("OSTAG_AMBIENT_MAX_DECISIONS", 3),
     )
     if overrides:
         data = settings.__dict__ | overrides

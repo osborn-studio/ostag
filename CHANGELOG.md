@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Ambient Mode V2 (`docs/ambient_v2.md`): new `overdue_requirement` and
+  `missing_status` monitors alongside unowned/stale; every decision cites
+  record id, rule, and threshold; done statuses stay quiet.
+- Ambient noise controls: per-sweep decision cap
+  (`OSTAG_AMBIENT_MAX_DECISIONS`), per-record suppression window
+  (`OSTAG_AMBIENT_SUPPRESS_DAYS`), configurable staleness threshold
+  (`OSTAG_AMBIENT_STALE_DAYS`); multiple findings join into one message.
+- Ambient decisions are audited in the run ledger as `ambient_decision`
+  events on an `executor_id: ambient` run.
+- New CLI: `ostag ambient run-once [--send] --json` — dry by default,
+  collecting would-be messages into the output.
+
 - Added per-channel policy (`docs/channel_policy.md`): `governed_writes` and
   `apply_enabled` channel overrides with inherit-from-global semantics, and
   channel-scoped actor grants that outrank the global mapping inside their

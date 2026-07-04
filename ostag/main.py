@@ -156,6 +156,17 @@ def build_parser() -> argparse.ArgumentParser:
     followups_run.add_argument("--json", action="store_true")
     followups_run.add_argument("--config")
 
+    ambient = subparsers.add_parser("ambient", help="Ambient monitor operations.")
+    ambient_sub = ambient.add_subparsers(dest="ambient_command", required=True)
+    ambient_run = ambient_sub.add_parser(
+        "run-once", help="Run one ambient sweep now. Dry by default; --send delivers to chats."
+    )
+    ambient_run.add_argument(
+        "--send", action="store_true", help="Actually send messages via the platform adapter."
+    )
+    ambient_run.add_argument("--json", action="store_true")
+    ambient_run.add_argument("--config")
+
     channel = subparsers.add_parser("channel", help="Per-channel policy management.")
     channel_sub = channel.add_subparsers(dest="channel_command", required=True)
     channel_policy = channel_sub.add_parser("policy", help="Show or set channel policy.")
@@ -227,6 +238,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return await run_followups_command(args)
     if args.command == "channel":
         return run_channel_command(args)
+    if args.command == "ambient":
+        return await run_ambient_command(args)
 
     overrides = {}
     if args.platform:
@@ -350,6 +363,38 @@ async def run_submit_command(args: argparse.Namespace) -> int:
         return 1
     _emit({"run": snapshot, "reply": reply}, as_json=as_json)
     return 0 if snapshot.get("status") == "succeeded" else 1
+
+
+class _CollectingAdapter:
+    """Dry-run message sink for `ostag ambient run-once` without --send."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, str]] = []
+
+    async def send_message(self, chat_id: str, text: str) -> None:
+        self.messages.append({"chat_id": chat_id, "text": text})
+
+
+async def run_ambient_command(args: argparse.Namespace) -> int:
+    as_json = getattr(args, "json", False)
+    config = load_settings(getattr(args, "config", None))
+    if args.send:
+        adapter = create_adapter(config.platform, config)
+    else:
+        adapter = _CollectingAdapter()
+    scheduler = AmbientScheduler(config, adapter=adapter)
+    result = await scheduler.run_once()
+    payload: dict[str, object] = {
+        "checked": result.checked,
+        "sent": result.sent,
+        "skipped": result.skipped,
+        "errors": result.errors,
+        "delivery": "sent" if args.send else "dry_run",
+    }
+    if isinstance(adapter, _CollectingAdapter):
+        payload["messages"] = adapter.messages
+    _emit(payload, as_json=as_json)
+    return 0 if result.errors == 0 else 1
 
 
 def _policy_payload(config, policy) -> dict:

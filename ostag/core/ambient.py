@@ -17,6 +17,7 @@ from ostag.core.channel_brain import ChannelBrainStore
 from ostag.core.event import NormalizedEvent
 from ostag.core.followups import FollowUpService
 from ostag.core.run_ledger import RunLedger
+from ostag.core.schemas import LedgerEvent, new_id
 from ostag.core.logging import write_audit_log
 from ostag.workflows.auto_base import LarkCLI, cell_to_text, extract_matching_records
 
@@ -56,6 +57,8 @@ class AmbientDecision:
     kind: str
     message: str
     proposal_only: bool = True
+    record_id: str = ""
+    rule: str = ""
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,9 @@ class AmbientMonitor:
         requirements: list[RequirementSnapshot],
         *,
         today: date,
+        max_decisions: int = 3,
+        stale_days: int = 7,
+        suppress_days: int = 3,
     ) -> list[AmbientDecision]:
         brain = self.store.load(platform, chat_id)
         if not brain.policy.ambient_enabled:
@@ -87,31 +93,92 @@ class AmbientMonitor:
 
         decisions: list[AmbientDecision] = []
         for requirement in requirements:
-            if not requirement.owner:
-                decisions.append(
-                    AmbientDecision(
-                        kind="unowned_requirement",
-                        message=(
-                            f"需求「{requirement.title or requirement.record_id}」还没有负责人，"
-                            "建议指定 owner。"
-                        ),
-                    )
-                )
-            elif requirement.days_stale >= 7 and requirement.status not in {"已完成", "完成"}:
-                decisions.append(
-                    AmbientDecision(
-                        kind="stale_requirement",
-                        message=(
-                            f"需求「{requirement.title or requirement.record_id}」已 {requirement.days_stale} "
-                            "天未更新，建议跟进状态。"
-                        ),
-                    )
-                )
-            if decisions:
+            if len(decisions) >= max(1, max_decisions):
                 break
+            decision = self._evaluate_one(requirement, today=today, stale_days=stale_days)
+            if decision is None:
+                continue
+            if self._suppressed(brain, decision, today, suppress_days):
+                continue
+            decisions.append(decision)
         if decisions:
             self._record_ambient(platform, chat_id, today)
+            self._record_flags(platform, chat_id, decisions, today)
         return decisions
+
+    def _evaluate_one(
+        self, requirement: RequirementSnapshot, *, today: date, stale_days: int
+    ) -> AmbientDecision | None:
+        """One decision per requirement, highest-priority issue first."""
+        label = requirement.title or requirement.record_id
+        done = requirement.status in DONE_STATUSES
+        if not requirement.owner:
+            return AmbientDecision(
+                kind="unowned_requirement",
+                message=f"需求「{label}」还没有负责人，建议指定 owner。",
+                record_id=requirement.record_id,
+                rule="owner is empty",
+            )
+        if requirement.due_date and requirement.due_date < today and not done:
+            return AmbientDecision(
+                kind="overdue_requirement",
+                message=(
+                    f"需求「{label}」（{requirement.record_id}）已于 "
+                    f"{requirement.due_date.isoformat()} 到期仍未完成"
+                    f"（当前状态：{requirement.status or '未设置'}），建议跟进。"
+                ),
+                record_id=requirement.record_id,
+                rule=f"due_date {requirement.due_date.isoformat()} < today, status not done",
+            )
+        if requirement.days_stale >= stale_days and not done:
+            return AmbientDecision(
+                kind="stale_requirement",
+                message=(
+                    f"需求「{label}」已 {requirement.days_stale} 天未更新"
+                    f"（阈值 {stale_days} 天），建议跟进状态。"
+                ),
+                record_id=requirement.record_id,
+                rule=f"days_stale {requirement.days_stale} >= {stale_days}",
+            )
+        if not requirement.status:
+            return AmbientDecision(
+                kind="missing_status",
+                message=(
+                    f"需求「{label}」（{requirement.record_id}）未设置状态，建议补全需求状态。"
+                ),
+                record_id=requirement.record_id,
+                rule="status is empty",
+            )
+        return None
+
+    def _suppressed(
+        self, brain: Any, decision: AmbientDecision, today: date, suppress_days: int
+    ) -> bool:
+        if not decision.record_id or suppress_days <= 0:
+            return False
+        key = f"ambient_flag:{decision.kind}:{decision.record_id}"
+        flagged_ordinal = int(brain.action_counts.get(key, 0))
+        return flagged_ordinal > 0 and today.toordinal() - flagged_ordinal < suppress_days
+
+    def _record_flags(
+        self, platform: str, chat_id: str, decisions: list[AmbientDecision], today: date
+    ) -> None:
+        brain = self.store.load(platform, chat_id)
+        counts = dict(brain.action_counts)
+        for decision in decisions:
+            if decision.record_id:
+                counts[f"ambient_flag:{decision.kind}:{decision.record_id}"] = today.toordinal()
+        self.store.save(
+            type(brain)(
+                platform=brain.platform,
+                chat_id=brain.chat_id,
+                facts=brain.facts,
+                preferences=brain.preferences,
+                policy=brain.policy,
+                action_counts=counts,
+                updated_at=brain.updated_at,
+            )
+        )
 
     def _ambient_count(self, platform: str, chat_id: str, today: date) -> int:
         brain = self.store.load(platform, chat_id)
@@ -212,12 +279,21 @@ class AmbientScheduler:
                     chat_id,
                     snapshots,
                     today=self.today(),
+                    max_decisions=self.config.ambient_max_decisions,
+                    stale_days=self.config.ambient_stale_days,
+                    suppress_days=self.config.ambient_suppress_days,
                 )
                 if not decisions:
                     continue
-                message = f"主动巡检建议：{decisions[0].message}"
+                if len(decisions) == 1:
+                    message = f"主动巡检建议：{decisions[0].message}"
+                else:
+                    message = "主动巡检建议：\n" + "\n".join(
+                        f"- {decision.message}" for decision in decisions
+                    )
                 await self.adapter.send_message(chat_id, message)
                 sent += 1
+                self._record_decisions(chat_id, decisions)
                 self._audit(chat_id, message, status="ok")
             except Exception as exc:  # noqa: BLE001
                 errors += 1
@@ -277,6 +353,41 @@ class AmbientScheduler:
                 updated_at=brain.updated_at,
             )
         )
+
+    def _record_decisions(self, chat_id: str, decisions: list[AmbientDecision]) -> None:
+        """Audit ambient decisions as a run in the ledger, citing rule and record."""
+        try:
+            ledger = self.followups.ledger
+            run = ledger.open_run(
+                NormalizedEvent(
+                    platform=self.config.platform,
+                    event_id=f"ambient:{chat_id}",
+                    chat_id=chat_id,
+                    message_id=f"ambient:{chat_id}",
+                    sender_id="ambient_scheduler",
+                    text="ambient scheduled scan",
+                    mention_bot=True,
+                ),
+                executor_id="ambient",
+            )
+            for decision in decisions:
+                ledger.append(
+                    LedgerEvent(
+                        event_id=new_id("evt"),
+                        run_id=run.run_id,
+                        event_type="ambient_decision",
+                        payload={
+                            "kind": decision.kind,
+                            "record_id": decision.record_id,
+                            "rule": decision.rule,
+                            "message": decision.message,
+                            "proposal_only": decision.proposal_only,
+                        },
+                    )
+                )
+            ledger.record_status(run.run_id, "succeeded")
+        except Exception:  # noqa: BLE001 - auditing must never break the scan
+            pass
 
     async def _projection_fields(self, base_token: str, table_id: str) -> list[str]:
         try:
