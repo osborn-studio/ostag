@@ -327,6 +327,43 @@ class RunLedger:
                 approvers.append(decision["actor_id"])
         return tuple(approvers)
 
+    def record_cost(
+        self,
+        run_id: str,
+        *,
+        chat_id: str,
+        platform: str,
+        credits: int,
+        backend: str,
+        date: str,
+    ) -> LedgerEvent:
+        """Charge a run's estimated cost, attributed to a channel and day."""
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=run_id,
+                event_type="cost_recorded",
+                payload={
+                    "chat_id": chat_id,
+                    "platform": platform,
+                    "credits": int(credits),
+                    "backend": backend,
+                    "date": date,
+                },
+            )
+        )
+
+    def cost_today(self, chat_id: str, date: str) -> int:
+        """Total credits charged to a channel on a given day (UTC date string)."""
+        total = 0
+        for record in self._read_all():
+            if record.get("event_type") != "cost_recorded":
+                continue
+            payload = record.get("payload", {})
+            if payload.get("chat_id") == chat_id and payload.get("date") == date:
+                total += int(payload.get("credits", 0))
+        return total
+
     def record_security_event(self, run_id: str, reason: str) -> LedgerEvent:
         return self.append(
             LedgerEvent(

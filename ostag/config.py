@@ -55,6 +55,8 @@ class Settings:
     four_eyes_enabled: bool = False
     gh_bin: str = "gh"
     github_default_repo: str = ""
+    run_cost_credits: int = 0
+    daily_cost_budget: int = 0
     governed_writes: bool = False
     followup_enabled: bool = True
     followup_after_seconds: int = 14400
@@ -143,6 +145,8 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         four_eyes_enabled=_bool("OSTAG_FOUR_EYES_ENABLED", False),
         gh_bin=os.getenv("OSTAG_GH_BIN", "gh"),
         github_default_repo=os.getenv("OSTAG_GITHUB_DEFAULT_REPO", ""),
+        run_cost_credits=_int("OSTAG_RUN_COST_CREDITS", 0),
+        daily_cost_budget=_int("OSTAG_DAILY_COST_BUDGET", 0),
         governed_writes=_bool("OSTAG_GOVERNED_WRITES", False),
         followup_enabled=_bool("OSTAG_FOLLOWUP_ENABLED", True),
         followup_after_seconds=_int("OSTAG_FOLLOWUP_AFTER_SECONDS", 14400),

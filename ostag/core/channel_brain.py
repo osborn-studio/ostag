@@ -26,6 +26,7 @@ class ChannelPolicy:
     apply_enabled: bool | None = None
     approval_quorum_high_risk: int | None = None
     four_eyes: bool | None = None
+    daily_cost_budget: int | None = None
     # Channel-scoped "actor_id:level" grants; take precedence over the global
     # OSTAG_ACTOR_PERMISSIONS mapping inside this channel only.
     actor_permissions: tuple[str, ...] = ()
@@ -94,6 +95,7 @@ class ChannelBrainStore:
                     policy_data.get("approval_quorum_high_risk")
                 ),
                 four_eyes=_optional_bool(policy_data.get("four_eyes")),
+                daily_cost_budget=_optional_int(policy_data.get("daily_cost_budget")),
                 actor_permissions=tuple(policy_data.get("actor_permissions", []) or ()),
             ),
             action_counts={
@@ -148,6 +150,7 @@ class ChannelBrainStore:
                 "apply_enabled": brain.policy.apply_enabled,
                 "approval_quorum_high_risk": brain.policy.approval_quorum_high_risk,
                 "four_eyes": brain.policy.four_eyes,
+                "daily_cost_budget": brain.policy.daily_cost_budget,
                 "actor_permissions": list(brain.policy.actor_permissions),
             },
             "action_counts": brain.action_counts,

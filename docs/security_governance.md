@@ -22,6 +22,7 @@ destructive action without approval, no secret logging, full audit trail.
 | Approval audit | Every approve/reject records an `ApprovalDecision` (`approval_recorded`) with the deciding actor |
 | High-risk quorum | `risk: high` receipts require `OSTAG_APPROVAL_QUORUM_HIGH_RISK` distinct approvers (channel-overridable); duplicates don't count; reject is always immediate |
 | Four-eyes rule | `OSTAG_FOUR_EYES_ENABLED` (channel-overridable `--four-eyes`): the recorded proposer cannot approve their own receipt; violations are ledgered as `security_event`; withdrawing (reject) your own proposal stays allowed |
+| Daily cost budget | `OSTAG_RUN_COST_CREDITS` + `OSTAG_DAILY_COST_BUDGET` (channel-overridable): a run that would exceed the channel's daily spend is blocked before the paid backend call; spend is ledgered as `cost_recorded` (`docs/cost_budget.md`) |
 | Stale approvals rejected in live flows | TTL (`OSTAG_RECEIPT_TTL_SECONDS`, default 24h) enforced on access; expired receipts marked `stale` in the ledger |
 | Governed writes | `OSTAG_GOVERNED_WRITES=true` turns table mutations into receipts; the approved `apply_payload` is exactly what executes — see `docs/governed_writes.md` |
 | Per-channel policy | `governed_writes`/`apply_enabled` channel overrides and channel-scoped actor grants via `ostag channel policy set` — see `docs/channel_policy.md` |

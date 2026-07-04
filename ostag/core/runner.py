@@ -15,11 +15,12 @@ from ostag.core.event import NormalizedEvent
 from ostag.core.logging import write_audit_log
 from ostag.connectors.apply import build_apply_executors
 from ostag.core.approvals import ApprovalService
+from ostag.core.budget import BudgetService, utc_today
 from ostag.core.prompt import PromptContext, build_chat_prompt
 from ostag.core.receipts import parse_receipt_command
 from ostag.core.run_ledger import RunLedger
 from ostag.core.safety import check_message_length, sanitize_user_text
-from ostag.core.schemas import ContextPacket, LedgerEvent, Run, new_id
+from ostag.core.schemas import ContextPacket, LedgerEvent, Run, SchemaError, new_id
 from ostag.mfs.client import MFSClient
 from ostag.workflows.auto_base import AutoBaseWorkflow
 
@@ -47,6 +48,7 @@ class OSTagRunner:
             else {}
         )
         self.approvals = approvals or ApprovalService(config, self.run_ledger, executors)
+        self.budget = BudgetService(config, self.run_ledger)
         # Run id of the most recent handled event; set by handle_event so CLI
         # callers can report which run their submission created.
         self.last_run_id = ""
@@ -241,6 +243,31 @@ class OSTagRunner:
                 detail="" if workflow_ok else workflow_reply[:200],
             )
 
+        cost = self.config.run_cost_credits
+        if cost > 0:
+            policy = self.channel_brain.load(event.platform, event.chat_id).policy
+            today = utc_today()
+            try:
+                self.budget.check(event.chat_id, policy, cost, date=today)
+            except SchemaError as exc:
+                reply = (
+                    "OS Tag 已暂停这个群今天的付费问答："
+                    f"{exc}。{exc.recovery_hint}"
+                )
+                write_audit_log(
+                    self.config.audit_log,
+                    event=event,
+                    backend=self.config.backend,
+                    mfs_enabled=self.config.mfs_enabled,
+                    input_text=text,
+                    output_text=reply,
+                    status="blocked",
+                    env=self.config.env,
+                    error=exc.code,
+                )
+                self.run_ledger.record_status(run.run_id, "blocked", detail=str(exc))
+                return reply
+
         prompt = build_chat_prompt(
             PromptContext(event=event, user_text=text, mfs_context=context_text)
         )
@@ -268,4 +295,15 @@ class OSTagRunner:
             env=self.config.env,
             error=error,
         )
+        if cost > 0:
+            # The backend was invoked, so the cost is incurred regardless of
+            # whether it returned an answer or an error.
+            self.budget.charge(
+                run.run_id,
+                event.chat_id,
+                event.platform,
+                self.config.backend,
+                cost,
+                date=today,
+            )
         return self._finish(run, reply, ok=status == "ok", detail=error or "")

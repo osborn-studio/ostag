@@ -174,6 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
     ambient_run.add_argument("--json", action="store_true")
     ambient_run.add_argument("--config")
 
+    budget = subparsers.add_parser("budget", help="Cost budget inspection.")
+    budget_sub = budget.add_subparsers(dest="budget_command", required=True)
+    budget_status = budget_sub.add_parser(
+        "status", help="Show a channel's daily spend against its budget."
+    )
+    budget_status.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    budget_status.add_argument("--chat", required=True)
+    budget_status.add_argument("--json", action="store_true")
+    budget_status.add_argument("--config")
+
     channel = subparsers.add_parser("channel", help="Per-channel policy management.")
     channel_sub = channel.add_subparsers(dest="channel_command", required=True)
     channel_policy = channel_sub.add_parser("policy", help="Show or set channel policy.")
@@ -207,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
         dest="four_eyes",
         choices=["true", "false", "inherit"],
         help="Whether the proposer may approve their own receipts.",
+    )
+    policy_set.add_argument(
+        "--daily-cost-budget",
+        dest="daily_cost_budget",
+        help="Daily spend cap in credits: a number (0 = unlimited) or 'inherit'.",
     )
     policy_set.add_argument(
         "--grant",
@@ -258,6 +275,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return run_channel_command(args)
     if args.command == "ambient":
         return await run_ambient_command(args)
+    if args.command == "budget":
+        return run_budget_command(args)
 
     overrides = {}
     if args.platform:
@@ -423,6 +442,7 @@ def _policy_payload(config, policy) -> dict:
         "apply_enabled": policy.apply_enabled,
         "approval_quorum_high_risk": policy.approval_quorum_high_risk,
         "four_eyes": policy.four_eyes,
+        "daily_cost_budget": policy.daily_cost_budget,
         "ambient_enabled": policy.ambient_enabled,
         "actor_permissions": list(policy.actor_permissions),
         "task_create_allowed": policy.task_create_allowed,
@@ -443,8 +463,26 @@ def _policy_payload(config, policy) -> dict:
             else config.approval_quorum_high_risk
         ),
         "four_eyes": effective_flag(policy.four_eyes, config.four_eyes_enabled),
+        "daily_cost_budget": (
+            policy.daily_cost_budget
+            if policy.daily_cost_budget is not None
+            else config.daily_cost_budget
+        ),
     }
     return {"channel": channel, "effective": effective}
+
+
+def run_budget_command(args: argparse.Namespace) -> int:
+    from ostag.core.budget import BudgetService
+    from ostag.core.channel_brain import ChannelBrainStore
+
+    as_json = getattr(args, "json", False)
+    config = load_settings(getattr(args, "config", None))
+    ledger = RunLedger(config.run_ledger_path)
+    policy = ChannelBrainStore(config).load(args.platform, args.chat).policy
+    status = BudgetService(config, ledger).status(args.chat, policy)
+    _emit({"platform": args.platform, "chat_id": args.chat, **status}, as_json=as_json)
+    return 0
 
 
 def run_channel_command(args: argparse.Namespace) -> int:
@@ -466,6 +504,23 @@ def run_channel_command(args: argparse.Namespace) -> int:
             changes["apply_enabled"] = tristate[args.apply_enabled]
         if args.four_eyes is not None:
             changes["four_eyes"] = tristate[args.four_eyes]
+        if args.daily_cost_budget is not None:
+            if args.daily_cost_budget == "inherit":
+                changes["daily_cost_budget"] = None
+            elif args.daily_cost_budget.isdigit():
+                changes["daily_cost_budget"] = int(args.daily_cost_budget)
+            else:
+                _emit(
+                    {
+                        "error": {
+                            "code": "invalid_budget",
+                            "message": f"Budget {args.daily_cost_budget!r} is not valid",
+                            "recovery_hint": "Use a non-negative integer or 'inherit'.",
+                        }
+                    },
+                    as_json=as_json,
+                )
+                return 1
         if args.ambient is not None:
             changes["ambient_enabled"] = args.ambient == "true"
         if args.quorum_high_risk is not None:

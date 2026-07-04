@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Cost & budget governance (`docs/cost_budget.md`): per-run cost in credits
+  (`OSTAG_RUN_COST_CREDITS`, default 0 = off) and a daily channel spend cap
+  (`OSTAG_DAILY_COST_BUDGET`, channel override `daily_cost_budget`). A run
+  that would exceed the channel's budget is blocked before the paid backend
+  call — no cost incurred, run status `blocked`; spend is ledgered as
+  `cost_recorded` and resets per UTC day.
+- New CLI: `ostag budget status --platform --chat` and
+  `ostag channel policy set --daily-cost-budget N|inherit`.
+
 - GitHub connector (`docs/github_connector.md`): governed issue creation and
   commenting via the `gh` CLI (`OSTAG_GH_BIN`, `OSTAG_GITHUB_DEFAULT_REPO`).
   There is no direct-write path — GitHub is reached only through

@@ -110,6 +110,16 @@ ostag ambient run-once --send --json   # deliver via platform adapter
 
 See `docs/ambient_v2.md` for monitors and noise controls.
 
+## Budget
+
+```bash
+ostag budget status --platform feishu --chat oc_xxx --json
+# {"daily_budget": 50, "spent_today": 10, "remaining": 40, "unit": "credits", ...}
+```
+
+Set caps via `ostag channel policy set --daily-cost-budget N|inherit`. See
+`docs/cost_budget.md`.
+
 ## Channel policy
 
 ```bash

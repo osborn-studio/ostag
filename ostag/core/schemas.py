@@ -63,6 +63,7 @@ LEDGER_EVENT_TYPES = (
     "continuation_fired",
     "continuation_cancelled",
     "ambient_decision",
+    "cost_recorded",
     "security_event",
 )
 
