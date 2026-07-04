@@ -16,6 +16,7 @@ Three-valued override with inherit-by-default:
 | `actor_permissions` | `["actor:level", ...]` | channel grant wins over global `OSTAG_ACTOR_PERMISSIONS`, else global, else default level |
 | `ambient_enabled` | `true` / `false` | channel value (ambient is opt-in per channel, as before) |
 | `approval_quorum_high_risk` | integer / `null` (inherit) | channel value, else `OSTAG_APPROVAL_QUORUM_HIGH_RISK` (default 1) — distinct approvers required for `risk: high` receipts |
+| `four_eyes` | `true` / `false` / `null` (inherit) | channel value, else `OSTAG_FOUR_EYES_ENABLED` (default false) — proposer may not approve their own receipt |
 
 This lets one workspace run mixed modes: e.g. the finance channel requires
 approvals with applies off (`governed_writes=true, apply_enabled=false`)

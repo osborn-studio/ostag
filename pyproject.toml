@@ -44,6 +44,7 @@ testpaths = [
   "tests/test_env_scrub.py",
   "tests/test_event_normalization.py",
   "tests/test_followups.py",
+  "tests/test_four_eyes.py",
   "tests/test_governed_tasks.py",
   "tests/test_governed_writes.py",
   "tests/test_mfs_client.py",

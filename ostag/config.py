@@ -52,6 +52,7 @@ class Settings:
     apply_enabled: bool = False
     receipt_ttl_seconds: int = 86400
     approval_quorum_high_risk: int = 1
+    four_eyes_enabled: bool = False
     governed_writes: bool = False
     followup_enabled: bool = True
     followup_after_seconds: int = 14400
@@ -137,6 +138,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         apply_enabled=_bool("OSTAG_APPLY_ENABLED", False),
         receipt_ttl_seconds=_int("OSTAG_RECEIPT_TTL_SECONDS", 86400),
         approval_quorum_high_risk=_int("OSTAG_APPROVAL_QUORUM_HIGH_RISK", 1),
+        four_eyes_enabled=_bool("OSTAG_FOUR_EYES_ENABLED", False),
         governed_writes=_bool("OSTAG_GOVERNED_WRITES", False),
         followup_enabled=_bool("OSTAG_FOLLOWUP_ENABLED", True),
         followup_after_seconds=_int("OSTAG_FOLLOWUP_AFTER_SECONDS", 14400),

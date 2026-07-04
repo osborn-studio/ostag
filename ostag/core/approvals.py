@@ -60,7 +60,12 @@ class ApprovalService:
         return self.channel_brain.load(platform, chat_id).policy
 
     def propose(
-        self, receipt: ActionReceipt, *, chat_id: str = "", platform: str = ""
+        self,
+        receipt: ActionReceipt,
+        *,
+        chat_id: str = "",
+        platform: str = "",
+        proposer_id: str = "",
     ) -> ActionReceipt:
         """Record a new proposed receipt in the ledger."""
         if receipt.state not in ("proposed", "needs_approval"):
@@ -69,7 +74,9 @@ class ApprovalService:
                 message=f"New receipts must start in proposed/needs_approval, got {receipt.state!r}",
                 recovery_hint="Create the receipt with state 'proposed' or 'needs_approval'.",
             )
-        self.ledger.record_receipt(receipt, chat_id=chat_id, platform=platform)
+        self.ledger.record_receipt(
+            receipt, chat_id=chat_id, platform=platform, proposer_id=proposer_id
+        )
         return receipt
 
     def _resolve_receipt(self, reference: str, chat_id: str | None) -> ActionReceipt:
@@ -90,6 +97,34 @@ class ApprovalService:
             message=f"{reference!r} does not identify an action receipt",
             recovery_hint="Use a pending index (e.g. 1) or an action_... id.",
         )
+
+    def _check_four_eyes(
+        self, receipt: ActionReceipt, actor_id: str, policy: ChannelPolicy | None
+    ) -> None:
+        """When the four-eyes rule is on, the proposer may not approve their own action."""
+        enabled = effective_flag(
+            policy.four_eyes if policy else None, self.config.four_eyes_enabled
+        )
+        if not enabled:
+            return
+        proposer = self.ledger.receipt_proposer(receipt.action_id)
+        if proposer and proposer == actor_id:
+            self.ledger.record_security_event(
+                receipt.run_id,
+                f"four_eyes_violation: proposer {actor_id} tried to approve "
+                f"{receipt.action_id}",
+            )
+            raise SchemaError(
+                code="four_eyes_violation",
+                message=(
+                    f"Actor {actor_id!r} proposed {receipt.action_id} and cannot "
+                    "approve it (four-eyes rule)"
+                ),
+                recovery_hint=(
+                    "Ask another write-level actor to approve, or reject it yourself "
+                    f"with: reject {receipt.action_id}"
+                ),
+            )
 
     def _required_quorum(self, receipt: ActionReceipt, policy: ChannelPolicy | None) -> int:
         """High-risk receipts may require several distinct approvers; others need one."""
@@ -174,6 +209,7 @@ class ApprovalService:
         self._check_stale(receipt, actor_id)
 
         if command.verb == "approve":
+            self._check_four_eyes(receipt, actor_id, policy)
             quorum = self._required_quorum(receipt, policy)
             if receipt.state not in ("proposed", "needs_approval"):
                 # let the state machine produce its usual invalid-transition error

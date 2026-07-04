@@ -21,6 +21,7 @@ destructive action without approval, no secret logging, full audit trail.
 | Apply double-gated | `OSTAG_APPLY_ENABLED=false` by default **and** apply requires a registered executor for the target system; failures leave `failed` state with ledger detail |
 | Approval audit | Every approve/reject records an `ApprovalDecision` (`approval_recorded`) with the deciding actor |
 | High-risk quorum | `risk: high` receipts require `OSTAG_APPROVAL_QUORUM_HIGH_RISK` distinct approvers (channel-overridable); duplicates don't count; reject is always immediate |
+| Four-eyes rule | `OSTAG_FOUR_EYES_ENABLED` (channel-overridable `--four-eyes`): the recorded proposer cannot approve their own receipt; violations are ledgered as `security_event`; withdrawing (reject) your own proposal stays allowed |
 | Stale approvals rejected in live flows | TTL (`OSTAG_RECEIPT_TTL_SECONDS`, default 24h) enforced on access; expired receipts marked `stale` in the ledger |
 | Governed writes | `OSTAG_GOVERNED_WRITES=true` turns table mutations into receipts; the approved `apply_payload` is exactly what executes — see `docs/governed_writes.md` |
 | Per-channel policy | `governed_writes`/`apply_enabled` channel overrides and channel-scoped actor grants via `ostag channel policy set` — see `docs/channel_policy.md` |
@@ -58,4 +59,3 @@ before release.
 
 - Sandbox/worktree execution mode for code-writing executors.
 - Repo write-access checks before any VCS-facing apply.
-- Four-eyes rule (proposer barred from approving their own receipt).

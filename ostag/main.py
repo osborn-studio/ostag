@@ -141,6 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["", "slack", "feishu", "lark", "dingtalk", "github", "gitlab"],
         help="Platform the receipt belongs to.",
     )
+    receipts_propose.add_argument(
+        "--actor",
+        default=LOCAL_ADMIN_ACTOR,
+        help="Proposer actor id recorded on the receipt (default: local-admin).",
+    )
     receipts_propose.add_argument("--json", action="store_true")
     receipts_propose.add_argument("--config")
 
@@ -194,6 +199,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--quorum-high-risk",
         dest="quorum_high_risk",
         help="Distinct approvers required for high-risk receipts: a number or 'inherit'.",
+    )
+    policy_set.add_argument(
+        "--four-eyes",
+        dest="four_eyes",
+        choices=["true", "false", "inherit"],
+        help="Whether the proposer may approve their own receipts.",
     )
     policy_set.add_argument(
         "--grant",
@@ -409,6 +420,7 @@ def _policy_payload(config, policy) -> dict:
         "governed_writes": policy.governed_writes,
         "apply_enabled": policy.apply_enabled,
         "approval_quorum_high_risk": policy.approval_quorum_high_risk,
+        "four_eyes": policy.four_eyes,
         "ambient_enabled": policy.ambient_enabled,
         "actor_permissions": list(policy.actor_permissions),
         "task_create_allowed": policy.task_create_allowed,
@@ -428,6 +440,7 @@ def _policy_payload(config, policy) -> dict:
             if policy.approval_quorum_high_risk is not None
             else config.approval_quorum_high_risk
         ),
+        "four_eyes": effective_flag(policy.four_eyes, config.four_eyes_enabled),
     }
     return {"channel": channel, "effective": effective}
 
@@ -449,6 +462,8 @@ def run_channel_command(args: argparse.Namespace) -> int:
             changes["governed_writes"] = tristate[args.governed_writes]
         if args.apply_enabled is not None:
             changes["apply_enabled"] = tristate[args.apply_enabled]
+        if args.four_eyes is not None:
+            changes["four_eyes"] = tristate[args.four_eyes]
         if args.ambient is not None:
             changes["ambient_enabled"] = args.ambient == "true"
         if args.quorum_high_risk is not None:
@@ -544,7 +559,10 @@ async def run_receipt_command(args: argparse.Namespace) -> int:
                 payload = json.loads(args.file.read_text(encoding="utf-8"))
                 receipt = ActionReceipt.from_dict(payload)
                 service.propose(
-                    receipt, chat_id=args.chat, platform=args.source_platform
+                    receipt,
+                    chat_id=args.chat,
+                    platform=args.source_platform,
+                    proposer_id=args.actor,
                 )
                 _emit(receipt.to_dict(), as_json=as_json)
                 return 0

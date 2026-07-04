@@ -252,18 +252,26 @@ class RunLedger:
         ]
 
     def record_receipt(
-        self, receipt: ActionReceipt, *, chat_id: str = "", platform: str = ""
+        self,
+        receipt: ActionReceipt,
+        *,
+        chat_id: str = "",
+        platform: str = "",
+        proposer_id: str = "",
     ) -> LedgerEvent:
+        payload: dict[str, Any] = {
+            "receipt": receipt.to_dict(),
+            "chat_id": chat_id,
+            "platform": platform,
+        }
+        if proposer_id:
+            payload["proposer_id"] = proposer_id
         return self.append(
             LedgerEvent(
                 event_id=new_id("evt"),
                 run_id=receipt.run_id,
                 event_type="action_proposed",
-                payload={
-                    "receipt": receipt.to_dict(),
-                    "chat_id": chat_id,
-                    "platform": platform,
-                },
+                payload=payload,
             )
         )
 
@@ -297,6 +305,11 @@ class RunLedger:
                 payload={"decision": decision.to_dict()},
             )
         )
+
+    def receipt_proposer(self, action_id: str) -> str:
+        """Actor who proposed the action; empty for pre-tracking receipts."""
+        entry = self._fold_receipts().get(action_id)
+        return entry.get("proposer_id", "") if entry else ""
 
     def list_approvers(self, action_id: str) -> tuple[str, ...]:
         """Distinct actor ids that recorded an 'approve' decision for an action."""
@@ -337,6 +350,7 @@ class RunLedger:
                         "receipt": dict(payload["receipt"]),
                         "chat_id": payload.get("chat_id", ""),
                         "platform": payload.get("platform", ""),
+                        "proposer_id": payload.get("proposer_id", ""),
                     }
             elif event_type == "action_state_changed":
                 entry = entries.get(payload.get("action_id", ""))

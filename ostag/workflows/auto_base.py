@@ -237,7 +237,12 @@ class AutoBaseWorkflow:
             state="needs_approval",
             apply_payload=apply_payload,
         )
-        self.run_ledger.record_receipt(receipt, chat_id=event.chat_id, platform=event.platform)
+        self.run_ledger.record_receipt(
+            receipt,
+            chat_id=event.chat_id,
+            platform=event.platform,
+            proposer_id=event.sender_id,
+        )
         if self.config.followup_enabled:
             FollowUpService(self.config, self.run_ledger).schedule_receipt_follow_up(
                 receipt, chat_id=event.chat_id, platform=event.platform

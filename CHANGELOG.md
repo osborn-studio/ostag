@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Four-eyes rule (`OSTAG_FOUR_EYES_ENABLED`, default off; channel override
+  `--four-eyes true|false|inherit`): the recorded proposer of a receipt
+  cannot approve it; violations raise `four_eyes_violation` and are ledgered
+  as security events. Rejecting (withdrawing) your own proposal stays
+  allowed; receipts proposed before proposer tracking are unrestricted.
+- Receipts now record their proposer (`proposer_id` on `action_proposed`);
+  `ostag receipts propose` gained `--actor`.
+
 - Approval quorum for high-risk receipts: `risk: high` actions stay in
   `needs_approval` until `OSTAG_APPROVAL_QUORUM_HIGH_RISK` distinct
   write-level actors approve (default 1 = unchanged behavior); duplicate
