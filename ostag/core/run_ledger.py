@@ -136,6 +136,10 @@ class RunLedger:
             payload = record.get("payload", {})
             if record.get("event_type") == "run_created" and "run" in payload:
                 snapshot = dict(payload["run"])
+            elif record.get("event_type") == "context_packet_built":
+                packet = payload.get("context_packet", {})
+                if packet.get("context_packet_id"):
+                    snapshot["context_packet_id"] = packet["context_packet_id"]
             elif "status" in payload:
                 snapshot["status"] = payload["status"]
                 snapshot["updated_at"] = record.get("created_at", snapshot.get("updated_at"))
@@ -144,6 +148,25 @@ class RunLedger:
         snapshot["run_id"] = run_id
         snapshot["event_count"] = len(records)
         return snapshot
+
+    def get_context_packet(self, run_id: str) -> dict[str, Any]:
+        """Latest context packet recorded for a run, including its audit hash."""
+        packets = [
+            record["payload"]
+            for record in self.export_run(run_id)
+            if record.get("event_type") == "context_packet_built"
+            and isinstance(record.get("payload", {}).get("context_packet"), dict)
+        ]
+        if not packets:
+            raise SchemaError(
+                code="no_context_packet",
+                message=f"No context packet recorded for run_id={run_id!r}",
+                recovery_hint=(
+                    "Context packets are recorded for runs that reach the workflow/backend "
+                    "stage; check the run with 'ostag ledger export'."
+                ),
+            )
+        return packets[-1]
 
     def list_artifacts(self, run_id: str) -> list[dict[str, Any]]:
         return [

@@ -19,7 +19,7 @@ from ostag.core.prompt import PromptContext, build_chat_prompt
 from ostag.core.receipts import parse_receipt_command
 from ostag.core.run_ledger import RunLedger
 from ostag.core.safety import check_message_length, sanitize_user_text
-from ostag.core.schemas import Run
+from ostag.core.schemas import ContextPacket, LedgerEvent, Run, new_id
 from ostag.mfs.client import MFSClient
 from ostag.workflows.auto_base import AutoBaseWorkflow
 
@@ -47,12 +47,48 @@ class OSTagRunner:
             else {}
         )
         self.approvals = approvals or ApprovalService(config, self.run_ledger, executors)
+        # Run id of the most recent handled event; set by handle_event so CLI
+        # callers can report which run their submission created.
+        self.last_run_id = ""
 
     def _finish(self, run: Run, reply: str, *, ok: bool, detail: str = "") -> str:
         self.run_ledger.record_status(
             run.run_id, "succeeded" if ok else "failed", detail=detail
         )
         return reply
+
+    def _build_context_packet(
+        self, run: Run, event: NormalizedEvent, text: str, mfs_results: list[str]
+    ) -> ContextPacket:
+        """Record what context this run's workflow/backend was given."""
+        brain = self.channel_brain.load(event.platform, event.chat_id)
+        packet = ContextPacket(
+            context_packet_id=new_id("ctx"),
+            run_id=run.run_id,
+            source_thread_summary=text[:500],
+            linked_resources=tuple(result[:200] for result in mfs_results[:8]),
+            channel_brain_facts=brain.facts[:20],
+            connector_platforms=(event.platform,),
+            policy_constraints={
+                "backend": self.config.backend,
+                "governed_writes": self.config.governed_writes,
+                "apply_enabled": self.config.apply_enabled,
+                "mfs_enabled": self.config.mfs_enabled,
+            },
+            citations=(f"{event.platform}://{event.chat_id}/{event.message_id}",),
+        )
+        self.run_ledger.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=run.run_id,
+                event_type="context_packet_built",
+                payload={
+                    "context_packet": packet.to_dict(),
+                    "hash": packet.content_hash(),
+                },
+            )
+        )
+        return packet
 
     async def handle_event(self, event: NormalizedEvent) -> str:
         if not event.mention_bot:
@@ -70,6 +106,7 @@ class OSTagRunner:
             return reply
 
         run = self.run_ledger.open_run(event, executor_id=self.config.backend)
+        self.last_run_id = run.run_id
         self.run_ledger.record_status(run.run_id, "running")
 
         text = sanitize_user_text(event.text)
@@ -172,6 +209,7 @@ class OSTagRunner:
 
         mfs_results = await self.mfs.search(text)
         context_text = trim_context(mfs_results, self.config)
+        self._build_context_packet(run, event, text, mfs_results)
         try:
             self.auto_base.current_run_id = run.run_id
             workflow_reply = await self.auto_base.handle(event)

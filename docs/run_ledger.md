@@ -39,6 +39,12 @@ Non-mention events are intentionally **not** ledgered as runs: they are noise
 in busy group chats and are already counted in the audit log with status
 `ignored`.
 
+Runs that reach the workflow/backend stage also record a
+`context_packet_built` event containing the `ContextPacket` (source summary,
+MFS results, channel brain facts, policy constraints, citations) plus a
+sha256/16 audit hash; the packet id is folded into the run snapshot as
+`context_packet_id` and exported via `ostag context export --run`.
+
 ## Example record
 
 ```json

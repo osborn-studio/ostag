@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added `ostag run`: submit a task through the full pipeline from the CLI
+  (safety, receipts, channel brain, workflow, backend) with the reply
+  returned to the caller — nothing is posted to platforms; exit code tracks
+  run outcome.
+- Runs now record a `ContextPacket` (`context_packet_built` ledger event)
+  with source summary, MFS results, channel brain facts, policy constraints,
+  citations, and a sha256/16 audit hash; run snapshots expose
+  `context_packet_id`.
+- Added `ostag runs list` (recent runs, newest first) and
+  `ostag context export --run` (packet + hash).
+
 - Added governed writes (`OSTAG_GOVERNED_WRITES`, default off): requirement
   patches and docx bulk imports become action receipts that require
   approve + apply instead of writing directly; the exact mutation is frozen

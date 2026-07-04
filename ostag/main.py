@@ -15,11 +15,12 @@ from ostag.core.ambient import AmbientScheduler
 from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
+from ostag.core.event import NormalizedEvent
 from ostag.core.permissions import LOCAL_ADMIN_ACTOR
 from ostag.core.receipts import ReceiptCommand
 from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
-from ostag.core.schemas import ActionReceipt, SchemaError
+from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 
 
@@ -41,6 +42,42 @@ def build_parser() -> argparse.ArgumentParser:
     memory_remember.add_argument("--text", required=True)
     memory_remember.add_argument("--sync", action="store_true")
     memory_sub.add_parser("sync")
+
+    run_submit = subparsers.add_parser(
+        "run", help="Submit a task through the OS Tag pipeline from the CLI."
+    )
+    run_submit.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], help="Defaults to config."
+    )
+    run_submit.add_argument("--chat", required=True, help="Chat/channel id the run is anchored to.")
+    run_submit.add_argument("--text", required=True, help="Task text, as if the bot was mentioned.")
+    run_submit.add_argument(
+        "--actor",
+        default=LOCAL_ADMIN_ACTOR,
+        help="Actor id the run is attributed to (default: local-admin).",
+    )
+    run_submit.add_argument("--thread", help="Optional thread id.")
+    run_submit.add_argument(
+        "--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"]
+    )
+    run_submit.add_argument("--json", action="store_true")
+    run_submit.add_argument("--config")
+
+    runs = subparsers.add_parser("runs", help="Inspect recent runs.")
+    runs_sub = runs.add_subparsers(dest="runs_command", required=True)
+    runs_list = runs_sub.add_parser("list", help="List recent runs, newest first.")
+    runs_list.add_argument("--limit", type=int, default=20)
+    runs_list.add_argument("--json", action="store_true")
+    runs_list.add_argument("--config")
+
+    context = subparsers.add_parser("context", help="Inspect run context packets.")
+    context_sub = context.add_subparsers(dest="context_command", required=True)
+    context_export = context_sub.add_parser(
+        "export", help="Export the context packet recorded for a run."
+    )
+    context_export.add_argument("--run", required=True)
+    context_export.add_argument("--json", action="store_true")
+    context_export.add_argument("--config")
 
     status = subparsers.add_parser("status", help="Show the latest state of a run.")
     status.add_argument("--run", required=True, help="Run id, e.g. run_ab12cd34ef56.")
@@ -132,7 +169,9 @@ async def main_async(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "memory":
         return run_memory_command(args)
-    if args.command in ("status", "ledger", "artifacts", "connector"):
+    if args.command == "run":
+        return await run_submit_command(args)
+    if args.command in ("status", "ledger", "artifacts", "connector", "runs", "context"):
         return run_inspection_command(args)
     if args.command in ("approve", "reject", "apply", "continue", "receipts"):
         return await run_receipt_command(args)
@@ -197,6 +236,13 @@ def run_inspection_command(args: argparse.Namespace) -> int:
         if args.command == "status":
             _emit(ledger.run_status(args.run), as_json=as_json)
             return 0
+        if args.command == "runs":
+            _emit(ledger.list_runs(limit=args.limit), as_json=as_json)
+            return 0
+        if args.command == "context":
+            ledger.run_status(args.run)  # raises run_not_found for unknown runs
+            _emit(ledger.get_context_packet(args.run), as_json=as_json)
+            return 0
         if args.command == "ledger":
             events = ledger.export_run(args.run)
             if not events:
@@ -217,6 +263,41 @@ def run_inspection_command(args: argparse.Namespace) -> int:
     except SchemaError as exc:
         _emit({"error": exc.to_dict()}, as_json=as_json)
         return 1
+
+
+async def run_submit_command(args: argparse.Namespace) -> int:
+    """Submit a task through the full OS Tag pipeline without a chat event.
+
+    The reply is returned to the caller; nothing is posted to any platform.
+    Table writes still go through governed-writes/policy exactly as chat
+    events do.
+    """
+    as_json = getattr(args, "json", False)
+    overrides: dict[str, object] = {}
+    if args.platform:
+        overrides["platform"] = args.platform
+    if args.backend:
+        overrides["backend"] = args.backend
+    config = load_settings(getattr(args, "config", None), **overrides)
+    runner = OSTagRunner(config)
+    event = NormalizedEvent(
+        platform=config.platform,
+        event_id=new_id("evt"),
+        chat_id=args.chat,
+        message_id=new_id("msg"),
+        sender_id=args.actor,
+        text=args.text,
+        mention_bot=True,
+        thread_id=args.thread,
+    )
+    try:
+        reply = await runner.handle_event(event)
+        snapshot = runner.run_ledger.run_status(runner.last_run_id)
+    except SchemaError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
+    _emit({"run": snapshot, "reply": reply}, as_json=as_json)
+    return 0 if snapshot.get("status") == "succeeded" else 1
 
 
 async def run_receipt_command(args: argparse.Namespace) -> int:

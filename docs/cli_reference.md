@@ -13,6 +13,21 @@ ostag --platform dingtalk --live                                      # live tra
 ostag --doctor --platform feishu --dry-run --event examples/feishu_event.json
 ```
 
+## Submitting work
+
+```bash
+ostag run --platform feishu --chat oc_xxx --text "请总结项目下一步" --json
+# {"reply": "...", "run": {"run_id": "run_...", "status": "succeeded",
+#  "context_packet_id": "ctx_...", ...}}
+```
+
+`ostag run` pushes a task through the full pipeline (safety checks, receipt
+commands, channel brain, auto_base workflow, backend) exactly as if the bot
+was mentioned in chat — but the reply is returned to the caller; **nothing is
+posted to any platform**. Table writes still go through governed-writes
+policy. Options: `--actor` (default `local-admin`), `--thread`, `--backend`.
+Exit code is 0 only if the run succeeded.
+
 ## Run inspection
 
 ```bash
@@ -24,6 +39,14 @@ ostag ledger export --run run_9f8e7d6c5b4a --json
 
 ostag artifacts list --run run_9f8e7d6c5b4a --json
 # [ {"artifact_id": "art_...", "name": "report.md", "path": "/tmp/report.md", ...} ]
+
+ostag runs list [--limit 20] --json
+# recent run snapshots, newest first
+
+ostag context export --run run_9f8e7d6c5b4a --json
+# {"context_packet": {"source_thread_summary": "...", "channel_brain_facts": [...],
+#   "policy_constraints": {...}, "citations": ["feishu://oc_xxx/om_xxx"]},
+#  "hash": "fe58..."}  # sha256/16 audit hash of the packet
 ```
 
 Options: `--config <path>` to point at an alternative `.env`; the ledger path
@@ -96,6 +119,5 @@ Agent-facing guarantees:
 
 ## Planned next commands
 
-`ostag run` (submit work from CLI), `ostag context export --run`,
 `ostag channel policy show/set`, `ostag connector test <platform>`,
-`ostag ambient run-once`.
+`ostag ambient run-once`, `ostag artifacts get`.
