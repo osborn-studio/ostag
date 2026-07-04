@@ -47,6 +47,7 @@ testpaths = [
   "tests/test_followups.py",
   "tests/test_four_eyes.py",
   "tests/test_github_connector.py",
+  "tests/test_gitlab_connector.py",
   "tests/test_governed_tasks.py",
   "tests/test_governed_writes.py",
   "tests/test_mfs_client.py",

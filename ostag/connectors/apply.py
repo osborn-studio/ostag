@@ -147,8 +147,16 @@ def build_apply_executors(workflow: Any) -> dict[str, Any]:
         registry["lark_task"] = task_executor
     if hasattr(workflow, "config"):
         from ostag.connectors.github import GhCLI, GitHubApplyExecutor, GitHubIssuesConnector
+        from ostag.connectors.gitlab import (
+            GitLabApplyExecutor,
+            GitLabIssuesConnector,
+            GlabCLI,
+        )
 
         registry["github_issues"] = GitHubApplyExecutor(
             GitHubIssuesConnector(GhCLI(workflow.config)), workflow.config
+        )
+        registry["gitlab_issues"] = GitLabApplyExecutor(
+            GitLabIssuesConnector(GlabCLI(workflow.config)), workflow.config
         )
     return registry

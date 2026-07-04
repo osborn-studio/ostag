@@ -39,8 +39,14 @@ def test_github_issues_available_without_destructive_ops() -> None:
     assert capability.destructive_requires_approval is True
 
 
-def test_gitlab_is_planned_stub() -> None:
-    assert get_capability("gitlab", "issues_mrs").status == "planned"
+def test_gitlab_issues_available_without_destructive_ops() -> None:
+    capability = get_capability("gitlab", "issues")
+    assert capability.status == "available"
+    assert capability.can("can_create_issues")
+    assert capability.can("can_comment_issues")
+    assert capability.can("can_apply_action")
+    assert not capability.can("can_close_issues")
+    assert not capability.can("can_delete_issues")
 
 
 def test_list_capabilities_filters_by_platform() -> None:

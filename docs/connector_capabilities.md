@@ -18,7 +18,7 @@ aspirational.
 | dingtalk | chat | available | reply/proactive text |
 | dingtalk | ai_table | available | read/create/update records, batch 30, no delete |
 | github | issues | available | create/comment via gh CLI; no close/delete (`docs/github_connector.md`) |
-| gitlab | issues_mrs | planned | stub — no capabilities enabled |
+| gitlab | issues | available | create/comment via glab CLI; no close/delete (`docs/gitlab_connector.md`) |
 
 Policy defaults for every connector: `default_mode: propose`,
 `destructive_requires_approval: true`. Table connectors deliberately declare

@@ -55,6 +55,8 @@ class Settings:
     four_eyes_enabled: bool = False
     gh_bin: str = "gh"
     github_default_repo: str = ""
+    glab_bin: str = "glab"
+    gitlab_default_repo: str = ""
     run_cost_credits: int = 0
     daily_cost_budget: int = 0
     governed_writes: bool = False
@@ -145,6 +147,8 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         four_eyes_enabled=_bool("OSTAG_FOUR_EYES_ENABLED", False),
         gh_bin=os.getenv("OSTAG_GH_BIN", "gh"),
         github_default_repo=os.getenv("OSTAG_GITHUB_DEFAULT_REPO", ""),
+        glab_bin=os.getenv("OSTAG_GLAB_BIN", "glab"),
+        gitlab_default_repo=os.getenv("OSTAG_GITLAB_DEFAULT_REPO", ""),
         run_cost_credits=_int("OSTAG_RUN_COST_CREDITS", 0),
         daily_cost_budget=_int("OSTAG_DAILY_COST_BUDGET", 0),
         governed_writes=_bool("OSTAG_GOVERNED_WRITES", False),

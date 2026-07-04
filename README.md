@@ -182,13 +182,13 @@ connector executors · CLI-submittable runs · context packets · durable
 continuations · per-channel policy · ambient monitors V2.
 
 Also done since: governed task creation · environment scrub for agent
-subprocesses · high-risk approval quorum · four-eyes rule · GitHub issues
-connector (governed create/comment via gh CLI) · per-channel daily cost
-budgets.
+subprocesses · high-risk approval quorum · four-eyes rule · GitHub and GitLab
+issues connectors (governed create/comment via gh/glab CLI) · per-channel
+daily cost budgets.
 
 Next: MFS-deepened context packets · sandbox hardening for code-writing
-executors · Slack Block Kit / Feishu card renderers · GitLab connector ·
-web admin console.
+executors · Slack Block Kit / Feishu card renderers · GitHub/GitLab thread
+reading · web admin console.
 
 ## Acceptance
 

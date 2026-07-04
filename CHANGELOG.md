@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- GitLab connector (`docs/gitlab_connector.md`): governed issue creation and
+  commenting via the `glab` CLI (`OSTAG_GLAB_BIN`, `OSTAG_GITLAB_DEFAULT_REPO`),
+  mirroring the GitHub connector. No direct-write path — reached only through
+  propose → approve → apply receipts (target `gitlab_issues`); no close/delete.
+  Capability declaration flipped from planned to available.
+
 - Cost & budget governance (`docs/cost_budget.md`): per-run cost in credits
   (`OSTAG_RUN_COST_CREDITS`, default 0 = off) and a daily channel spend cap
   (`OSTAG_DAILY_COST_BUDGET`, channel override `daily_cost_budget`). A run
