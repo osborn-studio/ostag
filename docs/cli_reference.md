@@ -101,6 +101,18 @@ ostag followups run-once --json       # fire due continuations now
 proposals auto-schedule a pending-approval reminder. See
 `docs/async_runs.md`.
 
+## Channel policy
+
+```bash
+ostag channel policy show --platform feishu --chat oc_xxx --json
+ostag channel policy set --platform feishu --chat oc_xxx \
+  --governed-writes true|false|inherit --apply-enabled true|false|inherit \
+  --ambient true|false --grant ou_alice:write --revoke ou_bob --json
+```
+
+Channel values override globals; `inherit` resets to the global config. See
+`docs/channel_policy.md`.
+
 ## Channel memory (existing)
 
 ```bash
@@ -130,5 +142,5 @@ Agent-facing guarantees:
 
 ## Planned next commands
 
-`ostag channel policy show/set`, `ostag connector test <platform>`,
-`ostag ambient run-once`, `ostag artifacts get`.
+`ostag connector test <platform>`, `ostag ambient run-once`,
+`ostag artifacts get`.

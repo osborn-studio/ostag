@@ -156,6 +156,41 @@ def build_parser() -> argparse.ArgumentParser:
     followups_run.add_argument("--json", action="store_true")
     followups_run.add_argument("--config")
 
+    channel = subparsers.add_parser("channel", help="Per-channel policy management.")
+    channel_sub = channel.add_subparsers(dest="channel_command", required=True)
+    channel_policy = channel_sub.add_parser("policy", help="Show or set channel policy.")
+    channel_policy_sub = channel_policy.add_subparsers(dest="policy_command", required=True)
+    policy_show = channel_policy_sub.add_parser("show")
+    policy_show.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    policy_show.add_argument("--chat", required=True)
+    policy_show.add_argument("--json", action="store_true")
+    policy_show.add_argument("--config")
+    policy_set = channel_policy_sub.add_parser("set")
+    policy_set.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    policy_set.add_argument("--chat", required=True)
+    policy_set.add_argument(
+        "--governed-writes", choices=["true", "false", "inherit"], dest="governed_writes"
+    )
+    policy_set.add_argument(
+        "--apply-enabled", choices=["true", "false", "inherit"], dest="apply_enabled"
+    )
+    policy_set.add_argument("--ambient", choices=["true", "false"])
+    policy_set.add_argument(
+        "--grant",
+        action="append",
+        default=[],
+        help="Channel-scoped actor grant, e.g. ou_alice:write (repeatable).",
+    )
+    policy_set.add_argument(
+        "--revoke", action="append", default=[], help="Remove a channel grant by actor id."
+    )
+    policy_set.add_argument("--json", action="store_true")
+    policy_set.add_argument("--config")
+
     parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--live", action="store_true", help="Disable dry-run and require live credentials.")
@@ -190,6 +225,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return await run_receipt_command(args)
     if args.command == "followups":
         return await run_followups_command(args)
+    if args.command == "channel":
+        return run_channel_command(args)
 
     overrides = {}
     if args.platform:
@@ -313,6 +350,94 @@ async def run_submit_command(args: argparse.Namespace) -> int:
         return 1
     _emit({"run": snapshot, "reply": reply}, as_json=as_json)
     return 0 if snapshot.get("status") == "succeeded" else 1
+
+
+def _policy_payload(config, policy) -> dict:
+    from ostag.core.permissions import effective_flag
+
+    channel = {
+        "governed_writes": policy.governed_writes,
+        "apply_enabled": policy.apply_enabled,
+        "ambient_enabled": policy.ambient_enabled,
+        "actor_permissions": list(policy.actor_permissions),
+        "task_create_allowed": policy.task_create_allowed,
+        "task_create_requires_confirmation": policy.task_create_requires_confirmation,
+        "daily_action_budget": policy.daily_action_budget,
+        "writable_fields": list(policy.writable_fields),
+        "default_base_token": policy.default_base_token,
+        "default_table_id": policy.default_table_id,
+    }
+    effective = {
+        "governed_writes": effective_flag(policy.governed_writes, config.governed_writes),
+        "apply_enabled": effective_flag(policy.apply_enabled, config.apply_enabled),
+        "ambient_enabled": policy.ambient_enabled,
+        "default_permission_level": config.default_permission_level,
+    }
+    return {"channel": channel, "effective": effective}
+
+
+def run_channel_command(args: argparse.Namespace) -> int:
+    from ostag.core.channel_brain import ChannelBrainStore
+
+    as_json = getattr(args, "json", False)
+    config = load_settings(getattr(args, "config", None))
+    store = ChannelBrainStore(config)
+    if args.policy_command == "show":
+        policy = store.load(args.platform, args.chat).policy
+        _emit(_policy_payload(config, policy), as_json=as_json)
+        return 0
+    if args.policy_command == "set":
+        changes: dict[str, object] = {}
+        tristate = {"true": True, "false": False, "inherit": None}
+        if args.governed_writes is not None:
+            changes["governed_writes"] = tristate[args.governed_writes]
+        if args.apply_enabled is not None:
+            changes["apply_enabled"] = tristate[args.apply_enabled]
+        if args.ambient is not None:
+            changes["ambient_enabled"] = args.ambient == "true"
+        if args.grant or args.revoke:
+            policy = store.load(args.platform, args.chat).policy
+            grants = {
+                pair.split(":", 1)[0]: pair
+                for pair in policy.actor_permissions
+                if ":" in pair
+            }
+            for pair in args.grant:
+                actor, _, level = pair.partition(":")
+                if not actor or level not in ("read", "propose", "write", "admin"):
+                    _emit(
+                        {
+                            "error": {
+                                "code": "invalid_grant",
+                                "message": f"Grant {pair!r} is not actor:level",
+                                "recovery_hint": "Use e.g. --grant ou_alice:write "
+                                "(levels: read/propose/write/admin).",
+                            }
+                        },
+                        as_json=as_json,
+                    )
+                    return 1
+                grants[actor] = pair
+            for actor in args.revoke:
+                grants.pop(actor, None)
+            changes["actor_permissions"] = tuple(grants.values())
+        if not changes:
+            _emit(
+                {
+                    "error": {
+                        "code": "no_changes",
+                        "message": "No policy changes given",
+                        "recovery_hint": "Pass at least one of --governed-writes, "
+                        "--apply-enabled, --ambient, --grant, --revoke.",
+                    }
+                },
+                as_json=as_json,
+            )
+            return 1
+        brain = store.update_policy(args.platform, args.chat, **changes)
+        _emit(_policy_payload(config, brain.policy), as_json=as_json)
+        return 0
+    raise AssertionError(args.policy_command)
 
 
 async def run_followups_command(args: argparse.Namespace) -> int:

@@ -14,8 +14,9 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from ostag.config import Settings
+from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy
 from ostag.core.followups import FollowUpService
-from ostag.core.permissions import ensure_verb_allowed, resolve_permission
+from ostag.core.permissions import effective_flag, ensure_verb_allowed, resolve_permission
 from ostag.core.receipts import (
     ReceiptCommand,
     is_stale,
@@ -51,6 +52,12 @@ class ApprovalService:
         self.config = config
         self.ledger = ledger
         self.executors = executors or {}
+        self.channel_brain = ChannelBrainStore(config)
+
+    def _channel_policy(self, platform: str, chat_id: str | None) -> ChannelPolicy | None:
+        if not platform or not chat_id:
+            return None
+        return self.channel_brain.load(platform, chat_id).policy
 
     def propose(
         self, receipt: ActionReceipt, *, chat_id: str = "", platform: str = ""
@@ -108,7 +115,10 @@ class ApprovalService:
         platform: str = "",
     ) -> dict[str, Any]:
         """Execute a receipt verb. Raises SchemaError on any violation."""
-        level = resolve_permission(self.config, actor_id)
+        policy = self._channel_policy(platform, chat_id)
+        level = resolve_permission(
+            self.config, actor_id, channel_grants=policy.actor_permissions if policy else ()
+        )
         try:
             ensure_verb_allowed(actor_id, level, command.verb)
         except SchemaError as exc:
@@ -172,12 +182,17 @@ class ApprovalService:
             return {"action": updated.to_dict()}
 
         if command.verb == "apply":
-            if not self.config.apply_enabled:
+            apply_allowed = effective_flag(
+                policy.apply_enabled if policy else None, self.config.apply_enabled
+            )
+            if not apply_allowed:
                 raise SchemaError(
                     code="apply_disabled",
-                    message="Apply is disabled by policy (OSTAG_APPLY_ENABLED=false)",
+                    message="Apply is disabled by policy (global OSTAG_APPLY_ENABLED "
+                    "or this channel's apply_enabled override)",
                     recovery_hint=(
-                        "An admin can enable live applies with OSTAG_APPLY_ENABLED=true; "
+                        "An admin can enable applies globally (OSTAG_APPLY_ENABLED=true) or "
+                        "per channel (ostag channel policy set ... --apply-enabled true); "
                         "the approval itself has been kept."
                     ),
                 )

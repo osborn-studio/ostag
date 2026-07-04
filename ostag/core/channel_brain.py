@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,12 @@ class ChannelPolicy:
     daily_action_budget: int = 0
     writable_fields: tuple[str, ...] = ()
     readable_fields: tuple[str, ...] = ()
+    # Governance overrides: None means "inherit the global config value".
+    governed_writes: bool | None = None
+    apply_enabled: bool | None = None
+    # Channel-scoped "actor_id:level" grants; take precedence over the global
+    # OSTAG_ACTOR_PERMISSIONS mapping inside this channel only.
+    actor_permissions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -80,6 +86,9 @@ class ChannelBrainStore:
                 daily_action_budget=int(policy_data.get("daily_action_budget") or 0),
                 writable_fields=tuple(policy_data.get("writable_fields", []) or ()),
                 readable_fields=tuple(policy_data.get("readable_fields", []) or ()),
+                governed_writes=_optional_bool(policy_data.get("governed_writes")),
+                apply_enabled=_optional_bool(policy_data.get("apply_enabled")),
+                actor_permissions=tuple(policy_data.get("actor_permissions", []) or ()),
             ),
             action_counts={
                 str(key): int(value)
@@ -129,12 +138,34 @@ class ChannelBrainStore:
                 "daily_action_budget": brain.policy.daily_action_budget,
                 "writable_fields": list(brain.policy.writable_fields),
                 "readable_fields": list(brain.policy.readable_fields),
+                "governed_writes": brain.policy.governed_writes,
+                "apply_enabled": brain.policy.apply_enabled,
+                "actor_permissions": list(brain.policy.actor_permissions),
             },
             "action_counts": brain.action_counts,
             "updated_at": brain.updated_at,
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         return path
+
+    def update_policy(self, platform: str, chat_id: str, **changes: object) -> ChannelBrain:
+        """Persist policy field changes for a channel; unknown fields are rejected."""
+        brain = self.load(platform, chat_id)
+        valid = {field.name for field in fields(ChannelPolicy)}
+        unknown = set(changes) - valid
+        if unknown:
+            raise ValueError(f"unknown policy fields: {', '.join(sorted(unknown))}")
+        updated = ChannelBrain(
+            platform=platform,
+            chat_id=chat_id,
+            facts=brain.facts,
+            preferences=brain.preferences,
+            policy=replace(brain.policy, **changes),  # type: ignore[arg-type]
+            action_counts=brain.action_counts,
+            updated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        )
+        self.save(updated)
+        return updated
 
     def actions_today(self, platform: str, chat_id: str, today: str | None = None) -> int:
         brain = self.load(platform, chat_id)
@@ -189,6 +220,12 @@ def format_channel_brain(brain: ChannelBrain) -> str:
         f"偏好：\n{prefs}\n"
         f"默认需求表：base={base}, table={table}"
     )
+
+
+def _optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
 
 
 def _safe_segment(value: str) -> str:

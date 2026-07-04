@@ -21,6 +21,7 @@ destructive action without approval, no secret logging, full audit trail.
 | Approval audit | Every approve/reject records an `ApprovalDecision` (`approval_recorded`) with the deciding actor |
 | Stale approvals rejected in live flows | TTL (`OSTAG_RECEIPT_TTL_SECONDS`, default 24h) enforced on access; expired receipts marked `stale` in the ledger |
 | Governed writes | `OSTAG_GOVERNED_WRITES=true` turns table mutations into receipts; the approved `apply_payload` is exactly what executes — see `docs/governed_writes.md` |
+| Per-channel policy | `governed_writes`/`apply_enabled` channel overrides and channel-scoped actor grants via `ostag channel policy set` — see `docs/channel_policy.md` |
 
 ## Governance data model
 
@@ -53,8 +54,6 @@ before release.
 
 ## Next hardening phase
 
-- Per-channel policy (permission and apply policy scoped to platform/channel,
-  not just global config).
 - Sandbox/worktree execution mode for code-writing executors.
 - Environment scrub before executor invocation.
 - Repo write-access checks before any VCS-facing apply.

@@ -33,6 +33,7 @@ testpaths = [
   "tests/test_auto_base_workflow.py",
   "tests/test_capabilities.py",
   "tests/test_channel_brain.py",
+  "tests/test_channel_policy.py",
   "tests/test_cli_inspection.py",
   "tests/test_cli_receipts.py",
   "tests/test_cli_run.py",

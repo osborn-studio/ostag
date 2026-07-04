@@ -25,6 +25,7 @@ from ostag.connectors.tasks import LarkCLITaskConnector, TaskConnector
 from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy, channel_policy_for_event
 from ostag.core.event import NormalizedEvent
 from ostag.core.followups import FollowUpService
+from ostag.core.permissions import effective_flag
 from ostag.core.receipts import render_receipt_text
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import ActionReceipt, new_id
@@ -259,7 +260,8 @@ class AutoBaseWorkflow:
             )
             if not payload["rows"]:
                 raise AutoBaseError("docx 中没有识别到可写入的需求内容。")
-            if self.config.governed_writes:
+            channel_policy = channel_policy_for_event(event, self.config)
+            if effective_flag(channel_policy.governed_writes, self.config.governed_writes):
                 count = len(payload["rows"])
                 return self._propose_write_receipt(
                     event,
@@ -334,7 +336,8 @@ class AutoBaseWorkflow:
                 patch.update(field_patch_if_exists(fields, "任务链接", task_url))
         if not patch and not command.create_task:
             raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
-        if patch and self.config.governed_writes:
+        governed = effective_flag(policy.governed_writes, self.config.governed_writes)
+        if patch and governed:
             self.channel_brain.record_action(event.platform, event.chat_id)
             ledger.complete("proposed", "已生成审批回执")
             reply = self._propose_write_receipt(

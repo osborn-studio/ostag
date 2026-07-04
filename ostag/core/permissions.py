@@ -40,13 +40,29 @@ def parse_actor_permissions(pairs: tuple[str, ...]) -> dict[str, str]:
     return mapping
 
 
-def resolve_permission(config: Settings, actor_id: str) -> str:
+def resolve_permission(
+    config: Settings, actor_id: str, channel_grants: tuple[str, ...] = ()
+) -> str:
+    """Resolve an actor's level: channel grants > global mapping > default.
+
+    ``channel_grants`` are per-channel "actor:level" pairs from the channel
+    policy; inside their channel they take precedence over the global
+    OSTAG_ACTOR_PERMISSIONS mapping.
+    """
+    channel_mapping = parse_actor_permissions(channel_grants)
+    if actor_id in channel_mapping:
+        return channel_mapping[actor_id]
     mapping = parse_actor_permissions(config.actor_permissions)
     if actor_id in mapping:
         return mapping[actor_id]
     if actor_id == LOCAL_ADMIN_ACTOR:
         return "admin"
     return config.default_permission_level
+
+
+def effective_flag(channel_value: bool | None, global_value: bool) -> bool:
+    """Channel override when set; otherwise inherit the global config value."""
+    return global_value if channel_value is None else channel_value
 
 
 def level_allows(level: str, required: str) -> bool:

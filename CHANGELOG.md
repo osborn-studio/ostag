@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added per-channel policy (`docs/channel_policy.md`): `governed_writes` and
+  `apply_enabled` channel overrides with inherit-from-global semantics, and
+  channel-scoped actor grants that outrank the global mapping inside their
+  channel only; legacy brain.json files load as inherit.
+- New CLI: `ostag channel policy show/set --platform --chat` with
+  `--governed-writes/--apply-enabled true|false|inherit`, repeatable
+  `--grant actor:level`, `--revoke actor`; output shows stored channel
+  values and resolved effective values.
+- Enforcement wired into the auto_base workflow (both write paths) and the
+  approval service (apply gate + permission resolution).
+
 - Added durable scheduled continuations (`docs/async_runs.md`): ledger-backed
   follow-ups that survive restarts, fire at most once, cancel when the
   subject is already resolved, and always cite why they triggered.
