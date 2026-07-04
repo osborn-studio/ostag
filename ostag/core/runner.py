@@ -14,7 +14,9 @@ from ostag.core.context import trim_context
 from ostag.core.event import NormalizedEvent
 from ostag.core.logging import write_audit_log
 from ostag.core.prompt import PromptContext, build_chat_prompt
+from ostag.core.run_ledger import RunLedger
 from ostag.core.safety import check_message_length, sanitize_user_text
+from ostag.core.schemas import Run
 from ostag.mfs.client import MFSClient
 from ostag.workflows.auto_base import AutoBaseWorkflow
 
@@ -27,12 +29,20 @@ class OSTagRunner:
         mfs_client: MFSClient | None = None,
         auto_base_workflow: AutoBaseWorkflow | None = None,
         channel_brain_store: ChannelBrainStore | None = None,
+        run_ledger: RunLedger | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
         self.mfs = mfs_client or MFSClient(config)
         self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
         self.channel_brain = channel_brain_store or ChannelBrainStore(config)
+        self.run_ledger = run_ledger or RunLedger(config.run_ledger_path)
+
+    def _finish(self, run: Run, reply: str, *, ok: bool, detail: str = "") -> str:
+        self.run_ledger.record_status(
+            run.run_id, "succeeded" if ok else "failed", detail=detail
+        )
+        return reply
 
     async def handle_event(self, event: NormalizedEvent) -> str:
         if not event.mention_bot:
@@ -49,6 +59,9 @@ class OSTagRunner:
             )
             return reply
 
+        run = self.run_ledger.open_run(event, executor_id=self.config.backend)
+        self.run_ledger.record_status(run.run_id, "running")
+
         text = sanitize_user_text(event.text)
         length = check_message_length(text, self.config.max_input_chars)
         if not length.ok:
@@ -63,7 +76,12 @@ class OSTagRunner:
                 env=self.config.env,
                 error=length.reason,
             )
-            return f"OS Tag 已拒绝处理：{length.reason}"
+            return self._finish(
+                run,
+                f"OS Tag 已拒绝处理：{length.reason}",
+                ok=False,
+                detail=length.reason or "rejected",
+            )
 
         remember_fact = extract_remember_fact(text)
         if remember_fact is not None:
@@ -79,7 +97,7 @@ class OSTagRunner:
                 status="ok",
                 env=self.config.env,
             )
-            return reply
+            return self._finish(run, reply, ok=True)
 
         if is_brain_status_request(text):
             brain = self.channel_brain.load(event.platform, event.chat_id)
@@ -94,7 +112,7 @@ class OSTagRunner:
                 status="ok",
                 env=self.config.env,
             )
-            return reply
+            return self._finish(run, reply, ok=True)
 
         if is_ambient_status_request(text):
             brain = self.channel_brain.load(event.platform, event.chat_id)
@@ -123,7 +141,7 @@ class OSTagRunner:
                 status="ok",
                 env=self.config.env,
             )
-            return reply
+            return self._finish(run, reply, ok=True)
 
         mfs_results = await self.mfs.search(text)
         context_text = trim_context(mfs_results, self.config)
@@ -147,7 +165,12 @@ class OSTagRunner:
                 env=self.config.env,
                 error=None if workflow_ok else workflow_reply,
             )
-            return workflow_reply
+            return self._finish(
+                run,
+                workflow_reply,
+                ok=workflow_ok,
+                detail="" if workflow_ok else workflow_reply[:200],
+            )
 
         prompt = build_chat_prompt(
             PromptContext(event=event, user_text=text, mfs_context=context_text)
@@ -176,4 +199,4 @@ class OSTagRunner:
             env=self.config.env,
             error=error,
         )
-        return reply
+        return self._finish(run, reply, ok=status == "ok", detail=error or "")

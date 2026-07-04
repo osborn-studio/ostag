@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from pathlib import Path
 
 from ostag.adapters.dingtalk import DingTalkAdapter
@@ -11,8 +12,11 @@ from ostag.adapters.lark import LarkAdapter
 from ostag.adapters.slack import SlackAdapter
 from ostag.config import load_settings
 from ostag.core.ambient import AmbientScheduler
+from ostag.core.capabilities import list_capabilities
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
+from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
+from ostag.core.schemas import SchemaError
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 
 
@@ -34,6 +38,33 @@ def build_parser() -> argparse.ArgumentParser:
     memory_remember.add_argument("--text", required=True)
     memory_remember.add_argument("--sync", action="store_true")
     memory_sub.add_parser("sync")
+
+    status = subparsers.add_parser("status", help="Show the latest state of a run.")
+    status.add_argument("--run", required=True, help="Run id, e.g. run_ab12cd34ef56.")
+    status.add_argument("--json", action="store_true")
+    status.add_argument("--config")
+
+    ledger = subparsers.add_parser("ledger", help="Inspect the durable run ledger.")
+    ledger_sub = ledger.add_subparsers(dest="ledger_command", required=True)
+    ledger_export = ledger_sub.add_parser("export", help="Export all ledger events for a run.")
+    ledger_export.add_argument("--run", required=True)
+    ledger_export.add_argument("--json", action="store_true")
+    ledger_export.add_argument("--config")
+
+    artifacts = subparsers.add_parser("artifacts", help="Inspect run artifacts.")
+    artifacts_sub = artifacts.add_subparsers(dest="artifacts_command", required=True)
+    artifacts_list = artifacts_sub.add_parser("list", help="List artifacts recorded for a run.")
+    artifacts_list.add_argument("--run", required=True)
+    artifacts_list.add_argument("--json", action="store_true")
+    artifacts_list.add_argument("--config")
+
+    connector = subparsers.add_parser("connector", help="Inspect connector capabilities.")
+    connector_sub = connector.add_subparsers(dest="connector_command", required=True)
+    connector_list = connector_sub.add_parser("list", help="List declared connector capabilities.")
+    connector_list.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk", "github", "gitlab"]
+    )
+    connector_list.add_argument("--json", action="store_true")
 
     parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
     parser.add_argument("--dry-run", action="store_true")
@@ -61,6 +92,8 @@ async def main_async(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "memory":
         return run_memory_command(args)
+    if args.command in ("status", "ledger", "artifacts", "connector"):
+        return run_inspection_command(args)
 
     overrides = {}
     if args.platform:
@@ -99,6 +132,49 @@ async def main_async(argv: list[str] | None = None) -> int:
         if ambient_task is not None:
             ambient_task.cancel()
     return 0
+
+
+def _emit(payload: object, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
+
+
+def run_inspection_command(args: argparse.Namespace) -> int:
+    """Read-only agent-facing commands: status / ledger export / artifacts / connector."""
+    as_json = getattr(args, "json", False)
+    try:
+        if args.command == "connector":
+            capabilities = list_capabilities(getattr(args, "platform", None))
+            _emit([item.to_dict() for item in capabilities], as_json=as_json)
+            return 0
+
+        config = load_settings(getattr(args, "config", None))
+        ledger = RunLedger(config.run_ledger_path)
+        if args.command == "status":
+            _emit(ledger.run_status(args.run), as_json=as_json)
+            return 0
+        if args.command == "ledger":
+            events = ledger.export_run(args.run)
+            if not events:
+                raise SchemaError(
+                    code="run_not_found",
+                    message=f"No ledger events found for run_id={args.run!r}",
+                    recovery_hint=(
+                        f"Confirm the run id and the ledger path ({config.run_ledger_path})."
+                    ),
+                )
+            _emit(events, as_json=as_json)
+            return 0
+        if args.command == "artifacts":
+            ledger.run_status(args.run)  # raises run_not_found for unknown runs
+            _emit(ledger.list_artifacts(args.run), as_json=as_json)
+            return 0
+        raise AssertionError(args.command)
+    except SchemaError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
 
 
 def run_memory_command(args: argparse.Namespace) -> int:

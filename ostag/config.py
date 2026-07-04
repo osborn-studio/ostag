@@ -46,6 +46,7 @@ class Settings:
     max_context_chars: int = 30000
     allow_shell: bool = False
     audit_log: Path = Path("./logs/audit.log")
+    run_ledger_path: Path = Path("./logs/run_ledger.jsonl")
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
     mfs_server_url: str = "http://127.0.0.1:8000"
@@ -118,6 +119,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         max_context_chars=_int("OSTAG_MAX_CONTEXT_CHARS", 30000),
         allow_shell=_bool("OSTAG_ALLOW_SHELL", False),
         audit_log=Path(os.getenv("OSTAG_AUDIT_LOG", "./logs/audit.log")),
+        run_ledger_path=Path(os.getenv("OSTAG_RUN_LEDGER_PATH", "./logs/run_ledger.jsonl")),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),
         mfs_server_url=os.getenv("MFS_SERVER_URL", "http://127.0.0.1:8000"),
@@ -177,4 +179,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
     if overrides:
         data = settings.__dict__ | overrides
         settings = Settings(**data)
+    if "run_ledger_path" not in overrides and os.getenv("OSTAG_RUN_LEDGER_PATH") is None:
+        derived = settings.audit_log.parent / "run_ledger.jsonl"
+        settings = Settings(**(settings.__dict__ | {"run_ledger_path": derived}))
     return settings
