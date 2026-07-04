@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from ostag.config import Settings
+from ostag.core.safety import scrub_environment
 from ostag.mfs.helpers import build_mfs_search_command
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class MFSClient:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
+                    env=scrub_environment(extra=self.config.env_scrub_extra),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

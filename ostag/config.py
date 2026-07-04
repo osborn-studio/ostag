@@ -54,6 +54,7 @@ class Settings:
     governed_writes: bool = False
     followup_enabled: bool = True
     followup_after_seconds: int = 14400
+    env_scrub_extra: tuple[str, ...] = ()
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
     mfs_server_url: str = "http://127.0.0.1:8000"
@@ -137,6 +138,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         governed_writes=_bool("OSTAG_GOVERNED_WRITES", False),
         followup_enabled=_bool("OSTAG_FOLLOWUP_ENABLED", True),
         followup_after_seconds=_int("OSTAG_FOLLOWUP_AFTER_SECONDS", 14400),
+        env_scrub_extra=_csv("OSTAG_ENV_SCRUB_EXTRA"),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),
         mfs_server_url=os.getenv("MFS_SERVER_URL", "http://127.0.0.1:8000"),

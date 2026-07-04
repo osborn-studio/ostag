@@ -14,6 +14,7 @@ destructive action without approval, no secret logging, full audit trail.
 | No delete on tables | Table connectors declare `can_delete_records: false` |
 | No shell by default | `OSTAG_ALLOW_SHELL=false` default; CLI backends require explicit `*_UNSAFE_MODE` flags |
 | Scoped context | MFS access restricted to `MFS_ALLOWED_SCOPES` (`validate_scope`) |
+| Environment scrub | Agent backend (Codex/Claude CLI) and MFS subprocesses run with chat-platform secrets removed from their environment (`scrub_environment`, plus `OSTAG_ENV_SCRUB_EXTRA` for custom vars); model-provider keys are kept; connector CLIs are deliberately exempt as system-of-record transport |
 | Audit trail | Audit log (JSONL) + run ledger (JSONL) written for every handled event; prod mode hashes input instead of storing previews |
 | Input hygiene | `sanitize_user_text` strips control/bidi characters and redacts secrets before processing; `OSTAG_MAX_INPUT_CHARS` bounds input |
 | Actor permission model | Enforced: `OSTAG_ACTOR_PERMISSIONS` maps actors to `read < propose < write < admin`; `approve`/`apply` require `write`, denials are ledgered as `security_event` (`ostag/core/permissions.py`, `approvals.py`) |
@@ -55,6 +56,5 @@ before release.
 ## Next hardening phase
 
 - Sandbox/worktree execution mode for code-writing executors.
-- Environment scrub before executor invocation.
 - Repo write-access checks before any VCS-facing apply.
 - Approval quorum / second-approver policy for high-risk receipts.

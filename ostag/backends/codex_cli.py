@@ -4,6 +4,7 @@ import asyncio
 
 from ostag.backends.base import BackendError
 from ostag.config import Settings
+from ostag.core.safety import scrub_environment
 
 
 class CodexCLIBackend:
@@ -14,6 +15,7 @@ class CodexCLIBackend:
         cmd = build_codex_command(self.config, prompt)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            env=scrub_environment(extra=self.config.env_scrub_extra),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

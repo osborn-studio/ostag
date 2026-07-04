@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Environment scrub: Codex/Claude CLI backends and the MFS client now spawn
+  with chat-platform secrets (Feishu/Lark/Slack/DingTalk tokens and keys)
+  removed from their environment; model-provider keys are preserved.
+  `OSTAG_ENV_SCRUB_EXTRA` scrubs additional custom variables. Connector CLIs
+  (lark-cli/dws-cli) are deliberately exempt as system-of-record transport.
+
 - Governed task creation: under governed writes, Feishu/Lark task creation is
   proposed as a receipt (target `feishu_task`/`lark_task`) instead of
   executed; apply creates the task and backfills the task-link fields

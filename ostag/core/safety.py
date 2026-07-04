@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
@@ -41,6 +42,35 @@ def check_message_length(text: str, max_chars: int) -> SafetyResult:
         text=text[:max_chars],
         reason=f"message exceeds OSTAG_MAX_INPUT_CHARS={max_chars}",
     )
+
+
+# Chat-platform credentials OS Tag reads from the environment. Agent backends
+# (Codex/Claude CLI) and the MFS client never need these — they get a scrubbed
+# environment so a misbehaving or compromised agent process cannot read them.
+# Connector CLIs (lark-cli / dws-cli) are deliberately NOT scrubbed: they are
+# the system-of-record transport and may authenticate via these variables.
+PLATFORM_SECRET_ENV_VARS = (
+    "FEISHU_APP_SECRET",
+    "FEISHU_VERIFICATION_TOKEN",
+    "FEISHU_ENCRYPT_KEY",
+    "LARK_APP_SECRET",
+    "LARK_VERIFICATION_TOKEN",
+    "LARK_ENCRYPT_KEY",
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
+    "DINGTALK_CLIENT_SECRET",
+    "DINGTALK_ROBOT_SECRET",
+)
+
+
+def scrub_environment(
+    env: dict[str, str] | None = None, extra: tuple[str, ...] = ()
+) -> dict[str, str]:
+    """Copy of the environment with platform secrets (and ``extra`` vars) removed."""
+    scrubbed = dict(os.environ if env is None else env)
+    for name in PLATFORM_SECRET_ENV_VARS + tuple(extra):
+        scrubbed.pop(name, None)
+    return scrubbed
 
 
 def is_shell_allowed(allow_shell: bool) -> bool:

@@ -4,6 +4,7 @@ import asyncio
 
 from ostag.backends.base import BackendError
 from ostag.config import Settings
+from ostag.core.safety import scrub_environment
 
 
 class ClaudeCLIBackend:
@@ -14,6 +15,7 @@ class ClaudeCLIBackend:
         cmd = build_claude_command(self.config)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            env=scrub_environment(extra=self.config.env_scrub_extra),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
