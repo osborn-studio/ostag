@@ -13,7 +13,9 @@ from ostag.core.channel_brain import (
 from ostag.core.context import trim_context
 from ostag.core.event import NormalizedEvent
 from ostag.core.logging import write_audit_log
+from ostag.core.approvals import ApprovalService
 from ostag.core.prompt import PromptContext, build_chat_prompt
+from ostag.core.receipts import parse_receipt_command
 from ostag.core.run_ledger import RunLedger
 from ostag.core.safety import check_message_length, sanitize_user_text
 from ostag.core.schemas import Run
@@ -30,6 +32,7 @@ class OSTagRunner:
         auto_base_workflow: AutoBaseWorkflow | None = None,
         channel_brain_store: ChannelBrainStore | None = None,
         run_ledger: RunLedger | None = None,
+        approvals: ApprovalService | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
@@ -37,6 +40,7 @@ class OSTagRunner:
         self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
         self.channel_brain = channel_brain_store or ChannelBrainStore(config)
         self.run_ledger = run_ledger or RunLedger(config.run_ledger_path)
+        self.approvals = approvals or ApprovalService(config, self.run_ledger)
 
     def _finish(self, run: Run, reply: str, *, ok: bool, detail: str = "") -> str:
         self.run_ledger.record_status(
@@ -82,6 +86,23 @@ class OSTagRunner:
                 ok=False,
                 detail=length.reason or "rejected",
             )
+
+        receipt_command = parse_receipt_command(text)
+        if receipt_command is not None:
+            reply = await self.approvals.handle_text_command(
+                receipt_command, actor_id=event.sender_id, chat_id=event.chat_id
+            )
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="receipts",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="ok",
+                env=self.config.env,
+            )
+            return self._finish(run, reply, ok=True)
 
         remember_fact = extract_remember_fact(text)
         if remember_fact is not None:

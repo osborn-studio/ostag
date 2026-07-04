@@ -37,6 +37,36 @@ ostag connector list --json
 ostag connector list --platform dingtalk --json
 ```
 
+## Receipt verbs
+
+```bash
+ostag approve <n|action_id> [--actor U1] [--chat C1] --json
+ostag reject  <n|action_id> [--actor U1] [--chat C1] --json
+ostag apply   <n|action_id> [--actor U1] [--chat C1] --json
+ostag continue <run_id|action_id> [--actor U1] --json
+```
+
+- `--actor` defaults to `local-admin`, which resolves to `admin` unless
+  explicitly demoted via `OSTAG_ACTOR_PERMISSIONS` — the CLI runs on the
+  operator's own machine. Pass `--actor <id>` to act as (and be permission-
+  checked as) a specific actor.
+- Numeric references resolve against pending receipts (scoped by `--chat`
+  when given).
+- `apply` requires `OSTAG_APPLY_ENABLED=true` and a registered executor;
+  otherwise it returns `apply_disabled` / `no_apply_executor` errors and the
+  approval is preserved.
+
+## Receipt management
+
+```bash
+ostag receipts list [--chat C1] [--pending] --json
+ostag receipts propose --file receipt.json [--chat C1] [--source-platform feishu] --json
+```
+
+`receipts propose` reads an `ActionReceipt` JSON object (see
+`docs/action_receipt_protocol.md`) — this is the agent-facing entry point for
+putting a mutation under governance from outside a chat thread.
+
 ## Channel memory (existing)
 
 ```bash
@@ -66,7 +96,6 @@ Agent-facing guarantees:
 
 ## Planned next commands
 
-`ostag run` (submit work from CLI), `ostag approve/reject/apply/continue`
-(receipt verbs from CLI, sharing `parse_receipt_command` semantics),
-`ostag context export --run`, `ostag channel policy show/set`,
-`ostag connector test <platform>`, `ostag ambient run-once`.
+`ostag run` (submit work from CLI), `ostag context export --run`,
+`ostag channel policy show/set`, `ostag connector test <platform>`,
+`ostag ambient run-once`.

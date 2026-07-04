@@ -16,6 +16,8 @@ from typing import Any
 from ostag.core.event import NormalizedEvent
 from ostag.core.safety import redact_secrets
 from ostag.core.schemas import (
+    ActionReceipt,
+    ApprovalDecision,
     Artifact,
     LedgerEvent,
     Run,
@@ -150,6 +152,114 @@ class RunLedger:
             if record.get("event_type") == "artifact_recorded"
             and isinstance(record.get("payload", {}).get("artifact"), dict)
         ]
+
+    def record_receipt(
+        self, receipt: ActionReceipt, *, chat_id: str = "", platform: str = ""
+    ) -> LedgerEvent:
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=receipt.run_id,
+                event_type="action_proposed",
+                payload={
+                    "receipt": receipt.to_dict(),
+                    "chat_id": chat_id,
+                    "platform": platform,
+                },
+            )
+        )
+
+    def record_receipt_state(
+        self, receipt: ActionReceipt, *, previous_state: str, actor_id: str = "", detail: str = ""
+    ) -> LedgerEvent:
+        payload: dict[str, Any] = {
+            "action_id": receipt.action_id,
+            "from_state": previous_state,
+            "to_state": receipt.state,
+        }
+        if actor_id:
+            payload["actor_id"] = actor_id
+        if detail:
+            payload["detail"] = detail
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=receipt.run_id,
+                event_type="action_state_changed",
+                payload=payload,
+            )
+        )
+
+    def record_approval(self, decision: ApprovalDecision) -> LedgerEvent:
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=decision.run_id or decision.action_id,
+                event_type="approval_recorded",
+                payload={"decision": decision.to_dict()},
+            )
+        )
+
+    def record_security_event(self, run_id: str, reason: str) -> LedgerEvent:
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=run_id,
+                event_type="security_event",
+                payload={"reason": reason},
+            )
+        )
+
+    def _fold_receipts(self) -> dict[str, dict[str, Any]]:
+        """Reconstruct latest receipt payloads from proposed/state-changed events."""
+        entries: dict[str, dict[str, Any]] = {}
+        for record in self._read_all():
+            event_type = record.get("event_type")
+            payload = record.get("payload", {})
+            if event_type == "action_proposed" and isinstance(payload.get("receipt"), dict):
+                action_id = payload["receipt"].get("action_id")
+                if action_id:
+                    entries[action_id] = {
+                        "receipt": dict(payload["receipt"]),
+                        "chat_id": payload.get("chat_id", ""),
+                        "platform": payload.get("platform", ""),
+                    }
+            elif event_type == "action_state_changed":
+                entry = entries.get(payload.get("action_id", ""))
+                if entry and payload.get("to_state"):
+                    entry["receipt"]["state"] = payload["to_state"]
+                    entry["receipt"]["updated_at"] = record.get(
+                        "created_at", entry["receipt"].get("updated_at")
+                    )
+        return entries
+
+    def get_receipt(self, action_id: str) -> ActionReceipt:
+        entry = self._fold_receipts().get(action_id)
+        if entry is None:
+            raise SchemaError(
+                code="action_not_found",
+                message=f"No receipt found for action_id={action_id!r}",
+                recovery_hint=(
+                    "List pending receipts with 'ostag receipts list --json' "
+                    "or check the run with 'ostag ledger export'."
+                ),
+            )
+        return ActionReceipt.from_dict(entry["receipt"])
+
+    def list_receipts(
+        self, *, chat_id: str | None = None, states: tuple[str, ...] | None = None
+    ) -> list[ActionReceipt]:
+        """Receipts in proposal order, optionally filtered by chat and states."""
+        receipts: list[ActionReceipt] = []
+        for entry in self._fold_receipts().values():
+            if chat_id is not None and entry["chat_id"] != chat_id:
+                continue
+            receipt = ActionReceipt.from_dict(entry["receipt"])
+            if states is not None and receipt.state not in states:
+                continue
+            receipts.append(receipt)
+        receipts.sort(key=lambda item: item.created_at)
+        return receipts
 
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         """Return the most recent run snapshots, newest first."""

@@ -12,11 +12,14 @@ from ostag.adapters.lark import LarkAdapter
 from ostag.adapters.slack import SlackAdapter
 from ostag.config import load_settings
 from ostag.core.ambient import AmbientScheduler
+from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
+from ostag.core.permissions import LOCAL_ADMIN_ACTOR
+from ostag.core.receipts import ReceiptCommand
 from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
-from ostag.core.schemas import SchemaError
+from ostag.core.schemas import ActionReceipt, SchemaError
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 
 
@@ -66,6 +69,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     connector_list.add_argument("--json", action="store_true")
 
+    for verb in ("approve", "reject", "apply", "continue"):
+        verb_parser = subparsers.add_parser(
+            verb, help=f"{verb.capitalize()} an action receipt (or run, for continue)."
+        )
+        verb_parser.add_argument(
+            "reference", help="Pending index, action_... id, or run_... id (continue/status)."
+        )
+        verb_parser.add_argument(
+            "--actor",
+            default=LOCAL_ADMIN_ACTOR,
+            help="Actor id to execute as (default: local-admin).",
+        )
+        verb_parser.add_argument("--chat", help="Chat id scope for numeric indexes.")
+        verb_parser.add_argument("--json", action="store_true")
+        verb_parser.add_argument("--config")
+
+    receipts = subparsers.add_parser("receipts", help="Manage action receipts.")
+    receipts_sub = receipts.add_subparsers(dest="receipts_command", required=True)
+    receipts_list = receipts_sub.add_parser("list", help="List receipts.")
+    receipts_list.add_argument("--chat", help="Filter by chat id.")
+    receipts_list.add_argument("--pending", action="store_true", help="Pending states only.")
+    receipts_list.add_argument("--json", action="store_true")
+    receipts_list.add_argument("--config")
+    receipts_propose = receipts_sub.add_parser(
+        "propose", help="Propose a new receipt from a JSON file."
+    )
+    receipts_propose.add_argument("--file", required=True, type=Path)
+    receipts_propose.add_argument("--chat", default="", help="Chat id the receipt belongs to.")
+    receipts_propose.add_argument(
+        "--source-platform",
+        default="",
+        choices=["", "slack", "feishu", "lark", "dingtalk", "github", "gitlab"],
+        help="Platform the receipt belongs to.",
+    )
+    receipts_propose.add_argument("--json", action="store_true")
+    receipts_propose.add_argument("--config")
+
     parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--live", action="store_true", help="Disable dry-run and require live credentials.")
@@ -94,6 +134,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return run_memory_command(args)
     if args.command in ("status", "ledger", "artifacts", "connector"):
         return run_inspection_command(args)
+    if args.command in ("approve", "reject", "apply", "continue", "receipts"):
+        return await run_receipt_command(args)
 
     overrides = {}
     if args.platform:
@@ -172,6 +214,50 @@ def run_inspection_command(args: argparse.Namespace) -> int:
             _emit(ledger.list_artifacts(args.run), as_json=as_json)
             return 0
         raise AssertionError(args.command)
+    except SchemaError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
+
+
+async def run_receipt_command(args: argparse.Namespace) -> int:
+    """Receipt verbs and receipt management for humans and agents."""
+    as_json = getattr(args, "json", False)
+    config = load_settings(getattr(args, "config", None))
+    ledger = RunLedger(config.run_ledger_path)
+    service = ApprovalService(config, ledger)
+    try:
+        if args.command == "receipts":
+            if args.receipts_command == "list":
+                states = PENDING_STATES if args.pending else None
+                receipts = ledger.list_receipts(chat_id=args.chat, states=states)
+                _emit([receipt.to_dict() for receipt in receipts], as_json=as_json)
+                return 0
+            if args.receipts_command == "propose":
+                payload = json.loads(args.file.read_text(encoding="utf-8"))
+                receipt = ActionReceipt.from_dict(payload)
+                service.propose(
+                    receipt, chat_id=args.chat, platform=args.source_platform
+                )
+                _emit(receipt.to_dict(), as_json=as_json)
+                return 0
+            raise AssertionError(args.receipts_command)
+
+        command = ReceiptCommand(verb=args.command, reference=args.reference)
+        result = await service.execute(command, actor_id=args.actor, chat_id=args.chat)
+        _emit(result, as_json=as_json)
+        return 0
+    except json.JSONDecodeError as exc:
+        _emit(
+            {
+                "error": {
+                    "code": "invalid_json",
+                    "message": f"Could not parse {args.file}: {exc}",
+                    "recovery_hint": "Provide a JSON object matching the ActionReceipt schema.",
+                }
+            },
+            as_json=as_json,
+        )
+        return 1
     except SchemaError as exc:
         _emit({"error": exc.to_dict()}, as_json=as_json)
         return 1

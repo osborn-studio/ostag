@@ -88,6 +88,34 @@ Example text rendering:
 查询：status run_9
 ```
 
+## Live flow (chat and CLI)
+
+`ostag.core.approvals.ApprovalService` executes receipt verbs end to end:
+
+1. `OSTagRunner` parses every mention message with `parse_receipt_command()`;
+   matches are routed to the approval service instead of the LLM backend.
+2. Actor permission is resolved (`ostag.core.permissions`):
+   `status` needs `read`, `reject`/`continue` need `propose`,
+   `approve`/`apply` need `write`. Denials are recorded in the ledger as
+   `security_event` and replied with a recovery hint.
+3. Numeric references (`approve 1`) resolve against pending receipts in the
+   same chat, in proposal order. `action_*` ids resolve globally.
+4. TTL staleness (`OSTAG_RECEIPT_TTL_SECONDS`, default 24h) is enforced on
+   access: an expired pending receipt is marked `stale` in the ledger and the
+   verb is refused.
+5. `approve`/`reject` record both `action_state_changed` and an
+   `ApprovalDecision` (`approval_recorded`) with the deciding actor.
+6. `apply` is double-gated: `OSTAG_APPLY_ENABLED` (default false) **and** an
+   `ApplyExecutor` registered for the receipt's `target_system`. Success
+   records evidence; executor errors mark the receipt `failed` with ledger
+   detail. The approval survives an `apply_disabled` refusal.
+7. `continue` currently returns the run snapshot with a note; scheduled
+   continuation is a later phase.
+
+Receipts are persisted in the run ledger itself (`action_proposed` +
+`action_state_changed` events) and reconstructed by folding events — one
+audit source of truth, no second store.
+
 ## Acceptance criteria
 
 - Platforms without buttons get the text command fallback. ✅

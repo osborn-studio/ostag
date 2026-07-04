@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Wired receipt verbs into live flows: chat messages `approve/reject/apply/
+  continue/status <ref>` are parsed by the runner and executed by the new
+  `ApprovalService` (`ostag/core/approvals.py`), with replies in the source
+  thread.
+- Enforced actor permissions (`OSTAG_ACTOR_PERMISSIONS`,
+  `OSTAG_DEFAULT_PERMISSION_LEVEL`): `approve`/`apply` require `write`;
+  denials are ledgered as `security_event` (`ostag/core/permissions.py`).
+- Receipts are now persisted in the run ledger (`action_proposed`,
+  `action_state_changed`, `approval_recorded`) and reconstructed by folding
+  events; every approve/reject records an `ApprovalDecision` with actor.
+- Apply is double-gated: `OSTAG_APPLY_ENABLED` (default false) plus a
+  registered `ApplyExecutor` per target system; executor failures mark the
+  receipt `failed` with ledger evidence.
+- TTL staleness enforced on access (`OSTAG_RECEIPT_TTL_SECONDS`, default
+  24h): expired pending receipts are marked `stale` and refuse all verbs.
+- New CLI: `ostag approve/reject/apply/continue <ref>` (with `--actor`,
+  default `local-admin`) and `ostag receipts list/propose` for agents.
+
 - Added open governance protocol schemas: `Run`, `ContextPacket`,
   `ActionReceipt`, `Artifact`, `PermissionGrant`, `ApprovalDecision`,
   `ApplyPlan`, `LedgerEvent`, `ConnectorCapability` (`ostag/core/schemas.py`).

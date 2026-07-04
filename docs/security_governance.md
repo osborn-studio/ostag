@@ -16,7 +16,10 @@ destructive action without approval, no secret logging, full audit trail.
 | Scoped context | MFS access restricted to `MFS_ALLOWED_SCOPES` (`validate_scope`) |
 | Audit trail | Audit log (JSONL) + run ledger (JSONL) written for every handled event; prod mode hashes input instead of storing previews |
 | Input hygiene | `sanitize_user_text` strips control/bidi characters and redacts secrets before processing; `OSTAG_MAX_INPUT_CHARS` bounds input |
-| Actor permission model | `PermissionGrant` with ordered levels `read < propose < write < admin` and `allows()` check (schema level; enforcement wiring is a next phase) |
+| Actor permission model | Enforced: `OSTAG_ACTOR_PERMISSIONS` maps actors to `read < propose < write < admin`; `approve`/`apply` require `write`, denials are ledgered as `security_event` (`ostag/core/permissions.py`, `approvals.py`) |
+| Apply double-gated | `OSTAG_APPLY_ENABLED=false` by default **and** apply requires a registered executor for the target system; failures leave `failed` state with ledger detail |
+| Approval audit | Every approve/reject records an `ApprovalDecision` (`approval_recorded`) with the deciding actor |
+| Stale approvals rejected in live flows | TTL (`OSTAG_RECEIPT_TTL_SECONDS`, default 24h) enforced on access; expired receipts marked `stale` in the ledger |
 
 ## Governance data model
 
@@ -49,10 +52,9 @@ before release.
 
 ## Next hardening phase
 
-- Wire `PermissionGrant` checks into the runner/workflows (read-only actor
-  cannot approve or apply).
-- Approval recording (`ApprovalDecision`) written to the run ledger when
-  receipt verbs execute in live flows.
+- Per-channel policy (permission and apply policy scoped to platform/channel,
+  not just global config).
 - Sandbox/worktree execution mode for code-writing executors.
 - Environment scrub before executor invocation.
 - Repo write-access checks before any VCS-facing apply.
+- Approval quorum / second-approver policy for high-risk receipts.
