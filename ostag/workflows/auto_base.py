@@ -20,7 +20,7 @@ from ostag.connectors.requirements import (
     LarkCLIRequirementTableConnector,
     RequirementTableConnector,
 )
-from ostag.connectors.apply import target_system_for_platform
+from ostag.connectors.apply import target_system_for_platform, task_system_for_platform
 from ostag.connectors.tasks import LarkCLITaskConnector, TaskConnector
 from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy, channel_policy_for_event
 from ostag.core.event import NormalizedEvent
@@ -172,6 +172,45 @@ class AutoBaseWorkflow:
         # anchor to the current run.
         self.current_run_id = ""
 
+    def _propose_task_receipt(
+        self,
+        event: NormalizedEvent,
+        command: RequirementManagementCommand,
+        record: MatchingRecord,
+        resolved: ResolvedTable,
+        fields: list[FieldInfo],
+    ) -> str:
+        """Propose task creation as a receipt; apply creates it and backfills links."""
+        summary = (record_title(record) or command.target)[:200]
+        backfill = [
+            found.name
+            for name in ("飞书任务", "任务链接")
+            if (found := find_field(fields, name)) is not None
+        ]
+        assignee = (
+            (command.assignee.name or command.assignee.open_id) if command.assignee else ""
+        )
+        return self._propose_write_receipt(
+            event,
+            title=f"为需求「{record_label(record)}」创建飞书任务",
+            target_object=record.record_id,
+            mutation_type="create",
+            summary=f"任务：{summary}" + (f"；负责人：{assignee}" if assignee else ""),
+            risk="medium",
+            target_system=task_system_for_platform(event.platform),
+            apply_payload={
+                "operation": "create_task",
+                "base_token": resolved.base_token,
+                "table_id": resolved.table.table_id,
+                "record_id": record.record_id,
+                "summary": summary,
+                "description": record_description(record)[:4000],
+                "assignee_open_id": command.assignee.open_id if command.assignee else "",
+                "idempotency_key": f"ostag-{record.record_id}",
+                "backfill_fields": backfill,
+            },
+        )
+
     def _propose_write_receipt(
         self,
         event: NormalizedEvent,
@@ -182,13 +221,14 @@ class AutoBaseWorkflow:
         summary: str,
         risk: str,
         apply_payload: dict[str, Any],
+        target_system: str | None = None,
     ) -> str:
         """Record a receipt for a deferred table write and render the approval reply."""
         receipt = ActionReceipt(
             action_id=new_id("action"),
             run_id=self.current_run_id or new_id("run"),
             title=title,
-            target_system=target_system_for_platform(event.platform),
+            target_system=target_system or target_system_for_platform(event.platform),
             target_object=target_object,
             mutation_type=mutation_type,
             summary=summary,
@@ -324,38 +364,46 @@ class AutoBaseWorkflow:
         ledger.complete("target_found", "已定位需求")
         patch = build_requirement_patch(command, fields)
         policy = channel_policy_for_event(event, self.config)
-        enforce_requirement_policy(command, patch, policy)
+        governed = effective_flag(policy.governed_writes, self.config.governed_writes)
+        enforce_requirement_policy(command, patch, policy, governed=governed)
         self._enforce_action_budget(event, policy)
         ledger.complete("permission_checked", "已校验可执行动作")
+        if not patch and not command.create_task:
+            raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
+
+        proposals: list[str] = []
         task_result: dict[str, Any] | None = None
-        if command.create_task:
+        if command.create_task and governed:
+            proposals.append(self._propose_task_receipt(event, command, record, resolved, fields))
+        elif command.create_task:
             task_result = await self._create_lark_task(command, record)
             task_url = extract_task_url(task_result)
             if task_url:
                 patch.update(field_patch_if_exists(fields, "飞书任务", task_url))
                 patch.update(field_patch_if_exists(fields, "任务链接", task_url))
-        if not patch and not command.create_task:
-            raise AutoBaseError("没有识别到要更新的负责人、状态、优先级或任务动作。")
-        governed = effective_flag(policy.governed_writes, self.config.governed_writes)
         if patch and governed:
+            proposals.append(
+                self._propose_write_receipt(
+                    event,
+                    title=f"更新需求「{record_label(record)}」",
+                    target_object=record.record_id,
+                    mutation_type="update",
+                    summary="；".join(f"{name}：{value}" for name, value in patch.items())
+                    or "字段更新",
+                    risk="low",
+                    apply_payload={
+                        "operation": "batch_update",
+                        "base_token": resolved.base_token,
+                        "table_id": resolved.table.table_id,
+                        "record_id": record.record_id,
+                        "patch": patch,
+                    },
+                )
+            )
+        if proposals:
             self.channel_brain.record_action(event.platform, event.chat_id)
             ledger.complete("proposed", "已生成审批回执")
-            reply = self._propose_write_receipt(
-                event,
-                title=f"更新需求「{record_label(record)}」",
-                target_object=record.record_id,
-                mutation_type="update",
-                summary="；".join(f"{name}：{value}" for name, value in patch.items()) or "字段更新",
-                risk="low",
-                apply_payload={
-                    "operation": "batch_update",
-                    "base_token": resolved.base_token,
-                    "table_id": resolved.table.table_id,
-                    "record_id": record.record_id,
-                    "patch": patch,
-                },
-            )
-            return f"{reply}\n{ledger.format_user()}"
+            return "\n\n".join(proposals) + "\n" + ledger.format_user()
         if patch:
             await self._update_record(resolved.base_token, resolved.table.table_id, record.record_id, patch)
         if patch or command.create_task:
@@ -1114,11 +1162,17 @@ def build_requirement_patch(
 
 
 def enforce_requirement_policy(
-    command: RequirementManagementCommand, patch: dict[str, Any], policy: ChannelPolicy
+    command: RequirementManagementCommand,
+    patch: dict[str, Any],
+    policy: ChannelPolicy,
+    *,
+    governed: bool = False,
 ) -> None:
     if command.create_task and not policy.task_create_allowed:
         raise AutoBaseError("频道策略禁止 OS Tag 创建飞书任务。")
-    if command.create_task and policy.task_create_requires_confirmation:
+    # Under governed writes the approval receipt IS the human confirmation,
+    # so the magic-phrase confirmation gate only applies to direct writes.
+    if command.create_task and policy.task_create_requires_confirmation and not governed:
         raise AutoBaseError("频道策略要求创建任务前先人工确认。请明确回复：确认创建任务。")
     if policy.writable_fields:
         blocked = [field for field in patch if field not in policy.writable_fields]

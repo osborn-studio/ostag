@@ -24,6 +24,13 @@ def target_system_for_platform(platform: str) -> str:
     return f"{platform}_base"
 
 
+def task_system_for_platform(platform: str) -> str:
+    """Name of the task system a platform's task creations land in."""
+    if platform in ("slack", "lark"):
+        return "lark_task"
+    return f"{platform}_task"
+
+
 class RequirementTableApplyExecutor:
     """Applies approved record patches and row imports to a requirement table."""
 
@@ -70,11 +77,72 @@ class RequirementTableApplyExecutor:
         )
 
 
+def _task_url(data: dict[str, Any]) -> str:
+    candidates = [data]
+    if isinstance(data.get("task"), dict):
+        candidates.append(data["task"])
+    for item in candidates:
+        for key in ("url", "app_link", "link"):
+            value = item.get(key)
+            if value:
+                return str(value)
+    return ""
+
+
+class TaskCreateApplyExecutor:
+    """Creates the approved task and backfills its link into declared record fields."""
+
+    def __init__(self, tasks: Any, requirements: RequirementTableConnector) -> None:
+        self.tasks = tasks
+        self.requirements = requirements
+
+    async def apply(self, receipt: ActionReceipt) -> str:
+        payload: dict[str, Any] = receipt.apply_payload
+        if payload.get("operation") != "create_task":
+            raise SchemaError(
+                code="unsupported_operation",
+                message=f"Receipt {receipt.action_id} has unsupported operation "
+                f"{payload.get('operation')!r} for the task executor",
+                recovery_hint="Task receipts must carry operation=create_task.",
+            )
+        summary = payload.get("summary", "")
+        if not summary:
+            raise SchemaError(
+                code="invalid_apply_payload",
+                message=f"Receipt {receipt.action_id} has no task summary",
+                recovery_hint="Re-propose the action so the payload is rebuilt.",
+            )
+        result = await self.tasks.create_task(
+            summary=summary,
+            description=payload.get("description", ""),
+            assignee_open_id=payload.get("assignee_open_id") or None,
+            idempotency_key=payload.get("idempotency_key", f"ostag-{receipt.action_id}"),
+        )
+        data = result.get("data", {}) if isinstance(result.get("data"), dict) else result
+        url = _task_url(data)
+        backfill = [name for name in payload.get("backfill_fields", []) if name]
+        evidence = f"created task {url or '(no url returned)'}"
+        if url and backfill and payload.get("record_id"):
+            await self.requirements.batch_update(
+                payload.get("base_token", ""),
+                payload.get("table_id", ""),
+                payload["record_id"],
+                {name: url for name in backfill},
+            )
+            evidence += f"; backfilled {', '.join(backfill)} on {payload['record_id']}"
+        return evidence
+
+
 def build_apply_executors(workflow: Any) -> dict[str, Any]:
     """Executor registry for an AutoBaseWorkflow's connectors, keyed by target system."""
     executor = RequirementTableApplyExecutor(workflow.requirements)
-    return {
+    registry: dict[str, Any] = {
         "feishu_base": executor,
         "lark_base": executor,
         "dingtalk_ai_table": executor,
     }
+    if hasattr(workflow, "tasks"):
+        task_executor = TaskCreateApplyExecutor(workflow.tasks, workflow.requirements)
+        registry["feishu_task"] = task_executor
+        registry["lark_task"] = task_executor
+    return registry

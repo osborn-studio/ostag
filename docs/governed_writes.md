@@ -28,9 +28,12 @@ writes), then steps 2–3 once the team is comfortable.
 
 | Write path | Governed when enabled | Notes |
 |---|---|---|
-| Requirement patch (`base +record-batch-update`) | ✅ receipt (`mutation_type: update`, risk low) | includes owner/status/priority and task-link fields |
+| Requirement patch (`base +record-batch-update`) | ✅ receipt (`mutation_type: update`, risk low) | owner/status/priority fields |
 | Docx bulk import (`base +record-batch-create`) | ✅ receipt (`mutation_type: create`, risk medium) | the exact extracted rows are frozen in the payload |
-| Feishu task creation | ➖ keeps its existing channel-policy gate (`task_create_requires_confirmation`) | receipt governance planned |
+| Feishu task creation (`task +create`) | ✅ receipt (`mutation_type: create`, risk medium, target `feishu_task`/`lark_task`) | apply creates the task and backfills 任务链接/飞书任务 fields declared at proposal time; the receipt satisfies `task_create_requires_confirmation` |
+
+A combined command (patch + task) proposes **two receipts** — approve/apply
+each independently (`approve 1`, `approve 2`).
 
 The receipt's `apply_payload` freezes the exact mutation at proposal time
 (base token, table id, record id, patch / rows). Apply executes **exactly what

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Governed task creation: under governed writes, Feishu/Lark task creation is
+  proposed as a receipt (target `feishu_task`/`lark_task`) instead of
+  executed; apply creates the task and backfills the task-link fields
+  declared at proposal time. The receipt satisfies the
+  `task_create_requires_confirmation` channel gate; direct mode is unchanged.
+- Combined commands (patch + task) propose two independently approvable
+  receipts.
+
 - Ambient Mode V2 (`docs/ambient_v2.md`): new `overdue_requirement` and
   `missing_status` monitors alongside unowned/stale; every decision cites
   record id, rule, and threshold; done statuses stay quiet.
