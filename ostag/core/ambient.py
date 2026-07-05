@@ -450,6 +450,56 @@ def snapshots_from_records(data: dict[str, Any]) -> list[RequirementSnapshot]:
     return snapshots
 
 
+def format_weekly_requirement_review(
+    requirements: list[RequirementSnapshot],
+    *,
+    today: date,
+    stale_days: int = 7,
+) -> str:
+    week_start = today.fromordinal(today.toordinal() - today.weekday())
+    open_tasks = [item for item in requirements if not _is_done(item)]
+    completed_this_week = [
+        item
+        for item in requirements
+        if _is_done(item) and item.due_date is not None and week_start <= item.due_date <= today
+    ]
+    overdue = [
+        item
+        for item in open_tasks
+        if item.due_date is not None and item.due_date < today
+    ]
+    unowned = [item for item in open_tasks if not item.owner]
+    missing_status = [item for item in requirements if not item.status]
+    stale = [item for item in open_tasks if item.days_stale >= stale_days]
+
+    lines = [
+        f"OS Tag 本周需求回顾（{week_start.isoformat()} 至 {today.isoformat()}）：",
+        (
+            f"总计：{len(requirements)} 项；未完成：{len(open_tasks)} 项；"
+            f"本周完成：{len(completed_this_week)} 项。"
+        ),
+        (
+            f"风险：逾期：{len(overdue)} 项；无人负责：{len(unowned)} 项；"
+            f"缺状态：{len(missing_status)} 项；停滞：{len(stale)} 项。"
+        ),
+    ]
+    sections = (
+        ("逾期需求", overdue),
+        ("无人负责", unowned),
+        ("缺状态", missing_status),
+        (f"停滞超过 {stale_days} 天", stale),
+        ("本周完成", completed_this_week),
+    )
+    for title, tasks in sections:
+        if tasks:
+            lines.append(f"{title}：")
+            lines.extend(_review_task_lines(tasks, today=today))
+    if not any((overdue, unowned, missing_status, stale)):
+        lines.append("本周没有识别到逾期、无人负责、缺状态或停滞需求。")
+    lines.append("建议：优先处理逾期和无人负责项，并在需求表补齐负责人、状态和下一步。")
+    return "\n".join(lines)
+
+
 def format_daily_digest(
     kind: str,
     requirements: list[RequirementSnapshot],
@@ -647,6 +697,35 @@ def _task_lines(tasks: list[RequirementSnapshot], *, today: date) -> list[str]:
         lines.append("；".join(parts))
     if len(tasks) > 20:
         lines.append(f"... 还有 {len(tasks) - 20} 项未展示")
+    return lines
+
+
+def _review_task_lines(tasks: list[RequirementSnapshot], *, today: date) -> list[str]:
+    lines: list[str] = []
+    for task in tasks[:10]:
+        parts = [f"「{task.title or task.record_id}」", task.record_id]
+        if task.owner:
+            parts.append(f"负责人：{task.owner}")
+        else:
+            parts.append("负责人：未指定")
+        if task.status:
+            parts.append(f"状态：{task.status}")
+        else:
+            parts.append("状态：未设置")
+        if task.priority:
+            parts.append(f"优先级：{task.priority}")
+        if task.due_date:
+            due = task.due_date.isoformat()
+            if task.due_date < today and not _is_done(task):
+                due += " 已逾期"
+            elif task.due_date == today:
+                due += " 今日"
+            parts.append(f"截止：{due}")
+        if task.days_stale:
+            parts.append(f"停滞：{task.days_stale} 天")
+        lines.append("- " + "；".join(parts))
+    if len(tasks) > 10:
+        lines.append(f"- ... 还有 {len(tasks) - 10} 项未展示")
     return lines
 
 

@@ -9,6 +9,7 @@ from ostag.core.ambient import (
     AmbientScheduler,
     RequirementSnapshot,
     format_daily_digest,
+    format_weekly_requirement_review,
     snapshots_from_records,
 )
 from ostag.core.channel_brain import ChannelBrain, ChannelBrainStore, ChannelPolicy
@@ -226,6 +227,57 @@ def test_snapshots_from_records_extracts_owner_status_and_staleness() -> None:
             days_stale=20,
         ),
     ]
+
+
+def test_format_weekly_requirement_review_summarizes_risks() -> None:
+    review = format_weekly_requirement_review(
+        [
+            RequirementSnapshot(
+                record_id="rec_overdue",
+                title="交易盯盘",
+                owner="张三",
+                status="开发交付中",
+                priority="高",
+                due_date=date(2026, 7, 1),
+                days_stale=2,
+            ),
+            RequirementSnapshot(
+                record_id="rec_unowned",
+                title="客户周报",
+                owner="",
+                status="方案设计中",
+                due_date=date(2026, 7, 9),
+                days_stale=8,
+            ),
+            RequirementSnapshot(
+                record_id="rec_missing",
+                title="投研报告",
+                owner="李四",
+                status="",
+                due_date=date(2026, 7, 10),
+            ),
+            RequirementSnapshot(
+                record_id="rec_done",
+                title="本周已交付",
+                owner="王五",
+                status="已完成",
+                due_date=date(2026, 7, 3),
+            ),
+        ],
+        today=date(2026, 7, 5),
+        stale_days=7,
+    )
+
+    assert "OS Tag 本周需求回顾" in review
+    assert "未完成：3 项" in review
+    assert "本周完成：1 项" in review
+    assert "逾期：1 项" in review
+    assert "无人负责：1 项" in review
+    assert "缺状态：1 项" in review
+    assert "停滞：1 项" in review
+    assert "「交易盯盘」" in review
+    assert "rec_overdue" in review
+    assert "「客户周报」" in review
 
 
 def test_snapshots_from_records_extracts_feishu_user_ids_and_due_date() -> None:
