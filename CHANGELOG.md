@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-07-05
+
+The governance-layer release: OS Tag becomes an open control plane for
+human-agent collaboration. Open protocol schemas, a durable run ledger, the
+action receipt protocol (approve/reject/apply/continue) with actor
+permissions, high-risk approval quorum, and a four-eyes rule; governed writes
+across five connector families (Feishu/Lark Base, DingTalk AI Table,
+Feishu/Lark tasks, GitHub issues, GitLab issues); CLI-submittable runs with
+hashed context packets; durable scheduled continuations; per-channel policy;
+generalized ambient monitors; agent-subprocess environment scrubbing; and
+per-channel daily cost budgets. 264 tests. See entries below.
 
 - GitLab connector (`docs/gitlab_connector.md`): governed issue creation and
   commenting via the `glab` CLI (`OSTAG_GLAB_BIN`, `OSTAG_GITLAB_DEFAULT_REPO`),
