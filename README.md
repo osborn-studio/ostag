@@ -130,6 +130,21 @@ explicit env vars, audit and ledger redact secrets.
 - Capability declarations per connector: `ostag connector list --json`
   ([docs/connector_capabilities.md](docs/connector_capabilities.md))
 
+## Platform operating model
+
+Feishu and DingTalk should present the same OS Tag operating model to users:
+
+- **Feishu** — Feishu Base requirement pools, Feishu multidimensional-table
+  tasks, internal approval flows, and customer/business group ambient
+  monitoring with status follow-through.
+- **DingTalk** — DingTalk AI Table requirement management, AI Table task
+  objects, internal approval flows, and customer/business group ambient
+  monitoring with status follow-through.
+
+The platform-specific connector owns the system-of-record details, while the
+governance layer stays consistent: receipts, actor permissions, approval
+quorum, four-eyes rules, budgets, follow-ups, and ledger audit.
+
 ## Requirement table operations
 
 With a default Feishu Base / DingTalk AI Table configured
