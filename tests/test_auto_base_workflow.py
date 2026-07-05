@@ -20,6 +20,7 @@ from ostag.workflows.auto_base import (
     find_workflow_context,
     is_auto_base_request,
     is_auto_base_status_request,
+    is_requirement_weekly_review_request,
     parse_requirement_management_command,
 )
 
@@ -35,6 +36,14 @@ def test_auto_base_status_request_detection_is_intentional() -> None:
     assert is_auto_base_status_request("需求运营能力可以用了吗？")
     assert is_auto_base_status_request("请告诉我自动入表功能现在能不能用")
     assert not is_auto_base_status_request("请把docx里的需求填入表格")
+
+
+def test_requirement_weekly_review_request_detection_is_intentional() -> None:
+    assert is_requirement_weekly_review_request(
+        "看一下需求表里有哪些逾期或没人负责的需求，做一个本周的周报回顾"
+    )
+    assert is_requirement_weekly_review_request("请做一下本周需求周报")
+    assert not is_requirement_weekly_review_request("请把 交易盯盘 状态改为 开发交付中")
 
 
 def test_requirement_management_command_uses_default_base_and_real_mention(tmp_path: Path) -> None:
@@ -482,6 +491,98 @@ async def test_auto_base_workflow_answers_status_without_cli(tmp_path: Path) -> 
 
     assert reply is not None
     assert "已经上线" in reply
+
+
+async def test_auto_base_workflow_returns_weekly_requirement_review(tmp_path: Path) -> None:
+    class FakeCLI:
+        def __init__(self):
+            self.calls = []
+
+        async def json(self, *args):
+            self.calls.append(args)
+            if args[:2] == ("base", "+table-list"):
+                return {
+                    "ok": True,
+                    "data": {"tables": [{"table_id": "tblDefault", "name": "需求收集管理"}]},
+                }
+            if args[:2] == ("base", "+field-list"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "fields": [
+                            {"name": "需求名称", "type": "text"},
+                            {"name": "需求负责人", "type": "user"},
+                            {"name": "需求状态", "type": "select"},
+                            {"name": "优先级", "type": "select"},
+                            {"name": "预计/实际完成时间", "type": "date"},
+                            {"name": "需求持续时长", "type": "number"},
+                        ]
+                    },
+                }
+            if args[:2] == ("base", "+record-list"):
+                return {
+                    "ok": True,
+                    "data": {
+                        "records": [
+                            {
+                                "record_id": "rec_overdue",
+                                "fields": {
+                                    "需求名称": "交易盯盘",
+                                    "需求负责人": "张三",
+                                    "需求状态": "开发交付中",
+                                    "优先级": "高",
+                                    "预计/实际完成时间": "2026-07-01",
+                                    "需求持续时长": 3,
+                                },
+                            },
+                            {
+                                "record_id": "rec_unowned",
+                                "fields": {
+                                    "需求名称": "客户周报",
+                                    "需求负责人": "",
+                                    "需求状态": "方案设计中",
+                                    "预计/实际完成时间": "2026-07-09",
+                                    "需求持续时长": 8,
+                                },
+                            },
+                        ]
+                    },
+                }
+            if args[:2] in {
+                ("base", "+record-batch-update"),
+                ("base", "+record-batch-create"),
+                ("task", "+create"),
+            }:
+                raise AssertionError(f"weekly review must stay read-only: {args}")
+            raise AssertionError(f"unexpected lark-cli call: {args}")
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        auto_base_default_base_token="base_token",
+        auto_base_default_table_id="tblDefault",
+    )
+    fake_cli = FakeCLI()
+    workflow = AutoBaseWorkflow(config, cli=fake_cli)
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt",
+        chat_id="oc_demo",
+        message_id="om_demo",
+        sender_id="ou_sender",
+        text="看一下需求表里有哪些逾期或没人负责的需求，做一个本周的周报回顾",
+        mention_bot=True,
+    )
+
+    reply = await workflow.handle(event)
+
+    assert reply is not None
+    assert "OS Tag 本周需求回顾" in reply
+    assert "逾期：1 项" in reply
+    assert "无人负责：1 项" in reply
+    assert "「交易盯盘」" in reply
+    assert "「客户周报」" in reply
+    assert any(call[:2] == ("base", "+record-list") for call in fake_cli.calls)
 
 
 async def test_auto_base_workflow_updates_requirement_owner_and_status(tmp_path: Path) -> None:
