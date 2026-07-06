@@ -2,6 +2,10 @@
 
 ## Unreleased — 2026-07-14
 
+- Added consolidated audit export through `ostag audit export`, including
+  filterable run status and cost, action receipts, approval decisions, spend
+  totals, and security events. Exports can be scoped by UTC date range,
+  platform, or chat and written as redacted JSON.
 - Added the OStag Copilot Relay: an owner-scoped Feishu console for discovering
   osstack sessions, viewing bounded assistant snapshots, answering explicit
   decisions, changing direction, and creating governed tasks without exposing

@@ -132,6 +132,17 @@ ostag budget status --platform feishu --chat oc_xxx --json
 Set caps via `ostag channel policy set --daily-cost-budget N|inherit`. See
 `docs/cost_budget.md`.
 
+## Audit export
+
+```bash
+ostag audit export --since 2026-07-01 --platform feishu --json
+ostag audit export --chat oc_xxx --output audit.json --json
+```
+
+Consolidated bundle of runs, receipt states, approvals, costs, and security
+events, filterable by date range / platform / channel. See
+`docs/audit_export.md`.
+
 ## Channel policy
 
 ```bash
