@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Audit export (`docs/audit_export.md`): `ostag audit export` folds the run
+  ledger into one filterable bundle — runs with status and cost, receipt
+  states, approval decisions, spend totals, and security events — scoped by
+  `--since`/`--until` (UTC date range), `--platform`, and `--chat`, printed or
+  written to `--output`. Secrets are already redacted upstream. New
+  `RunLedger.events()` accessor.
+
 ## 0.2.0 — 2026-07-05
 
 The governance-layer release: OS Tag becomes an open control plane for

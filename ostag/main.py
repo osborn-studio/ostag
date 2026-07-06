@@ -174,6 +174,21 @@ def build_parser() -> argparse.ArgumentParser:
     ambient_run.add_argument("--json", action="store_true")
     ambient_run.add_argument("--config")
 
+    audit = subparsers.add_parser("audit", help="Consolidated audit export.")
+    audit_sub = audit.add_subparsers(dest="audit_command", required=True)
+    audit_export = audit_sub.add_parser(
+        "export", help="Export a filtered audit bundle (runs, receipts, costs, security)."
+    )
+    audit_export.add_argument("--since", help="Earliest UTC date, YYYY-MM-DD (inclusive).")
+    audit_export.add_argument("--until", help="Latest UTC date, YYYY-MM-DD (inclusive).")
+    audit_export.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk", "github", "gitlab"]
+    )
+    audit_export.add_argument("--chat", help="Filter by channel/chat id.")
+    audit_export.add_argument("--output", type=Path, help="Write the bundle to a file.")
+    audit_export.add_argument("--json", action="store_true")
+    audit_export.add_argument("--config")
+
     budget = subparsers.add_parser("budget", help="Cost budget inspection.")
     budget_sub = budget.add_subparsers(dest="budget_command", required=True)
     budget_status = budget_sub.add_parser(
@@ -277,6 +292,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return await run_ambient_command(args)
     if args.command == "budget":
         return run_budget_command(args)
+    if args.command == "audit":
+        return run_audit_command(args)
 
     overrides = {}
     if args.platform:
@@ -470,6 +487,33 @@ def _policy_payload(config, policy) -> dict:
         ),
     }
     return {"channel": channel, "effective": effective}
+
+
+def run_audit_command(args: argparse.Namespace) -> int:
+    from ostag.core.audit import AuditExporter
+
+    as_json = getattr(args, "json", False)
+    config = load_settings(getattr(args, "config", None))
+    ledger = RunLedger(config.run_ledger_path)
+    bundle = AuditExporter(config, ledger).export(
+        since=args.since,
+        until=args.until,
+        platform=args.platform,
+        chat_id=args.chat,
+    )
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(bundle, ensure_ascii=False, sort_keys=True, indent=2),
+            encoding="utf-8",
+        )
+        _emit(
+            {"output": str(args.output), "runs": bundle["summary"]["runs"]},
+            as_json=as_json,
+        )
+        return 0
+    _emit(bundle, as_json=as_json)
+    return 0
 
 
 def run_budget_command(args: argparse.Namespace) -> int:

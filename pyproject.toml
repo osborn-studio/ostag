@@ -32,6 +32,7 @@ testpaths = [
   "tests/test_ambient_v2.py",
   "tests/test_approval_quorum.py",
   "tests/test_approvals.py",
+  "tests/test_audit_export.py",
   "tests/test_budget.py",
   "tests/test_auto_base_workflow.py",
   "tests/test_capabilities.py",

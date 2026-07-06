@@ -115,6 +115,10 @@ class RunLedger:
                     continue
         return records
 
+    def events(self) -> list[dict[str, Any]]:
+        """Return every ledger record, in append order."""
+        return self._read_all()
+
     def export_run(self, run_id: str) -> list[dict[str, Any]]:
         """Return every ledger record for a run, in append order."""
         return [record for record in self._read_all() if record.get("run_id") == run_id]
