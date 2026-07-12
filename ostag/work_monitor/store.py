@@ -104,6 +104,12 @@ MIGRATIONS = (
             "ALTER TABLE commands ADD COLUMN ledger_synced INTEGER NOT NULL DEFAULT 0",
         )
     ),
+    Migration(
+        statements=(
+            "ALTER TABLE commands ADD COLUMN lease_until TEXT NOT NULL DEFAULT ''",
+            "CREATE TABLE IF NOT EXISTS instance_nonces (instance_id TEXT NOT NULL, nonce TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(instance_id,nonce))",
+        )
+    ),
 )
 
 
@@ -205,20 +211,35 @@ class MonitorStore:
         return None if row is None else StoredTask(**dict(row))
 
     def claim_pending_commands(
-        self, instance_id: str, *, claimed_at: str
+        self, instance_id: str, *, claimed_at: str, lease_until: str
     ) -> tuple[dict[str, Any], ...]:
         """Atomically return each pending command to one authenticated consumer."""
         with self.transaction() as connection:
             rows = connection.execute(
                 "SELECT command_id,payload FROM commands WHERE instance_id=? AND status='pending' "
-                "AND consumed_at IS NULL ORDER BY rowid",
-                (instance_id,),
+                "AND (lease_until='' OR lease_until<=?) "
+                "AND json_extract(payload,'$.expires_at')>? ORDER BY rowid",
+                (instance_id, claimed_at, claimed_at),
             ).fetchall()
             connection.executemany(
-                "UPDATE commands SET consumed_at=? WHERE command_id=? AND consumed_at IS NULL",
-                [(claimed_at, row["command_id"]) for row in rows],
+                "UPDATE commands SET consumed_at=?,lease_until=? WHERE command_id=?",
+                [(claimed_at, lease_until, row["command_id"]) for row in rows],
             )
         return tuple(json.loads(str(row["payload"])) for row in rows)
+
+    def consume_instance_nonce(
+        self, instance_id: str, nonce: str, *, now: int, ttl_seconds: int
+    ) -> bool:
+        try:
+            with self.transaction() as connection:
+                connection.execute("DELETE FROM instance_nonces WHERE expires_at<=?", (now,))
+                connection.execute(
+                    "INSERT INTO instance_nonces(instance_id,nonce,expires_at) VALUES (?,?,?)",
+                    (instance_id, nonce, now + ttl_seconds),
+                )
+        except sqlite3.IntegrityError:
+            return False
+        return True
 
     def stage_counts(self, instance_id: str | None = None) -> dict[str, int]:
         parameters: tuple[str, ...] = ()

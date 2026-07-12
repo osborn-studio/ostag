@@ -34,6 +34,34 @@ def _csv(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
 
 
+def _json_object(name: str) -> dict[str, object]:
+    value = json.loads(os.getenv(name, "{}"))
+    if not isinstance(value, dict) or not all(isinstance(key, str) and key for key in value):
+        raise ValueError(f"{name} must be a JSON object with non-empty string keys")
+    return value
+
+
+def _instance_secrets() -> tuple[tuple[str, str], ...]:
+    value = _json_object("OSTAG_MONITOR_INSTANCE_SECRETS")
+    if not all(isinstance(secret, str) and secret for secret in value.values()):
+        raise ValueError("OSTAG_MONITOR_INSTANCE_SECRETS values must be non-empty strings")
+    return tuple((key, secret) for key, secret in value.items())  # type: ignore[misc]
+
+
+def _human_credentials() -> tuple[tuple[str, str, str, str, str], ...]:
+    value = _json_object("OSTAG_MONITOR_HUMAN_CREDENTIALS")
+    required = {"platform", "actor_id", "destination_id", "chat_type"}
+    records = []
+    for token, credential in value.items():
+        if not isinstance(credential, dict) or set(credential) != required:
+            raise ValueError("human credentials require exactly platform, actor_id, destination_id, chat_type")
+        fields = tuple(credential[key] for key in ("platform", "actor_id", "destination_id", "chat_type"))
+        if not all(isinstance(field, str) and field for field in fields) or fields[-1] not in {"private", "group"}:
+            raise ValueError("human credential fields are invalid")
+        records.append((token, *fields))
+    return tuple(records)  # type: ignore[return-value]
+
+
 @dataclass(frozen=True)
 class Settings:
     env: str = "dev"
@@ -127,9 +155,19 @@ class Settings:
     monitor_osstack_bin: str = "osstack"
     monitor_osstack_references: Path = Path("./logs/osstack_task_references.json")
     monitor_server_db: Path = Path("/var/lib/ostag/work_monitor.sqlite3")
-    monitor_human_token: str = ""
     monitor_admin_token: str = ""
     monitor_instance_secrets: tuple[tuple[str, str], ...] = ()
+    monitor_human_credentials: tuple[tuple[str, str, str, str, str], ...] = ()
+    monitor_server_max_body_bytes: int = 1_048_576
+
+    def monitor_human_credentials_dict(self):
+        from ostag.core.identity import Principal
+        from ostag.work_monitor.identity import Destination
+        from ostag.work_monitor.server import HumanCredential
+        return {
+            token: HumanCredential(Principal(platform, actor), Destination(platform, destination, chat_type))
+            for token, platform, actor, destination, chat_type in self.monitor_human_credentials
+        }
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -243,14 +281,10 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_server_db=Path(
             os.getenv("OSTAG_MONITOR_SERVER_DB", "/var/lib/ostag/work_monitor.sqlite3")
         ),
-        monitor_human_token=os.getenv("OSTAG_MONITOR_HUMAN_TOKEN", ""),
         monitor_admin_token=os.getenv("OSTAG_MONITOR_ADMIN_TOKEN", ""),
-        monitor_instance_secrets=tuple(
-            (str(key), str(value))
-            for key, value in json.loads(
-                os.getenv("OSTAG_MONITOR_INSTANCE_SECRETS", "{}")
-            ).items()
-        ),
+        monitor_instance_secrets=_instance_secrets(),
+        monitor_human_credentials=_human_credentials(),
+        monitor_server_max_body_bytes=_int("OSTAG_MONITOR_SERVER_MAX_BODY_BYTES", 1_048_576),
     )
     if overrides:
         data = settings.__dict__ | overrides

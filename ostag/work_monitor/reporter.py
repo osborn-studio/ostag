@@ -415,15 +415,19 @@ class Reporter:
             }
         )
 
-    def _headers(self, body: bytes) -> dict[str, str]:
+    def _headers(self, method: str, path: str, body: bytes) -> dict[str, str]:
         timestamp = str(int(self.clock().timestamp()))
+        nonce = uuid.uuid4().hex
+        canonical = "\n".join(("v1", method.upper(), path, self.instance_id, timestamp, nonce,
+                                hashlib.sha256(body).hexdigest())).encode()
         signature = hmac.new(
-            self._secret.encode(), timestamp.encode() + b"\n" + body, hashlib.sha256
+            self._secret.encode(), canonical, hashlib.sha256
         ).hexdigest()
         return {
             "Content-Type": "application/json",
             "X-OStag-Instance": self.instance_id,
             "X-OStag-Timestamp": timestamp,
+            "X-OStag-Nonce": nonce,
             "X-OStag-Signature": signature,
         }
 
@@ -447,7 +451,8 @@ class Reporter:
         ).encode()
         try:
             response = self.transport.request(
-                "POST", f"{self.central_url}/v1/events", body, self._headers(body)
+                "POST", f"{self.central_url}/v1/events", body,
+                self._headers("POST", "/v1/events", body)
             )
         except OSError:
             response = TransportResponse(599, b"")
@@ -492,7 +497,7 @@ class Reporter:
                 "POST",
                 f"{self.central_url}/v1/commands/poll",
                 empty,
-                self._headers(empty),
+                self._headers("POST", "/v1/commands/poll", empty),
             )
         except (OSError, TimeoutError, urllib.error.URLError) as exc:
             self._record_error(f"command poll transport: {exc}")
@@ -611,7 +616,7 @@ class Reporter:
             try:
                 ack_response = self.transport.request(
                     "POST", f"{self.central_url}/v1/commands/{command.command_id}/ack", body,
-                    self._headers(body)
+                    self._headers("POST", f"/v1/commands/{command.command_id}/ack", body)
                 )
             except (OSError, TimeoutError, urllib.error.URLError) as exc:
                 self._record_error(f"command ack transport: {exc}")

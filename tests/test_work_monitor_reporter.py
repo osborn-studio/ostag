@@ -245,9 +245,10 @@ def test_flush_signs_exact_body_and_only_deletes_acknowledged_sequences(tmp_path
     )
     assert reporter.flush_once() == 1
     _, _, body, headers = transport.requests[0]
-    expected = hmac.new(
-        b"top-secret", headers["X-OStag-Timestamp"].encode() + b"\n" + body, hashlib.sha256
-    ).hexdigest()
+    canonical = "\n".join(("v1", "POST", "/v1/events", "macbook",
+                            headers["X-OStag-Timestamp"], headers["X-OStag-Nonce"],
+                            hashlib.sha256(body).hexdigest())).encode()
+    expected = hmac.new(b"top-secret", canonical, hashlib.sha256).hexdigest()
     assert headers["X-OStag-Signature"] == expected
     assert [e.sequence for e in reporter.pending_events()] == [2]
 

@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import sqlite3
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -16,7 +17,7 @@ from ostag.core.identity import Principal
 from ostag.core.schemas import ActionReceipt
 from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.projection import Projector
-from ostag.work_monitor.server import ServerAuth, create_app
+from ostag.work_monitor.server import HumanCredential, ServerAuth, create_app
 from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 
@@ -33,11 +34,15 @@ def _event(sequence: int = 1, *, task_id: str = "task-1", project: str = "ostag"
     }
 
 
-def _instance_headers(body: bytes, instance: str = "runner-1") -> dict[str, str]:
+def _instance_headers(body: bytes, instance: str = "runner-1", path: str = "/v1/events",
+                      nonce: str = "nonce-1") -> dict[str, str]:
     timestamp = str(int(datetime.now(UTC).timestamp()))
-    signature = hmac.new(b"runner-secret", timestamp.encode() + b"\n" + body, hashlib.sha256).hexdigest()
+    canonical = "\n".join(("v1", "POST", path, instance, timestamp, nonce,
+                            hashlib.sha256(body).hexdigest())).encode()
+    signature = hmac.new(b"runner-secret", canonical, hashlib.sha256).hexdigest()
     return {"X-OStag-Instance": instance, "X-OStag-Timestamp": timestamp,
-            "X-OStag-Signature": signature, "content-type": "application/json"}
+            "X-OStag-Nonce": nonce, "X-OStag-Signature": signature,
+            "content-type": "application/json"}
 
 
 def _human_headers(**extra: str) -> dict[str, str]:
@@ -54,7 +59,8 @@ def _app(tmp_path: Path, **kwargs: object):
                             local_admin=True)
     service = WorkMonitorService(store, identities)
     app = create_app(service=service, projector=Projector(store),
-                     auth=ServerAuth({"runner-1": "runner-secret"}, human_token="human-secret",
+                     auth=ServerAuth({"runner-1": "runner-secret"}, human_credentials={
+                         "human-secret": HumanCredential(Principal("feishu", "alice"), destination)},
                                      admin_token="admin-secret"), **kwargs)
     return app, store
 
@@ -79,11 +85,19 @@ def test_group_scope_allows_matching_tasks_and_rejects_cross_scope_access(tmp_pa
         Principal("feishu", "alice"), Destination("feishu", "project-chat", "group"),
         scope="project:ostag", local_admin=True,
     )
-    headers = _human_headers(**{"X-OStag-Destination": "project-chat", "X-OStag-Chat-Type": "group"})
+    group = Destination("feishu", "project-chat", "group")
+    app = create_app(
+        service=WorkMonitorService(store, identities), projector=Projector(store),
+        auth=ServerAuth({"runner-1": "runner-secret"}, human_credentials={
+            "scope-secret": HumanCredential(Principal("feishu", "alice"), group)}),
+    )
+    headers = _human_headers(**{"Authorization": "Bearer scope-secret",
+                               "X-OStag-Destination": "forged-chat",
+                               "X-OStag-Chat-Type": "private"})
     with TestClient(app) as client:
         for event in (_event(1), _event(2, task_id="task-2", project="secret")):
             body = json.dumps({"events": [event]}, separators=(",", ":")).encode()
-            assert client.post("/v1/events", content=body, headers=_instance_headers(body)).status_code == 200
+            assert client.post("/v1/events", content=body, headers=_instance_headers(body, nonce=f"nonce-{event['sequence']}")).status_code == 200
         assert [card["task_id"] for card in client.get("/v1/board", headers=headers).json()["cards"]] == ["task-1"]
         assert client.get("/v1/tasks/task-1", headers=headers).status_code == 200
         assert client.get("/v1/tasks/task-2", headers=headers).status_code == 404
@@ -95,7 +109,7 @@ def test_instance_identity_is_derived_from_hmac_not_payload(tmp_path: Path) -> N
     app, _ = _app(tmp_path)
     body = b'{"instance_id":"other"}'
     with TestClient(app) as client:
-        assert client.post("/v1/commands/poll", content=body, headers=_instance_headers(body)).status_code == 422
+        assert client.post("/v1/commands/poll", content=body, headers=_instance_headers(body, path="/v1/commands/poll")).status_code == 422
         assert client.post("/v1/events", json={"events": [_event()]}, headers={}).status_code == 401
 
 
@@ -114,38 +128,100 @@ def test_command_poll_is_single_consumer_and_ack_is_instance_scoped(tmp_path: Pa
                    ("cmd-1", "runner-1", "task-1", "pending", json.dumps(command), "action-1"))
     body = b"{}"
     with TestClient(app) as client:
-        first = client.post("/v1/commands/poll", content=body, headers=_instance_headers(body))
-        second = client.post("/v1/commands/poll", content=body, headers=_instance_headers(body))
+        first = client.post("/v1/commands/poll", content=body, headers=_instance_headers(body, path="/v1/commands/poll", nonce="poll-1"))
+        second = client.post("/v1/commands/poll", content=body, headers=_instance_headers(body, path="/v1/commands/poll", nonce="poll-2"))
         assert [item["command_id"] for item in first.json()["commands"]] == ["cmd-1"]
         assert second.json() == {"commands": []}
         ack_body = json.dumps({"result": {"ok": False, "code": "COMMAND_REJECTED"}}, separators=(",", ":")).encode()
         assert client.post("/v1/commands/cmd-1/ack", content=ack_body,
-                           headers=_instance_headers(ack_body)).status_code == 200
+                           headers=_instance_headers(ack_body, path="/v1/commands/cmd-1/ack", nonce="ack-1")).status_code == 200
 
 
 def test_store_claims_pending_commands_once_with_caller_clock(tmp_path: Path) -> None:
     store = MonitorStore(tmp_path / "claim.sqlite3")
     with store.connect() as db:
         db.execute("INSERT INTO commands(command_id,instance_id,task_id,status,payload) VALUES (?,?,?,?,?)",
-                   ("cmd-1", "runner-1", "task-1", "pending", '{"command_id":"cmd-1"}'))
+                   ("cmd-1", "runner-1", "task-1", "pending", '{"command_id":"cmd-1","expires_at":"2026-07-14T00:00:00+00:00"}'))
     fixed = datetime.fromisoformat("2026-07-13T01:02:03+00:00")
     service = WorkMonitorService(store, IdentityStore(store.path), clock=lambda: fixed)
     claimed = service.poll_commands("runner-1")
-    assert claimed == ({"command_id": "cmd-1"},)
+    assert claimed == ({"command_id": "cmd-1", "expires_at": "2026-07-14T00:00:00+00:00"},)
     assert service.poll_commands("runner-1") == ()
     with store.connect() as db:
         assert db.execute("SELECT consumed_at FROM commands").fetchone()["consumed_at"] == "2026-07-13T01:02:03+00:00"
 
 
+def test_v4_database_migrates_command_leases_and_nonce_cache(tmp_path: Path) -> None:
+    path = tmp_path / "v4.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE commands (command_id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, task_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL, consumed_at TEXT, action_id TEXT NOT NULL DEFAULT '', ack_payload TEXT NOT NULL DEFAULT '', ack_hash TEXT NOT NULL DEFAULT '', ledger_synced INTEGER NOT NULL DEFAULT 0)")
+        db.execute("PRAGMA user_version=4")
+    store = MonitorStore(path)
+    with store.connect() as db:
+        assert "lease_until" in {row[1] for row in db.execute("PRAGMA table_info(commands)")}
+        assert db.execute("SELECT name FROM sqlite_master WHERE name='instance_nonces'").fetchone()
+
+
+def test_command_lease_can_be_reclaimed_but_expired_command_is_never_delivered(tmp_path: Path) -> None:
+    store = MonitorStore(tmp_path / "lease.sqlite3")
+    now = [datetime.fromisoformat("2026-07-13T01:00:00+00:00")]
+    with store.connect() as db:
+        for command_id, expires_at in (("live", "2026-07-14T00:00:00+00:00"),
+                                       ("expired", "2026-07-13T00:00:00+00:00")):
+            payload = json.dumps({"command_id": command_id, "expires_at": expires_at})
+            db.execute("INSERT INTO commands(command_id,instance_id,task_id,status,payload) VALUES (?,?,?,?,?)",
+                       (command_id, "runner-1", "task-1", "pending", payload))
+    service = WorkMonitorService(store, IdentityStore(store.path), clock=lambda: now[0])
+    assert [item["command_id"] for item in service.poll_commands("runner-1")] == ["live"]
+    assert service.poll_commands("runner-1") == ()
+    now[0] += timedelta(seconds=31)
+    assert [item["command_id"] for item in service.poll_commands("runner-1")] == ["live"]
+
+
 def test_health_router_hook_and_no_placeholder_webhooks(tmp_path: Path) -> None:
     router = APIRouter()
     router.add_api_route("/extension", lambda: {"ok": True})
-    app, _ = _app(tmp_path, routers=[router])
+    app, _ = _app(tmp_path, routers=[(router, "authenticated_dependency")])
     paths = {route.path for route in app.routes}
     assert "/webhooks/feishu" not in paths and "/webhooks/telegram" not in paths
     with TestClient(app) as client:
         assert client.get("/healthz").json() == {"status": "ok"}
         assert client.get("/extension").json() == {"ok": True}
+
+
+def test_router_hook_rejects_missing_security_contract(tmp_path: Path) -> None:
+    try:
+        _app(tmp_path, routers=[APIRouter()])
+    except ValueError as exc:
+        assert "security contract" in str(exc)
+    else:
+        raise AssertionError("bare router was registered")
+
+
+def test_instance_signature_binds_path_and_nonce_replay_is_rejected(tmp_path: Path) -> None:
+    app, _ = _app(tmp_path)
+    body = json.dumps({"events": [_event()]}, separators=(",", ":")).encode()
+    headers = _instance_headers(body, nonce="one-shot")
+    with TestClient(app) as client:
+        assert client.post("/v1/events", content=body, headers=headers).status_code == 200
+        assert client.post("/v1/events", content=body, headers=headers).status_code == 401
+        wrong_path = _instance_headers(body, path="/v1/commands/poll", nonce="wrong-path")
+        assert client.post("/v1/events", content=body, headers=wrong_path).status_code == 401
+
+
+def test_instance_body_limit_rejects_before_authentication(tmp_path: Path) -> None:
+    app, _ = _app(tmp_path, settings=None)
+    with TestClient(app) as client:
+        response = client.post("/v1/events", content=b"x" * 1_048_577)
+    assert response.status_code == 413
+
+    def chunks():
+        yield b"x" * 700_000
+        yield b"y" * 700_000
+
+    with TestClient(app) as client:
+        chunked = client.post("/v1/events", content=chunks())
+    assert chunked.status_code == 413
 
 
 def test_authentication_happens_before_domain_call(tmp_path: Path) -> None:
@@ -160,8 +236,10 @@ def test_authentication_happens_before_domain_call(tmp_path: Path) -> None:
             raise AssertionError("domain called before authentication")
 
     spy = SpyService(store, identities)
+    credential = HumanCredential(Principal("feishu", "alice"), Destination("feishu", "chat", "private"))
     app = create_app(service=spy, projector=Projector(store),
-                     auth=ServerAuth({"runner-1": "runner-secret"}, human_token="human-secret"))
+                     auth=ServerAuth({"runner-1": "runner-secret"},
+                                     human_credentials={"human-secret": credential}))
     with TestClient(app) as client:
         assert client.get("/v1/board").status_code == 401
     assert spy.calls == 0
@@ -173,7 +251,8 @@ def _request_with_token(token: str) -> Request:
 
 
 def test_human_and_admin_credentials_are_not_interchangeable() -> None:
-    auth = ServerAuth({}, human_token="human-secret", admin_token="admin-secret")
+    credential = HumanCredential(Principal("feishu", "alice"), Destination("feishu", "chat", "private"))
+    auth = ServerAuth({}, human_credentials={"human-secret": credential}, admin_token="admin-secret")
     auth.admin(_request_with_token("admin-secret"))
     for token in ("human-secret", "wrong"):
         try:

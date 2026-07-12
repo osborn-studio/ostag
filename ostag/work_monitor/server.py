@@ -10,7 +10,7 @@ import time
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 
@@ -30,45 +30,48 @@ class LifespanOwner(Protocol):
 
 
 @dataclass(frozen=True)
+class HumanCredential:
+    principal: Principal
+    destination: Destination
+
+
+@dataclass(frozen=True)
 class ServerAuth:
     instance_secrets: dict[str, str]
-    human_token: str = ""
+    human_credentials: dict[str, HumanCredential] | None = None
     admin_token: str = ""
     max_clock_skew_seconds: int = 300
 
-    def instance(self, request: Request, body: bytes) -> str:
+    def instance(self, request: Request, body: bytes, store: MonitorStore) -> str:
         instance_id = request.headers.get("X-OStag-Instance", "")
         timestamp = request.headers.get("X-OStag-Timestamp", "")
         supplied = request.headers.get("X-OStag-Signature", "")
+        nonce = request.headers.get("X-OStag-Nonce", "")
         secret = self.instance_secrets.get(instance_id, "")
         try:
             fresh = abs(int(time.time()) - int(timestamp)) <= self.max_clock_skew_seconds
         except ValueError:
             fresh = False
-        expected = hmac.new(
-            secret.encode(), timestamp.encode() + b"\n" + body, hashlib.sha256
-        ).hexdigest()
-        if not secret or not fresh or not hmac.compare_digest(supplied, expected):
+        canonical = "\n".join(("v1", request.method.upper(), request.url.path, instance_id,
+                                timestamp, nonce, hashlib.sha256(body).hexdigest())).encode()
+        expected = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
+        valid = bool(secret and nonce and fresh) and hmac.compare_digest(supplied, expected)
+        if not valid or not store.consume_instance_nonce(
+            instance_id, nonce, now=int(time.time()), ttl_seconds=self.max_clock_skew_seconds
+        ):
             raise HTTPException(status_code=401, detail="invalid instance credentials")
         return instance_id
 
     def human(self, request: Request) -> tuple[Principal, Destination]:
         authorization = request.headers.get("Authorization", "")
         token = authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
-        if not self.human_token or not hmac.compare_digest(token, self.human_token):
+        matched: HumanCredential | None = None
+        for candidate, credential in (self.human_credentials or {}).items():
+            if hmac.compare_digest(token, candidate):
+                matched = credential
+        if matched is None:
             raise HTTPException(status_code=401, detail="invalid human credentials")
-        try:
-            principal = Principal(
-                request.headers["X-OStag-Platform"], request.headers["X-OStag-Actor"]
-            )
-            destination = Destination(
-                request.headers["X-OStag-Platform"],
-                request.headers["X-OStag-Destination"],
-                request.headers["X-OStag-Chat-Type"],
-            )
-        except (KeyError, ValueError) as exc:
-            raise HTTPException(status_code=400, detail="invalid human identity headers") from exc
-        return principal, destination
+        return matched.principal, matched.destination
 
     def admin(self, request: Request) -> None:
         authorization = request.headers.get("Authorization", "")
@@ -109,7 +112,7 @@ def create_app(
     service: WorkMonitorService | None = None,
     projector: Projector | None = None,
     auth: ServerAuth | None = None,
-    routers: Iterable[APIRouter] = (),
+    routers: Iterable[tuple[APIRouter, Literal["verified_platform", "authenticated_dependency"]]] = (),
     feishu_ws: LifespanOwner | None = None,
     scheduler: LifespanOwner | None = None,
     outbox: LifespanOwner | None = None,
@@ -132,7 +135,7 @@ def create_app(
             assert configured is not None
             auth = ServerAuth(
                 dict(configured.monitor_instance_secrets),
-                human_token=configured.monitor_human_token,
+                human_credentials=configured.monitor_human_credentials_dict(),
                 admin_token=configured.monitor_admin_token,
             )
         stop = asyncio.Event()
@@ -151,6 +154,22 @@ def create_app(
                     await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan)
+
+    async def bounded_body(request: Request) -> bytes:
+        limit = configured.monitor_server_max_body_bytes if configured else 1_048_576
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > limit:
+                    raise HTTPException(413, "request body too large")
+            except ValueError as exc:
+                raise HTTPException(400, "invalid content-length") from exc
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > limit:
+                raise HTTPException(413, "request body too large")
+        return bytes(body)
 
     def dependencies() -> tuple[WorkMonitorService, Projector, ServerAuth]:
         if runtime.service is None or runtime.projector is None or auth is None:
@@ -171,8 +190,8 @@ def create_app(
     @app.post("/v1/events")
     async def events(request: Request) -> dict[str, int]:
         svc, project, credentials = dependencies()
-        body = await request.body()
-        instance_id = credentials.instance(request, body)
+        body = await bounded_body(request)
+        instance_id = credentials.instance(request, body, svc.store)
         try:
             payload = json.loads(body)
             raw_events = payload["events"]
@@ -228,8 +247,8 @@ def create_app(
     @app.post("/v1/commands/poll")
     async def poll(request: Request) -> dict[str, list[dict[str, object]]]:
         svc, _, credentials = dependencies()
-        body = await request.body()
-        instance_id = credentials.instance(request, body)
+        body = await bounded_body(request)
+        instance_id = credentials.instance(request, body, svc.store)
         if body not in (b"", b"{}"):
             raise HTTPException(422, "poll body must be empty")
         return {"commands": list(svc.poll_commands(instance_id))}
@@ -237,8 +256,8 @@ def create_app(
     @app.post("/v1/commands/{command_id}/ack")
     async def ack(request: Request, command_id: str) -> dict[str, object]:
         svc, _, credentials = dependencies()
-        body = await request.body()
-        instance_id = credentials.instance(request, body)
+        body = await bounded_body(request)
+        instance_id = credentials.instance(request, body, svc.store)
         try:
             result = json.loads(body)["result"]
             receipt = svc.acknowledge_control(instance_id, command_id, result)
@@ -252,6 +271,17 @@ def create_app(
         return {"status": "ok"}
 
     for extension in routers:
-        app.include_router(extension)
+        if not isinstance(extension, tuple) or len(extension) != 2:
+            raise ValueError("router registration requires an explicit security contract")
+        register_router(app, extension[0], security=extension[1])
     return app
+
+
+def register_router(
+    app: FastAPI, router: APIRouter, *,
+    security: Literal["verified_platform", "authenticated_dependency"],
+) -> None:
+    if security not in {"verified_platform", "authenticated_dependency"}:
+        raise ValueError("unsupported router security contract")
+    app.include_router(router)
 app = create_app()

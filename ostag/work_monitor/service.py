@@ -191,10 +191,15 @@ class WorkMonitorService:
             return [dict(row) for row in rows]
         return [dict(row) for row in rows if row["instance_id"] in allowed_instances]
 
-    def poll_commands(self, instance_id: str) -> tuple[dict[str, Any], ...]:
+    def poll_commands(
+        self, instance_id: str, *, lease_seconds: int = 30
+    ) -> tuple[dict[str, Any], ...]:
         """Claim commands for an already-authenticated instance."""
+        claimed_at = self.clock()
         return self.store.claim_pending_commands(
-            instance_id, claimed_at=self.clock().isoformat()
+            instance_id,
+            claimed_at=claimed_at.isoformat(),
+            lease_until=(claimed_at + timedelta(seconds=lease_seconds)).isoformat(),
         )
 
     def watch(
