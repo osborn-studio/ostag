@@ -13,6 +13,7 @@
 ## File map
 
 - `ostag/work_monitor/models.py`: strict versioned monitor domain models and parsing.
+- `ostag/work_monitor/identity.py`: canonical principals and private/group bindings.
 - `ostag/work_monitor/redaction.py`: cloud allowlist and secret filtering.
 - `ostag/work_monitor/store.py`: SQLite event, projection, subscription, outbox, command repository.
 - `ostag/work_monitor/projection.py`: ordered idempotent Kanban projection.
@@ -27,19 +28,20 @@
 - `ostag/core/runner.py`: route monitor intents through the shared service.
 - `ostag/core/permissions.py`, `ostag/core/receipts.py`: extend existing governance verbs only.
 - `ostag/core/run_ledger.py`, `ostag/core/ambient.py`: monitor audit events and scheduler integration.
-- `ostag/main.py`, `ostag/config.py`: platform/reporter/relay CLI and settings.
+- `ostag/main.py`, `ostag/config.py`: platform, reporter, central-service CLI and settings.
 - `deploy/work-monitor/docker-compose.yml`, `Dockerfile`: persistent central service.
 - `deploy/work-monitor/edgeone-origin.md`: EdgeOne HTTPS/WAF/reverse-proxy settings.
 - `docs/ostag/work_monitor.md`, `docs/ostag/telegram_setup.md`: operations and setup.
 
 ### Task 1: Strict event contracts and outbound redaction
 
-**Files:** Create `ostag/work_monitor/__init__.py`, `models.py`, `redaction.py`; create `tests/test_work_monitor_models.py`, `tests/test_work_monitor_redaction.py`; modify `pyproject.toml` testpaths.
+**Files:** Create `ostag/work_monitor/__init__.py`, `models.py`, `redaction.py`; create `tests/test_work_monitor_models.py`, `tests/test_work_monitor_redaction.py`; modify `pyproject.toml` testpaths to the `tests` directory.
 
 - [ ] Write failing tests that parse a valid `task.blocked` event, reject an unknown `raw_log` field, reject commands without `expires_at`, and prove strings containing `Bearer`, `TOKEN=`, source, prompt and full log content never appear in serialized output.
 - [ ] Run `uv run pytest tests/test_work_monitor_models.py tests/test_work_monitor_redaction.py -q`; expect import failures.
 - [ ] Implement frozen dataclasses `TaskSnapshot`, `MonitorEvent`, `RemoteCommand` with explicit `from_dict` key-set validation. Use stages `triage,todo,ready,running,blocked,done`, event kinds from the design, 500-character summary and positive sequence.
 - [ ] Implement `sanitize_task_input(input: Mapping[str, object]) -> TaskSnapshot` by projecting only `task_id,title,project,status,agent,progress,duration_seconds,summary,error_class,evidence_ref`; replace token/password/authorization patterns with `[REDACTED]` and truncate before model construction.
+- [ ] Replace the current explicit pytest file whitelist with `testpaths = ["tests"]`. Run `uv run pytest --collect-only -q` and assert the output contains every new `test_work_monitor_*`, `test_feishu_work_monitor`, `test_feishu_card_security`, and `test_telegram_work_monitor` module; add this collection check to `scripts/release_check.sh` so a new test file cannot be silently skipped.
 - [ ] Re-run focused tests; expect all pass. Commit `feat(work-monitor): add strict remote event contracts`.
 
 ### Task 2: SQLite projection with ordering and idempotency
@@ -61,39 +63,31 @@
 - [ ] Run `uv run pytest tests/test_work_monitor_reporter.py -q`; expect import/CLI failures.
 - [ ] Implement `Reporter.tail_ledger_once`, `enqueue`, `flush_once`, `heartbeat`, `poll_commands_once` with injectable clock/transport and exponential backoff metadata. Persist ledger identity, byte offset and last event ID only after local spool commit. Add `ostag monitor ingest --file|--stdin`, `reporter run-once`, `reporter start`, and `reporter status`; the osstack bridge emits task ID/version/status through this CLI without importing internals.
 - [ ] Implement `CommandExecutor` with `OStagControlPort` and `OsstackControlPort` protocols. Persist capabilities and recheck at render/apply. Adapt osstack 0.8.1 cancel/loop.stop and existing cockpit retry/requeue; retry requires failed state and acknowledges only verified new/reordered attempt state. Never map `kanban.move`/`daemon.resume` to pause/resume. Compare instance/status/version and poll cancel terminal state.
-- [ ] Add settings for instance ID/secret, relay URL, spool DB, upload interval and command polling; keep reporter disabled by default.
+- [ ] Add settings for instance ID/secret, central-service URL, spool DB, upload interval and command polling; keep reporter disabled by default.
 - [ ] Verify `uv run pytest tests/test_work_monitor_reporter.py tests/test_work_monitor_executor.py tests/test_cli_run.py -q` and dry-run `uv run ostag monitor ingest --file examples/work_monitor_event.json --json`; expect sanitized queued event. Commit `feat(work-monitor): add durable reporter and command executor`.
 
 ### Task 3A: Complete osstack remote-control contract without duplicating retry
 
 **Files (in `/Users/gilbertchen/Documents/CODE/agentsteam/osstack`):** Modify `packages/cli/src/bin.ts` and the existing loop/task runtime owning task lifecycle; create/modify adjacent `*.test.ts` CLI/runtime tests; update the CLI reference and capability/version declaration.
 
+- [ ] Do not edit `/Users/gilbertchen/Documents/CODE/agentsteam/osstack` directly. First run `git -C .../osstack status --short`; preserve all user changes and abort direct-main work when dirty. Create an ignored isolated worktree/branch such as `git -C .../osstack worktree add .../osstack/.worktrees/ostag-remote-controls -b codex/ostag-remote-controls`. Record source HEAD, dirty-main guard result, and run the repository baseline install/build/focused tests in the isolated worktree before edits.
 - [ ] Locate authoritative task runtime and cockpit retry with `rg "retry|requeue|loop.stop|cancel|kanban.move|daemon.resume" packages`; record exact paths. First add characterization tests proving existing retry accepts only failed tasks and returns/creates the requeued attempt; do not reimplement it. Write failing tests for pause preserving resumable state, resume continuing the same task/run, and versioned remote command results.
 - [ ] Run exact focused pnpm/Vitest tests; expect cockpit retry characterization to pass and pause/resume/versioned contract tests to fail.
 - [ ] Adapt existing retry into the versioned remote command contract. Add only missing `task pause|resume` runtime/CLI capabilities with structured JSON containing task ID, prior/new status and monotonic version. Pause quiesces the active loop and resume continues that task; neither aliases `kanban.move` or `daemon.resume`.
-- [ ] Add capability discovery declaring actions only when supported. Run focused and full osstack release gates; publish/install that version, then prove OStag integration for all four actions and cancel terminal polling. Until this passes, UI shows `UNSUPPORTED` and production launch remains incomplete. Commit upstream and OStag changes separately.
+- [ ] Add capability discovery declaring actions only when supported. Run focused and full osstack release gates in the isolated worktree, commit there, then integrate by reviewed cherry-pick/PR without touching unrelated user changes. Publish/install the resulting osstack version into the OStag integration environment and record its version/SHA; prove all four actions and cancel polling. Until this passes, UI shows `UNSUPPORTED` and launch remains incomplete.
 
-### Task 4: Persistent FastAPI central service
+### Task 4: Shared identity, queries, subscriptions, and mobile view model
 
-**Files:** Create `ostag/work_monitor/server.py`; create `tests/test_work_monitor_server.py`; modify `pyproject.toml`, `ostag/config.py`; create `deploy/work-monitor/Dockerfile`, `deploy/work-monitor/docker-compose.yml`.
+**Files:** Create `ostag/work_monitor/identity.py`, `service.py`, `rendering.py`; modify `ostag/core/event.py`, `ostag/core/permissions.py`, `ostag/main.py`; create `tests/test_work_monitor_service.py`, `tests/test_work_monitor_rendering.py`, `tests/test_work_monitor_identity.py`; modify `tests/test_event_normalization.py`.
 
-- [ ] Add `server = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]`. Write failing `TestClient`/lifespan tests for APIs, command single-consumer poll/ack, card-action and Telegram routes, `/healthz`, exactly one Feishu WS consumer, WS crash supervision with bounded backoff, no duplicate consumer on restart, and graceful cancellation/join of WS/scheduler/drain.
-- [ ] Run `uv run --extra server pytest tests/test_work_monitor_server.py -q`; expect missing app/routes.
-- [ ] Implement FastAPI routes `/v1/events`, `/v1/board`, `/v1/tasks/{id}`, `/v1/instances`, `/v1/subscriptions`, `/v1/commands/poll`, `/v1/commands/{id}/ack`, `/webhooks/feishu/card-action`, `/webhooks/telegram`, `/healthz`. Authenticate/limit before domain calls, use `compare_digest`, persist replay nonce, and scope query tokens.
-- [ ] Implement FastAPI lifespan so one process owns scheduler/drain and supervises existing `FeishuAdapter.start` as the sole message WS consumer. Restart unexpected WS exits with capped backoff; expose degraded health while restarting; on shutdown signal, cancel and await WS/scheduler/drain. Docker Compose runs one uvicorn worker, persistent volume, restart/healthcheck and no secret literals.
-- [ ] Run focused tests, `docker compose -f deploy/work-monitor/docker-compose.yml config`, and `python -m compileall ostag`; expect pass. Commit `feat(work-monitor): add persistent central FastAPI service`.
-
-### Task 5: Shared queries, subscriptions, and mobile view model
-
-**Files:** Create `ostag/work_monitor/service.py`, `rendering.py`; modify `ostag/core/event.py`; create `tests/test_work_monitor_service.py`, `tests/test_work_monitor_rendering.py`, modify `tests/test_event_normalization.py`.
-
-- [ ] Write failing tests for `/board`, `/task`, `/instances`, `/watch`; capability-aware views hide/disable unsupported actions; `NormalizedEvent.chat_type` derives from signed Feishu/Telegram payloads; forged text/button private claims cannot elevate groups; ambiguous task selection; first-screen ordering and pagination.
+- [ ] Write failing tests for domain board/task/instances/watch methods and capability-aware views. Add identity tests for `Principal(platform, actor_id)`, owner/admin private binding, group enroll/revoke, revoked access denial, platform-scoped permissions, identical Feishu/Telegram actor strings never matching, and callback actor sourced only from trusted normalized payload.
 - [ ] Run focused tests; expect missing service/view types.
-- [ ] Implement `WorkMonitorService` using repository queries and existing `resolve_permission`/`level_allows`; store subscriptions by platform, destination, actor and scope with a delivery cursor. Implement `MobileBoardView` and `TaskDetailView` without platform markup.
+- [ ] Implement canonical frozen `Principal(platform, actor_id)` and binding records keyed by platform plus destination. Add local-admin/enrollment-secret private owner bind/list/revoke and owner-authorized group enroll/list/revoke; store platform-scoped grants/subscriptions and never resolve a naked actor ID.
+- [ ] Implement `WorkMonitorService` using repository queries and `Principal`-aware permission resolution; store subscriptions with delivery cursor. Implement `MobileBoardView` and `TaskDetailView` without platform markup.
 - [ ] Extend `NormalizedEvent` with required trusted `chat_type: Literal["private","group"]` and destination identity, updating all adapters/fixtures. Extend `OSTagRunner` routing for Chinese/slash commands using only those normalized fields. Queries require `read`, watch requires `propose`; ambiguous matches return candidates.
-- [ ] Run `uv run pytest tests/test_work_monitor_service.py tests/test_work_monitor_rendering.py tests/test_permissions.py tests/test_cli_run.py -q`; expect pass. Commit `feat(work-monitor): add governed mobile board queries`.
+- [ ] Run `uv run pytest tests/test_work_monitor_identity.py tests/test_work_monitor_service.py tests/test_work_monitor_rendering.py tests/test_permissions.py tests/test_cli_run.py -q`; expect pass. Commit `feat(work-monitor): add scoped principals and mobile queries`.
 
-### Task 6: Reuse receipts for safe remote controls
+### Task 5: Reuse receipts for safe remote controls
 
 **Files:** Modify `ostag/core/permissions.py`, `ostag/core/receipts.py`, `ostag/core/run_ledger.py`, `ostag/work_monitor/service.py`; create `tests/test_work_monitor_controls.py`.
 
@@ -103,11 +97,21 @@
 - [ ] Implement command ack mapping back to receipt terminal state and a new monitor event; failure never masquerades as applied.
 - [ ] Run focused tests plus `tests/test_receipts.py tests/test_permissions.py tests/test_cli_receipts.py`; expect pass. Commit `feat(work-monitor): govern remote task controls with receipts`.
 
+### Task 6: Compose the persistent FastAPI central service
+
+**Files:** Create `ostag/work_monitor/server.py`; create `tests/test_work_monitor_server.py`; modify `pyproject.toml`, `ostag/config.py`; create `deploy/work-monitor/Dockerfile`, `deploy/work-monitor/docker-compose.yml`.
+
+- [ ] Using only completed Task 1–5 domain interfaces, add `server = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]`. Write failing `TestClient`/lifespan tests for APIs, scoped Principal bindings/subscriptions, governed command single-consumer poll/ack, webhook routes, `/healthz`, one Feishu WS consumer, crash backoff, no duplicate consumer and graceful shutdown.
+- [ ] Run `uv run --extra server pytest tests/test_work_monitor_server.py -q`; expect missing composition root/routes, not missing domain placeholders.
+- [ ] Compose completed repository/projector/service/control interfaces into `/v1/events`, `/v1/board`, `/v1/tasks/{id}`, `/v1/instances`, `/v1/subscriptions`, `/v1/commands/poll`, `/v1/commands/{id}/ack`, both platform webhooks and `/healthz`. Authenticate before domain calls and construct Principal only from authenticated platform context.
+- [ ] Implement lifespan ownership/supervision and Docker Compose single worker, persistent volume, restart/healthcheck and no secret literals.
+- [ ] Run focused tests, Docker Compose config and compileall; expect pass. Commit `feat(work-monitor): compose persistent central service`.
+
 ### Task 7: Feishu mobile cards and callbacks
 
 **Files:** Modify `ostag/adapters/base.py`, `ostag/adapters/feishu.py`; create `ostag/work_monitor/feishu_cards.py`, `ostag/work_monitor/feishu_card_security.py`, `tests/test_feishu_work_monitor.py`, `tests/test_feishu_card_security.py`; modify `docs/ostag/feishu_setup.md`.
 
-- [ ] Write failing renderer tests for mobile cards and proactive sends. Write platform-security spy tests for the exact pipeline: bad raw-body/ciphertext signature means decryptor and runner are both uncalled; tampered ciphertext is rejected before decrypt; valid constant-time raw signature then passes timestamp/replay, then decrypts, then validates payload verification token/schema, then handles URL challenge/action; bad token/schema never reaches runner; encrypted payload without key is rejected.
+- [ ] Write failing renderer tests for mobile cards and proactive sends. Write platform-security spy tests for the exact pipeline: bad raw-body/ciphertext signature means decryptor and runner are both uncalled; tampered ciphertext is rejected before decrypt; valid signature then decrypt/token/schema; callback `Principal` actor comes from verified Feishu payload and ignores button actor fields; bad token/schema never reaches runner; encrypted payload without key is rejected.
 - [ ] Run `uv run pytest tests/test_feishu_work_monitor.py -q`; expect missing rich-message APIs.
 - [ ] Add rich sends/renderers. Implement `FeishuCardSecurity` in this non-reorderable sequence: capture raw body/ciphertext, timestamp and nonce; calculate platform signature with encrypt key and compare via `hmac.compare_digest`; enforce time window and persist replay key; decrypt only after those checks; validate plaintext verification token and strict schema; then answer challenge or normalize action. Reject encrypted input without key. This is separate from reporter HMAC.
 - [ ] Keep ordinary messages exclusively on the lifespan-supervised Feishu WebSocket path. The HTTPS endpoint accepts card actions/challenge only and rejects ordinary message events. Add deployment settings for WS enabled=true and card action URL; document that there is no message-webhook fallback.

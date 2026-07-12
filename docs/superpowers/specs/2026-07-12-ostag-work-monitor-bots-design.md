@@ -39,6 +39,7 @@
 新增 `ostag/work_monitor/`，只包含平台无关领域逻辑：
 
 - `models.py`：版本化实例、任务、事件、订阅、命令和投递模型；
+- `identity.py`：canonical Principal、私聊 owner/admin binding、群聊 enrollment/revoke；
 - `redaction.py`：严格字段白名单、长度上限和敏感值替换；
 - `store.py`：SQLite 事件、投影、outbox、订阅和命令存储；
 - `projection.py`：按 `instance_id + sequence` 幂等、有序地折叠六阶段 Kanban；
@@ -51,7 +52,7 @@
 
 该模块不调用飞书或 Telegram SDK，也不自行实现 actor 权限、审批或审计。
 
-### 3.2 Reporter 与 relay
+### 3.2 Reporter 与中央 service
 
 每个实例有稳定 `instance_id` 和可轮换独立密钥。reporter 持久保存 ledger inode/offset/event cursor，自动尾读 OStag `RunLedger` 的新增结构化 run、stage、receipt 和 terminal 事件并映射为 monitor event，重启后从确认位置续读。osstack 不直接写中央数据库：其 bridge 通过 `ostag monitor ingest --file/--stdin` 提交相同 JSON 契约到本地 spool，并保存 osstack task ID/version/status 到 OStag task reference，不要求移动或复制 osstack 状态库。
 
@@ -84,6 +85,8 @@ Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云�
 实例注册和每次心跳都声明 `supported_actions`；卡片只启用实例当前声明的动作，服务端在 receipt/apply 时再次校验。权威基线 osstack 0.8.1 支持 `status`、`observe`、`kanban`、`cancel`、`loop.stop`，且 cockpit 已支持对 failed task 执行 retry/requeue，但缺少统一版本化 `RemoteCommand` contract；它仍不支持 task pause/resume。OStag 应适配已有 cockpit retry，只允许 failed task，读取重排/新 attempt 状态并验证结果，不得重复实现 retry。`kanban.move` 和 `daemon.resume` 严禁伪装 task pause/resume。第一阶段对缺失动作显示 `UNSUPPORTED`；上线完成前必须在 osstack upstream 实现真正 pause/resume 及统一版本化 remote control contract。cancel 发出后必须轮询本地权威状态直到 `cancelled` 终态或超时。
 
 ## 5. 命令、权限与 receipt
+
+身份的 canonical key 是 `Principal(platform, actor_id)`，持久化、权限、receipt 和审计都使用完整二元组；禁止裸 actor ID 查权。飞书 `ou_*` 与 Telegram 数字/字符串 ID 永远位于不同命名空间，即使字符相同也不得互认或覆盖。首次 owner/admin 私聊必须通过部署时一次性 enrollment secret 或本机管理员 CLI 显式绑定到 `(platform, actor_id, destination_id, chat_type=private)`；绑定可列出和撤销。群聊必须由已绑定 owner/admin 显式 enroll `(platform, group_destination_id, scope)`，并可 revoke；平台 scoped permission 不跨平台继承。callback actor 只能来自平台签名验证后的原始 payload，不能来自按钮 value。
 
 两端支持相同意图：
 
@@ -121,9 +124,9 @@ EdgeOne 配置源站反代、TLS、WAF、请求大小/速率限制和 `/healthz`
 
 ## 9. 测试与上线验收
 
-单元测试覆盖契约、脱敏、签名、幂等/乱序、投影、通知规则、北京时间窗口、权限、receipt 和二次确认。集成测试覆盖 reporter→relay→投影→双平台 renderer，以及按钮/callback→receipt→实例 poll→ack→卡片更新。
+单元测试覆盖契约、脱敏、签名、幂等/乱序、投影、通知规则、北京时间窗口、canonical Principal、绑定/撤销、平台 scoped 权限、receipt 和二次确认。集成测试覆盖 reporter→中央 service→投影→双平台 renderer，以及按钮/callback→receipt→实例 poll→ack→卡片更新。
 
-故障与安全测试覆盖断网补传、重复/缺失/乱序、平台限流、relay 短暂故障、伪造签名、重放、过期确认、群内越权、跨实例命令和敏感字段泄漏。
+故障与安全测试覆盖断网补传、重复/缺失/乱序、平台限流、中央 service 短暂故障、伪造签名、重放、跨平台同 ID 不互认、绑定撤销、callback actor 伪造、过期确认、群内越权、跨实例命令和敏感字段泄漏。
 
 真实上线验收必须保存：中央容器镜像/version、持久卷重启恢复证据、EdgeOne 域名/WAF/origin health、脱敏后的 lark-cli 配置证据、Telegram webhook 状态、两个真实手机端的 09/19 测试摘要与关键事件、一次真实 pause/resume 和一次 cancel 二次确认闭环、实例离线与恢复、完整 `uv run pytest` 和 `scripts/release_check.sh` 结果。
 
