@@ -80,3 +80,39 @@ def test_scanner_catches_quoted_json_and_shell_values_with_punctuation(tmp_path:
     report = json.loads((reports / "secret-hygiene.json").read_text(encoding="utf-8"))
     assert report["match_count"] == 2
     assert report["category_counts"] == {"credential_assignment": 2}
+
+
+def test_scanner_checks_python_and_text_without_flagging_normal_placeholders(
+    tmp_path: Path,
+) -> None:
+    fixture = tmp_path / "fixture"
+    reports = tmp_path / "reports"
+    fixture.mkdir()
+    (fixture / "unsafe.py").write_text(
+        'API_SECRET = "Synthetic.Mixed+Credential:4100"\n', encoding="utf-8"
+    )
+    (fixture / "unsafe.txt").write_text(
+        '"service_token": "Synthetic.Text+Credential@example.invalid/path"\n',
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "OSTAG_SECRET_HYGIENE_REPORT_DIR": str(reports),
+        "OSTAG_SECRET_HYGIENE_EXTRA_SCAN_ROOT": str(fixture),
+    }
+
+    failed = subprocess.run(["scripts/secret_hygiene_check.sh"], env=env)
+    report = json.loads((reports / "secret-hygiene.json").read_text(encoding="utf-8"))
+    assert failed.returncode == 2
+    assert report["match_count"] == 2
+
+    (fixture / "unsafe.py").write_text(
+        "token = None\nAPI_SECRET = placeholder\npassword = credential\n",
+        encoding="utf-8",
+    )
+    (fixture / "unsafe.txt").write_text(
+        '"service_token": "<secret_manager_reference>"\n', encoding="utf-8"
+    )
+    passed = subprocess.run(["scripts/secret_hygiene_check.sh"], env=env)
+    report = json.loads((reports / "secret-hygiene.json").read_text(encoding="utf-8"))
+    assert passed.returncode == 0
+    assert report["match_count"] == 0

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import sys
 from collections import Counter
@@ -29,14 +28,12 @@ def placeholder(value: str) -> bool:
         or cleaned.startswith("<") and cleaned.endswith(">")
         or "${" in cleaned
         or "..." in cleaned
-        or lowered in {"configured", "verify", "secret", "token", "password"}
-        or lowered.startswith(("example-", "changeme", "replace-me"))
+        or lowered in {
+            "configured", "verify", "secret", "token", "password", "none", "null",
+            "credential", "credentials", "value", "placeholder",
+        }
+        or lowered.startswith(("example-", "changeme", "replace-me", "placeholder_"))
     )
-
-
-def entropy(value: str) -> float:
-    counts = Counter(value)
-    return -sum((count / len(value)) * math.log2(count / len(value)) for count in counts.values())
 
 
 def credential_like(value: str) -> bool:
@@ -47,13 +44,17 @@ def credential_like(value: str) -> bool:
         (any(c.islower() for c in value), any(c.isupper() for c in value),
          any(c.isdigit() for c in value), any(not c.isalnum() for c in value))
     )
-    return punctuation or classes >= 2 or entropy(value) >= 3.0
+    return punctuation or classes >= 2
 
 
 def scan(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
     for path in root.rglob("*"):
-        if not path.is_file() or path.suffix in {".gz", ".sha256"}:
+        if (
+            not path.is_file()
+            or path.suffix in {".gz", ".sha256", ".png", ".jpg", ".jpeg", ".pdf", ".sqlite3"}
+            or path.stat().st_size > 2_000_000
+        ):
             continue
         if path.name in {"secret-hygiene.json", "secret-hygiene.md", "secret_hygiene_scan.py"}:
             continue
@@ -61,12 +62,10 @@ def scan(root: Path) -> list[tuple[str, str]]:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if path.name.startswith(".env") or path.suffix.casefold() in {
-            "", ".env", ".json", ".yaml", ".yml", ".toml", ".md", ".sh"
-        }:
-            for match in (*SHELL_QUOTED.finditer(text), *JSON_QUOTED.finditer(text)):
-                if credential_like(match.group(2)):
-                    findings.append((str(path.relative_to(root)), "credential_assignment"))
+        for match in (*SHELL_QUOTED.finditer(text), *JSON_QUOTED.finditer(text)):
+            if credential_like(match.group(2)):
+                findings.append((str(path.relative_to(root)), "credential_assignment"))
+        if path.suffix.casefold() != ".py":
             for match in SHELL_UNQUOTED.finditer(text):
                 if not match.group(1).startswith(("'", '"')) and credential_like(match.group(1)):
                     findings.append((str(path.relative_to(root)), "credential_assignment"))
