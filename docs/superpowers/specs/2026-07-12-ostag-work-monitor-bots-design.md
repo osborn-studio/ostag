@@ -19,7 +19,7 @@
 
 ## 2. 核心决策
 
-采用“本地 reporter + 公有云 relay/projection + 多平台 OStag bot”的事件驱动架构。实例只建立出站 HTTPS 连接，不开放公网端口；云端维护跨实例只读投影和短期命令信箱，本地 runner/ledger 始终是执行事实源。
+采用“本地 reporter + 中央 OStag Python service + 多平台 OStag bot”的事件驱动架构。中央 service 以 Docker 常驻运行在腾讯云 CVM/Lighthouse（或同等支持持久容器和磁盘的主机），SQLite 与数据目录挂载持久卷。EdgeOne 只提供公网域名、HTTPS、WAF 和到中央 service 的反向代理，不承载 Python、SQLite、scheduler 或业务状态。实例只建立出站 HTTPS 连接，不开放公网端口；中央 service 维护跨实例只读投影和短期命令信箱，本地 runner/ledger 始终是执行事实源。
 
 治理不另起炉灶：
 
@@ -27,7 +27,7 @@
 - `RunLedger` 记录监控事件、订阅、通知和控制结果；
 - `permissions` 决定查询及控制授权；
 - `ActionReceipt` 承担 pause/resume/retry/cancel 的提议、批准和执行状态；
-- `AmbientScheduler` 承担定时摘要和关键事件通知编排；
+- 中央 service 内唯一 `WorkMonitorScheduler` 复用 ambient 的窗口/抑制语义，承担定时摘要、关键事件入队和 notification outbox drain；不得在 reporter、EdgeOne 或多个 web worker 中重复运行；
 - adapters 只负责平台事件规范化、发送与富交互渲染。
 
 不采用中心轮询或上传整板快照：前者要求开发机公网可达，后者无法可靠表达顺序、幂等、订阅游标和审计。
@@ -44,26 +44,30 @@
 - `projection.py`：按 `instance_id + sequence` 幂等、有序地折叠六阶段 Kanban；
 - `service.py`：看板查询、订阅、关键事件分类和 receipt 创建；
 - `reporter.py`：本地可靠队列、签名上报、心跳、命令领取及执行回执；
+- `executor.py`：将领取的命令映射为本地 OStag/osstack pause/resume/retry/cancel，执行前验证目标实例、任务版本和预期状态；
 - `scheduler.py`：北京时间双日报、实例健康判断、通知 outbox；
 - `rendering.py`：平台无关的移动视图模型。
+- `server.py`：FastAPI 生命周期、webhook/API routes、唯一 scheduler 与 outbox drain owner。
 
 该模块不调用飞书或 Telegram SDK，也不自行实现 actor 权限、审批或审计。
 
 ### 3.2 Reporter 与 relay
 
-每个实例有稳定 `instance_id` 和可轮换独立密钥。reporter 从 OStag `RunLedger` 读取新的结构化事件；osstack 集成通过一个窄的 JSON event ingestion CLI/API 提交同一契约，不要求移动或复制 osstack 状态库。
+每个实例有稳定 `instance_id` 和可轮换独立密钥。reporter 持久保存 ledger inode/offset/event cursor，自动尾读 OStag `RunLedger` 的新增结构化 run、stage、receipt 和 terminal 事件并映射为 monitor event，重启后从确认位置续读。osstack 不直接写中央数据库：其 bridge 通过 `ostag monitor ingest --file/--stdin` 提交相同 JSON 契约到本地 spool，并保存 osstack task ID/version/status 到 OStag task reference，不要求移动或复制 osstack 状态库。
 
-reporter 先脱敏并落入本地 SQLite outbox，再以 HMAC 签名批量上报。relay 校验实例、时间偏差、签名、schema、大小、幂等键和速率，持久化后返回确认 sequence。断网恢复后顺序补传；监控故障不得停止本地任务。
+reporter 先脱敏并落入本地 SQLite outbox，再以 HMAC 签名批量上报。中央 service 校验实例、时间偏差、签名、schema、大小、幂等键和速率，持久化后返回确认 sequence。断网恢复后顺序补传；监控故障不得停止本地任务。
 
-relay 同时提供 board/task/instance 查询、订阅、命令 poll/ack 和通知 drain 接口。生产部署使用 EdgeOne Pages Functions；领域服务保持 ASGI/WSGI 无关，便于本地 pytest 和迁移。
+中央 FastAPI service 提供 `/v1/events`、board/task/instance 查询、订阅、`/v1/commands/poll|ack`、`/webhooks/feishu/card-action`、`/webhooks/telegram` 和 `/healthz`。uvicorn 生产进程只启一个启用 scheduler 的 worker；如未来横向扩容，必须先加入数据库租约再允许第二 worker。EdgeOne origin 指向该 service 的私网/受限源站端口并透传 webhook/API；FastAPI 便于本地 pytest ASGI 集成测试。
 
 ### 3.3 飞书与 Telegram adapters
 
 扩展 adapter 能力，但保持文本回退：
 
-- 飞书：现有 WebSocket 消息入口；出站使用 `interactive` card，回调动作转换为 `NormalizedEvent`；通过 lark-cli 配置应用权限、事件订阅和管理员 `open_id`；
+- 飞书：中央 webhook/现有 WebSocket 消息入口；出站使用 `interactive` card，回调动作转换为 `NormalizedEvent`；主动私聊必须调用 messages API 的 `receive_id_type=open_id`，群聊使用 `receive_id_type=chat_id`；通过 lark-cli 配置应用权限、事件订阅和管理员 `open_id`；
 - Telegram：Bot API long polling/webhook 均可，第一版生产使用 webhook；看板以短消息分段并用 InlineKeyboard 提供查看、订阅和控制；callback query 转换为相同控制意图；
 - 两端共享 `MobileBoardView`、命令解析、授权、receipt、订阅和审计，只各自实现 renderer/transporter。
+
+`NormalizedEvent` 增加由 adapter 从签名验证后的平台原始事件推导的 `chat_type: private|group`（以及可信 destination ID）；权限判断不得从用户文本、卡片 value 或 Telegram callback data 推断私聊/群聊。
 
 ## 4. 数据契约与状态
 
@@ -72,6 +76,10 @@ relay 同时提供 board/task/instance 查询、订阅、命令 poll/ack 和通�
 Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云端状态是投影，不得反向覆盖本地状态。实例内 sequence 单调递增；重复事件只应用一次，缺口暂存并触发数据不完整告警。
 
 实例超过 2 分钟无心跳为 `degraded`，超过 10 分钟为 `offline`。控制命令包含 instance、task、expected version/status、action、requester、nonce、TTL 和 receipt ID，只能领取一次；过期、版本不符或跨实例命令必须拒绝并审计。
+
+本地 `CommandExecutor` 是控制闭环的唯一执行者。它通过 OStag runner/task control port 或配置的 osstack CLI bridge 执行 pause/resume/retry/cancel；执行前重新读取本地任务的 instance、version 和 status，与命令的 expected 值逐项匹配。无对应能力、状态漂移、执行超时或非零退出都返回失败 ack，禁止用更新云端投影模拟成功。
+
+实例注册和每次心跳都声明 `supported_actions`；卡片只启用实例当前声明的动作，服务端在 receipt/apply 时再次校验。权威基线 osstack 0.8.1 支持 `status`、`observe`、`kanban`、`cancel`、`loop.stop`，不支持 task pause/resume/retry。`kanban.move` 只是投影移动，`daemon.resume` 只是 daemon 生命周期操作，严禁伪装 task pause/resume/retry。第一阶段对缺失动作明确显示 `UNSUPPORTED`；上线完成前必须在 osstack upstream 实现并验证真正的 task pause/resume/retry capability。cancel 发出后必须轮询本地权威状态直到 `cancelled` 终态或超时，不能把命令接受当作完成。
 
 ## 5. 命令、权限与 receipt
 
@@ -99,15 +107,15 @@ Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云�
 
 - 即时：blocked、failed、approval_required、offline，全天发送；普通完成进入摘要；
 - 定时：`Asia/Shanghai` 09:00 早报和 19:00 晚报，每个平台/目标/窗口用幂等键只生成一次；
-- outbox 至少一次投递，event/delivery ID 抑制重复；429/5xx 指数退避加抖动，持续失败进入 dead letter，恢复后标记延迟补发；
+- 中央 service 的唯一 scheduler 拥有 notification outbox drain；outbox 至少一次投递，event/delivery ID 抑制重复；429/5xx 指数退避加抖动，持续失败进入 dead letter，恢复后标记延迟补发；
 - 订阅保存平台、chat/user、资源范围和投递游标；群聊必须在白名单；
-- relay 不可用时 reporter 继续排队，本地 OStag/osstack 不受影响。
+- 中央 service 不可用时 reporter 继续排队，本地 OStag/osstack 不受影响。
 
 ## 8. 部署与秘密管理
 
-生产控制面部署至腾讯云 EdgeOne。实例密钥、飞书 App Secret、Telegram Bot Token 只存平台 secret binding 或本机权限受限配置，不进入仓库、事件、卡片或 ledger。每实例密钥可单独撤销轮换。
+生产控制面是腾讯云 CVM/Lighthouse 上常驻的 Docker 容器，运行 `uvicorn ostag.work_monitor.server:app`。`/var/lib/ostag` 作为宿主机持久卷挂入容器，保存 SQLite、ledger、outbox 和迁移版本；升级前备份并执行迁移，回滚同时恢复兼容镜像/数据备份。实例密钥、飞书 App Secret、Telegram Bot Token 只存主机权限受限 env/secret 文件，不进入仓库、事件、卡片或 ledger。每实例密钥可单独撤销轮换。当前 Telegram token 不存在，管理员必须通过 BotFather 创建后再注入；代码、测试或部署脚本不得编造 token，也不得把该外部步骤误报为已完成。
 
-部署包括：EdgeOne routes/storage/schedules、飞书应用发布与事件/卡片回调、Telegram webhook 与 secret token、实例注册及 reporter 常驻服务。`ostag doctor` 增加 relay、存储、调度、平台凭证、webhook 和实例心跳检查。
+EdgeOne 配置源站反代、TLS、WAF、请求大小/速率限制和 `/healthz` origin probe；不配置 Pages Functions、KV、SQLite 或定时器。部署还包括 Docker healthcheck/restart policy、持久卷备份、飞书应用发布与事件/卡片回调、Telegram webhook secret token、实例注册及 reporter 常驻服务。`ostag doctor` 检查中央 health、持久卷可写/可恢复、单 scheduler owner、平台凭证/webhook 和实例心跳。
 
 ## 9. 测试与上线验收
 
@@ -115,7 +123,7 @@ Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云�
 
 故障与安全测试覆盖断网补传、重复/缺失/乱序、平台限流、relay 短暂故障、伪造签名、重放、过期确认、群内越权、跨实例命令和敏感字段泄漏。
 
-真实上线验收必须保存：EdgeOne 部署 URL/版本、脱敏后的 lark-cli 配置证据、Telegram webhook 状态、两个真实手机端的 09/19 测试摘要与关键事件、一次 pause/resume 和一次 cancel 二次确认闭环、实例离线与恢复、完整 `uv run pytest` 和 `scripts/release_check.sh` 结果。
+真实上线验收必须保存：中央容器镜像/version、持久卷重启恢复证据、EdgeOne 域名/WAF/origin health、脱敏后的 lark-cli 配置证据、Telegram webhook 状态、两个真实手机端的 09/19 测试摘要与关键事件、一次真实 pause/resume 和一次 cancel 二次确认闭环、实例离线与恢复、完整 `uv run pytest` 和 `scripts/release_check.sh` 结果。
 
 ## 10. 第一版边界
 

@@ -4,9 +4,9 @@
 
 **Goal:** Add an OStag-native, governed Feishu and Telegram mobile work monitor for remote OStag/osstack instances, including Kanban, critical alerts, twice-daily digests, subscriptions, and safe controls.
 
-**Architecture:** A platform-neutral `ostag.work_monitor` domain folds sanitized, signed instance events into a SQLite projection and reuses OStag runner, ledger, permissions, receipts, and ambient scheduling. Feishu cards and Telegram InlineKeyboard are transport renderers over one mobile view model; an EdgeOne relay provides public ingress/query/callback/poll endpoints while local reporters only make outbound HTTPS calls.
+**Architecture:** A platform-neutral `ostag.work_monitor` domain folds sanitized, signed instance events into a persistent SQLite projection and reuses OStag runner, ledger, permissions, receipts, and ambient semantics. One Dockerized FastAPI service on Tencent CVM/Lighthouse owns APIs, webhooks, scheduler, and outbox drain; EdgeOne only terminates HTTPS/WAF and reverse-proxies to that origin. Local reporters tail RunLedger automatically, accept an osstack event bridge, and only make outbound HTTPS calls.
 
-**Tech Stack:** Python 3.11+, uv, pytest/pytest-asyncio, stdlib dataclasses/sqlite3/hmac/urllib, lark-oapi, Telegram Bot HTTP API, EdgeOne Pages Functions, lark-cli.
+**Tech Stack:** Python 3.11+, uv, pytest/pytest-asyncio, FastAPI, uvicorn, stdlib dataclasses/sqlite3/hmac/urllib, lark-oapi, Telegram Bot HTTP API, Docker Compose, Tencent CVM/Lighthouse, EdgeOne reverse proxy/WAF, lark-cli.
 
 ---
 
@@ -18,16 +18,18 @@
 - `ostag/work_monitor/projection.py`: ordered idempotent Kanban projection.
 - `ostag/work_monitor/service.py`: queries, subscriptions, critical classification, governed controls.
 - `ostag/work_monitor/reporter.py`: durable local upload/poll loop and HMAC client.
+- `ostag/work_monitor/executor.py`: validated local OStag/osstack control execution.
 - `ostag/work_monitor/rendering.py`: shared mobile board/detail view models.
 - `ostag/work_monitor/scheduler.py`: 09:00/19:00 and health notification scheduling.
-- `ostag/work_monitor/relay.py`: framework-neutral HTTP request handlers.
+- `ostag/work_monitor/server.py`: FastAPI API/webhook application and lifespan owner.
 - `ostag/adapters/feishu.py`: interactive cards and action normalization.
 - `ostag/adapters/telegram.py`: Bot API transport and InlineKeyboard callbacks.
 - `ostag/core/runner.py`: route monitor intents through the shared service.
 - `ostag/core/permissions.py`, `ostag/core/receipts.py`: extend existing governance verbs only.
 - `ostag/core/run_ledger.py`, `ostag/core/ambient.py`: monitor audit events and scheduler integration.
 - `ostag/main.py`, `ostag/config.py`: platform/reporter/relay CLI and settings.
-- `edgeone/work-monitor/`: thin EdgeOne entrypoints and deployment manifest.
+- `deploy/work-monitor/docker-compose.yml`, `Dockerfile`: persistent central service.
+- `deploy/work-monitor/edgeone-origin.md`: EdgeOne HTTPS/WAF/reverse-proxy settings.
 - `docs/ostag/work_monitor.md`, `docs/ostag/telegram_setup.md`: operations and setup.
 
 ### Task 1: Strict event contracts and outbound redaction
@@ -52,32 +54,43 @@
 
 ### Task 3: Signed reporter, reliable spool, and osstack bridge
 
-**Files:** Create `ostag/work_monitor/reporter.py`; modify `ostag/main.py`, `ostag/config.py`, `.env.example`; create `tests/test_work_monitor_reporter.py`, `examples/work_monitor_event.json`.
+**Files:** Create `ostag/work_monitor/reporter.py`, `ostag/work_monitor/executor.py`; modify `ostag/main.py`, `ostag/config.py`, `.env.example`; create `tests/test_work_monitor_reporter.py`, `tests/test_work_monitor_executor.py`, `examples/work_monitor_event.json`.
 
-- [ ] Write failing tests with a fake HTTP transport: enqueue survives a new reporter process, upload signs `timestamp + newline + body` with HMAC-SHA256, acknowledgements delete only confirmed sequences, 500 retains rows, and a polled expired/wrong-instance command is rejected without execution.
+- [ ] Write failing tests with a fake HTTP transport and append-only ledger: persisted inode/offset resumes automatic RunLedger tailing after restart without duplicates; run/stage/receipt/terminal records map to sanitized events; enqueue survives restart; upload signs `timestamp + newline + body` with HMAC-SHA256; acknowledgements delete only confirmed sequences; 500 retains rows.
+- [ ] Write failing executor tests with fake OStag and osstack control ports: capability negotiation exposes only declared actions; unsupported action returns `UNSUPPORTED`; expired/wrong-instance and expected status/version mismatch never invoke execution; timeout/nonzero results fail; cancel polls until authoritative `cancelled` terminal state, because command acceptance is not success.
 - [ ] Run `uv run pytest tests/test_work_monitor_reporter.py -q`; expect import/CLI failures.
-- [ ] Implement `Reporter.enqueue`, `flush_once`, `heartbeat`, `poll_commands_once` with injectable clock/transport and exponential backoff metadata. Add `ostag monitor ingest --file`, `reporter run-once`, `reporter start`, and `reporter status` CLI commands so osstack can submit the shared JSON contract without importing internals.
+- [ ] Implement `Reporter.tail_ledger_once`, `enqueue`, `flush_once`, `heartbeat`, `poll_commands_once` with injectable clock/transport and exponential backoff metadata. Persist ledger identity, byte offset and last event ID only after local spool commit. Add `ostag monitor ingest --file|--stdin`, `reporter run-once`, `reporter start`, and `reporter status`; the osstack bridge emits task ID/version/status through this CLI without importing internals.
+- [ ] Implement `CommandExecutor` with `OStagControlPort` and `OsstackControlPort` protocols. Persist `supported_actions` from heartbeat and recheck at render/apply. For osstack 0.8.1 map only proven cancel/loop.stop; never map `kanban.move` or `daemon.resume` to task controls. Compare instance/status/version and acknowledge only observed post-state, with cancel terminal polling.
 - [ ] Add settings for instance ID/secret, relay URL, spool DB, upload interval and command polling; keep reporter disabled by default.
-- [ ] Verify `uv run pytest tests/test_work_monitor_reporter.py tests/test_cli_run.py -q` and dry-run `uv run ostag monitor ingest --file examples/work_monitor_event.json --json`; expect sanitized queued event. Commit `feat(work-monitor): add durable remote reporter`.
+- [ ] Verify `uv run pytest tests/test_work_monitor_reporter.py tests/test_work_monitor_executor.py tests/test_cli_run.py -q` and dry-run `uv run ostag monitor ingest --file examples/work_monitor_event.json --json`; expect sanitized queued event. Commit `feat(work-monitor): add durable reporter and command executor`.
 
-### Task 4: Relay ingress, query, and command endpoints
+### Task 3A: Add real task controls to osstack upstream
 
-**Files:** Create `ostag/work_monitor/relay.py`; create `tests/test_work_monitor_relay.py`; create `edgeone/work-monitor/events.py`, `query.py`, `commands.py`, `edgeone.json`.
+**Files (in `/Users/gilbertchen/Documents/CODE/agentsteam/osstack`):** Modify `packages/cli/src/bin.ts` and the existing loop/task runtime owning task lifecycle; create/modify adjacent `*.test.ts` CLI/runtime tests; update the CLI reference and capability/version declaration.
 
-- [ ] Write failing handler tests for valid event batch, invalid signature, timestamp older than 300 seconds, replayed request nonce, unknown fields, payload over limit, board/task/instances queries, and single-consumer command poll/ack.
-- [ ] Run `uv run pytest tests/test_work_monitor_relay.py -q`; expect missing handlers.
-- [ ] Implement framework-neutral `Relay.handle(Request) -> Response`; authenticate before JSON parsing beyond size limit, compare HMAC with `compare_digest`, persist request nonce, then call projector/service. Scope query tokens to configured user/project/instance visibility.
-- [ ] Keep EdgeOne files as thin environment/storage adapters with routes `/v1/events`, `/v1/board`, `/v1/tasks/:id`, `/v1/instances`, `/v1/commands/poll`, `/v1/commands/:id/ack`; configure 09/19 schedules and secret binding names, never literal secrets.
-- [ ] Run focused tests and `python -m compileall ostag edgeone`; expect pass. Commit `feat(work-monitor): expose authenticated relay endpoints`.
+- [ ] Locate the authoritative runtime with `rg "loop.stop|cancel|kanban.move|daemon.resume" packages` and record exact paths before editing. Write failing tests for task pause preserving resumable state, resume continuing the same task/run, retry creating an auditable new attempt, and invalid/terminal transitions refusing mutation.
+- [ ] Run the exact focused pnpm/Vitest tests; expect failure because osstack 0.8.1 lacks task pause/resume/retry.
+- [ ] Add explicit `task pause|resume|retry` runtime/CLI capabilities with structured JSON containing task ID, previous/new status and monotonically increasing version. Pause quiesces the active loop, resume continues the resumable task, and retry follows the documented failed/cancelled state machine; none may alias `kanban.move` or `daemon.resume`.
+- [ ] Add capability discovery declaring actions only when supported. Run focused and full osstack release gates; publish/install that version, then prove OStag integration for all four actions and cancel terminal polling. Until this passes, UI shows `UNSUPPORTED` and production launch remains incomplete. Commit upstream and OStag changes separately.
+
+### Task 4: Persistent FastAPI central service
+
+**Files:** Create `ostag/work_monitor/server.py`; create `tests/test_work_monitor_server.py`; modify `pyproject.toml`, `ostag/config.py`; create `deploy/work-monitor/Dockerfile`, `deploy/work-monitor/docker-compose.yml`.
+
+- [ ] Add `server = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]` optional dependencies. Write failing `TestClient` tests for valid event batch, invalid signature, timestamp older than 300 seconds, replayed nonce, unknown/oversize payload, scoped board/task/instances queries, single-consumer command poll/ack, both webhook routes and `/healthz` storage/scheduler status.
+- [ ] Run `uv run --extra server pytest tests/test_work_monitor_server.py -q`; expect missing app/routes.
+- [ ] Implement FastAPI routes `/v1/events`, `/v1/board`, `/v1/tasks/{id}`, `/v1/instances`, `/v1/subscriptions`, `/v1/commands/poll`, `/v1/commands/{id}/ack`, `/webhooks/feishu/card-action`, `/webhooks/telegram`, `/healthz`. Authenticate/limit before domain calls, use `compare_digest`, persist replay nonce, and scope query tokens.
+- [ ] Implement FastAPI lifespan so exactly one configured process owns `WorkMonitorScheduler` and notification drain; fail startup if scheduler-owner lock cannot be acquired. Docker Compose runs one uvicorn worker, mounts `${OSTAG_DATA_DIR:-./data}:/var/lib/ostag`, sets restart/healthcheck, and contains no secret literals.
+- [ ] Run focused tests, `docker compose -f deploy/work-monitor/docker-compose.yml config`, and `python -m compileall ostag`; expect pass. Commit `feat(work-monitor): add persistent central FastAPI service`.
 
 ### Task 5: Shared queries, subscriptions, and mobile view model
 
-**Files:** Create `ostag/work_monitor/service.py`, `rendering.py`; create `tests/test_work_monitor_service.py`, `tests/test_work_monitor_rendering.py`.
+**Files:** Create `ostag/work_monitor/service.py`, `rendering.py`; modify `ostag/core/event.py`; create `tests/test_work_monitor_service.py`, `tests/test_work_monitor_rendering.py`, modify `tests/test_event_normalization.py`.
 
-- [ ] Write failing tests for `/board`, `/task`, `/instances`, `/watch`; private vs allowlisted group visibility; ambiguous natural-language task selection; first-screen ordering `health,running,blocked,approval,done`; pagination and long-title preservation.
+- [ ] Write failing tests for `/board`, `/task`, `/instances`, `/watch`; capability-aware views hide/disable unsupported actions; `NormalizedEvent.chat_type` derives from signed Feishu/Telegram payloads; forged text/button private claims cannot elevate groups; ambiguous task selection; first-screen ordering and pagination.
 - [ ] Run focused tests; expect missing service/view types.
 - [ ] Implement `WorkMonitorService` using repository queries and existing `resolve_permission`/`level_allows`; store subscriptions by platform, destination, actor and scope with a delivery cursor. Implement `MobileBoardView` and `TaskDetailView` without platform markup.
-- [ ] Extend `OSTagRunner` intent routing for Chinese commands and slash commands, passing `NormalizedEvent` actor/platform/chat/private-chat context. Queries require `read`, watch requires `propose`; ambiguous matches return candidates.
+- [ ] Extend `NormalizedEvent` with required trusted `chat_type: Literal["private","group"]` and destination identity, updating all adapters/fixtures. Extend `OSTagRunner` routing for Chinese/slash commands using only those normalized fields. Queries require `read`, watch requires `propose`; ambiguous matches return candidates.
 - [ ] Run `uv run pytest tests/test_work_monitor_service.py tests/test_work_monitor_rendering.py tests/test_permissions.py tests/test_cli_run.py -q`; expect pass. Commit `feat(work-monitor): add governed mobile board queries`.
 
 ### Task 6: Reuse receipts for safe remote controls
@@ -94,9 +107,9 @@
 
 **Files:** Modify `ostag/adapters/base.py`, `ostag/adapters/feishu.py`; create `ostag/work_monitor/feishu_cards.py`, `tests/test_feishu_work_monitor.py`; modify `docs/ostag/feishu_setup.md`.
 
-- [ ] Write failing tests for 390px-oriented vertical card JSON, critical section before progress, long Chinese title retention, opaque action IDs, text fallback, callback normalization, operator ID preservation, and API `interactive` message payload.
+- [ ] Write failing tests for 390px-oriented vertical card JSON, critical-first ordering, long Chinese title, opaque action IDs, text fallback, callback normalization, operator/chat_type preservation, `interactive` payload, proactive private send with `receive_id_type=open_id`, and group send with `receive_id_type=chat_id`.
 - [ ] Run `uv run pytest tests/test_feishu_work_monitor.py -q`; expect missing rich-message APIs.
-- [ ] Add optional `send_view`/`reply_view` adapter capability while retaining `send_message`. Implement board/detail/confirm/result card renderers and callback-to-`NormalizedEvent`; never trust actor or target fields from button data.
+- [ ] Add optional `send_view`/`reply_view` while retaining text send. Implement renderers and callback normalization; `send_view(destination_type="user")` calls Feishu messages API with `receive_id_type=open_id`, while group uses `chat_id`. Never trust actor/chat type/target fields from button data.
 - [ ] Document lark-cli app creation/update, minimum message/card/event scopes, `open_id` binding, callback URL/signature, publication and rollback commands with secret placeholders.
 - [ ] Run focused tests and existing event normalization tests; expect pass. Commit `feat(feishu): render governed work monitor cards`.
 
@@ -116,18 +129,19 @@
 
 - [ ] Write failing clock-driven tests: blocked/failed/approval/offline enqueue immediately 24h; normal completion waits; degraded at 2 minutes, offline at 10; 09:00 and 19:00 `Asia/Shanghai` windows each enqueue once across restarts; one subscription cursor per target; 429/5xx backoff then dead-letter and delayed recovery label.
 - [ ] Run focused tests; expect missing scheduler.
-- [ ] Implement `WorkMonitorScheduler.run_once` using `zoneinfo.ZoneInfo("Asia/Shanghai")`, persisted window keys and notification outbox. Integrate as an AmbientScheduler collaborator rather than a second daemon loop; use adapter rich views when supported and text fallback otherwise.
+- [ ] Implement `WorkMonitorScheduler.run_once` and `drain_notifications_once` using `zoneinfo.ZoneInfo("Asia/Shanghai")`, persisted window keys and outbox. It runs only from the central FastAPI lifespan scheduler owner; request handlers and ambient evaluation may enqueue/wake it but never drain concurrently. EdgeOne never runs domain code.
 - [ ] Add configurable hours defaulting to 9 and 19, heartbeat thresholds, retry cap and allowlisted destinations. Record enqueue/deliver/fail/dead-letter in `RunLedger` with redacted payloads.
 - [ ] Run scheduler, ambient and ledger tests; expect pass. Commit `feat(work-monitor): schedule critical alerts and daily boards`.
 
 ### Task 10: Doctor, deployment, full verification, and real launch
 
-**Files:** Modify `ostag/core/doctor.py`, `README.md`, `docs/ostag/architecture.md`, `docs/ostag/deployment.md`, `docs/cli_reference.md`, `scripts/release_check.sh`; create `docs/ostag/work_monitor.md`, `scripts/work_monitor_smoke.sh`, `release/work-monitor-live-validation-template.md`.
+**Files:** Modify `ostag/core/doctor.py`, `README.md`, `docs/ostag/architecture.md`, `docs/ostag/deployment.md`, `docs/cli_reference.md`, `scripts/release_check.sh`; create `docs/ostag/work_monitor.md`, `deploy/work-monitor/edgeone-origin.md`, `scripts/work_monitor_smoke.sh`, `scripts/backup_work_monitor.sh`, `release/work-monitor-live-validation-template.md`.
 
-- [ ] Write failing doctor/smoke tests for missing relay credential, unreachable relay, scheduler/storage failure, Feishu credentials/card callback, Telegram webhook status and stale instance; add secret-hygiene fixture containing fake tokens that must never reach artifacts.
+- [ ] Write failing doctor/smoke tests for missing central credential, unreachable origin, unwritable/unrecoverable persistent volume, duplicate scheduler owner, Feishu credentials/card callback, Telegram webhook status and stale instance; add secret-hygiene fixture containing fake tokens that must never reach artifacts.
 - [ ] Implement doctor checks and a deterministic local smoke: two instances → signed ingestion → board projection → Feishu/Telegram render → receipt approve/apply → command poll/ack → notification update.
 - [ ] Run `uv sync --all-extras`, `uv run pytest`, `scripts/work_monitor_smoke.sh`, `scripts/release_check.sh`, and `scripts/secret_hygiene_check.sh`; all must exit 0. Fix failures before deployment.
-- [ ] Deploy EdgeOne manifest and record deployment URL/version; use lark-cli to create/update/publish the Feishu app and save redacted scope/event evidence; configure Telegram webhook with secret token and save redacted `getWebhookInfo`; register at least one remote instance and start reporter service.
+- [ ] Build/push the central image; deploy Docker Compose to Tencent CVM/Lighthouse with `/var/lib/ostag` persistent host volume, restricted origin firewall, healthcheck, restart policy and verified backup/restore. Configure EdgeOne domain, TLS, WAF, rate/body limits and reverse proxy to the origin; prove `/healthz` via origin and EdgeOne. Do not deploy Pages Functions or store SQLite in EdgeOne.
+- [ ] Use lark-cli to create/update/publish the Feishu app and save redacted scope/event/card evidence; configure callbacks to EdgeOne. Telegram token is currently absent: the administrator must create it in BotFather and inject it through protected server env before configuring the webhook secret and saving redacted `getWebhookInfo`; never synthesize credentials or mark this complete without external evidence. Register one OStag and one osstack-bridge instance and start reporters.
 - [ ] On real Feishu iOS/Android and Telegram iOS/Android verify mobile board, long Chinese title, dark mode, critical alert, forced 09:00/19:00 preview, subscribe, pause/resume, cancel second confirmation, offline/recovery, callback retry, and delayed delivery. Store timestamps/message IDs/screenshots with secrets removed in the live validation record.
 - [ ] Re-run `uv run pytest && scripts/release_check.sh`; expect all pass. Update README/architecture/CLI/deployment docs with exact production commands and rollback. Commit `docs(work-monitor): record production launch evidence`.
 
