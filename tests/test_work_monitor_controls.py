@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -157,11 +158,15 @@ def test_apply_rejects_stale_task_version_and_cross_instance_replay(tmp_path: Pa
 @pytest.mark.parametrize(
     ("result", "terminal"),
     [
-        ({"ok": True, "status": "paused", "version": 8}, "applied"),
+        ({"ok": True, "code": "OK", "status": "paused", "version": 8}, "applied"),
         ({"ok": False, "code": "UNSUPPORTED"}, "failed"),
         ({"ok": False, "code": "COMMAND_REJECTED"}, "failed"),
         ({"ok": False, "code": "INDETERMINATE"}, "failed"),
         ({"ok": True, "status": "running", "version": 8}, "failed"),
+        ({"ok": True, "code": "UNSUPPORTED", "status": "paused"}, "failed"),
+        ({"ok": True, "code": "INDETERMINATE", "status": "paused"}, "failed"),
+        ({"ok": True, "code": "COMMAND_REJECTED", "status": "paused"}, "failed"),
+        ({"ok": True, "code": "FAILED", "status": "paused"}, "failed"),
     ],
 )
 def test_ack_maps_receipt_terminal_and_never_applies_failure(
@@ -181,3 +186,55 @@ def test_ack_maps_receipt_terminal_and_never_applies_failure(
     assert ledger.get_receipt(receipt.action_id).state == terminal
     with pytest.raises(SchemaError):
         service.acknowledge_control("mac", command_id, result)
+
+
+def test_concurrent_apply_reserves_one_command_by_receipt_in_sqlite(tmp_path: Path) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def apply() -> None:
+        try:
+            barrier.wait()
+            service.apply_control(owner, private, receipt.action_id)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=apply) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    with service.store.connect() as db:
+        rows = db.execute("SELECT action_id,payload FROM commands").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["action_id"] == receipt.action_id
+
+
+def test_ledger_append_failure_retry_reuses_reserved_command(tmp_path: Path, monkeypatch) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    original = ledger.record_receipt_state
+    failed_once = False
+
+    def fail_after_reservation(*args, **kwargs):
+        nonlocal failed_once
+        if kwargs.get("detail") and not failed_once:
+            failed_once = True
+            raise OSError("simulated ledger outage")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "record_receipt_state", fail_after_reservation)
+    with pytest.raises(OSError, match="ledger outage"):
+        service.apply_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+
+    with service.store.connect() as db:
+        rows = db.execute("SELECT command_id,action_id FROM commands").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["action_id"] == receipt.action_id

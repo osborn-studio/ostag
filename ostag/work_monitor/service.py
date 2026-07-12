@@ -339,16 +339,25 @@ class WorkMonitorService:
             "expires_at": (issued + timedelta(minutes=5)).isoformat(),
         }
         with self.store.transaction() as db:
-            db.execute(
-                "INSERT INTO commands(command_id,instance_id,task_id,status,payload) VALUES (?,?,?,?,?)",
-                (
-                    command_id,
-                    task.instance_id,
-                    task.task_id,
-                    "pending",
-                    json.dumps(command, sort_keys=True),
-                ),
-            )
+            existing = db.execute(
+                "SELECT command_id,payload FROM commands WHERE action_id=?", (receipt.action_id,)
+            ).fetchone()
+            if existing is None:
+                db.execute(
+                    "INSERT INTO commands(command_id,instance_id,task_id,status,payload,action_id) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (
+                        command_id,
+                        task.instance_id,
+                        task.task_id,
+                        "pending",
+                        json.dumps(command, sort_keys=True),
+                        receipt.action_id,
+                    ),
+                )
+            else:
+                command_id = str(existing["command_id"])
+                command = json.loads(str(existing["payload"]))
         self.ledger.record_receipt_state(
             applying,
             previous_state=receipt.state,
@@ -385,9 +394,13 @@ class WorkMonitorService:
                 "retry": {"queued", "running", "retried"},
                 "cancel": {"cancelled"},
             }
-            success = result.get("ok") is True and str(
-                result.get("status", "")
-            ).lower() in verified_statuses.get(str(command["action"]), set())
+            success_codes = {"OK", "APPLIED", "SUCCESS", "EXECUTED"}
+            success = (
+                result.get("ok") is True
+                and str(result.get("code", "")).upper() in success_codes
+                and str(result.get("status", "")).lower()
+                in verified_statuses.get(str(command["action"]), set())
+            )
             terminal = receipt.with_state("applied" if success else "failed")
             db.execute(
                 "UPDATE commands SET status='acked',consumed_at=? WHERE command_id=?",

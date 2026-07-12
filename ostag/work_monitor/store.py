@@ -17,11 +17,13 @@ class Migration:
     statements: tuple[str, ...]
 
 
-_V1_STATEMENTS = ("""CREATE TABLE IF NOT EXISTS instances (
+_V1_STATEMENTS = (
+    """CREATE TABLE IF NOT EXISTS instances (
     instance_id TEXT PRIMARY KEY,
     last_sequence INTEGER NOT NULL DEFAULT 0,
     last_seen_at TEXT
-)""", """CREATE TABLE IF NOT EXISTS events (
+)""",
+    """CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
     instance_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
@@ -29,13 +31,15 @@ _V1_STATEMENTS = ("""CREATE TABLE IF NOT EXISTS instances (
     occurred_at TEXT NOT NULL,
     payload TEXT NOT NULL,
     UNIQUE(instance_id, sequence)
-)""", """CREATE TABLE IF NOT EXISTS pending_events (
+)""",
+    """CREATE TABLE IF NOT EXISTS pending_events (
     instance_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
     event_id TEXT NOT NULL UNIQUE,
     payload TEXT NOT NULL,
     PRIMARY KEY(instance_id, sequence)
-)""", """CREATE TABLE IF NOT EXISTS tasks (
+)""",
+    """CREATE TABLE IF NOT EXISTS tasks (
     instance_id TEXT NOT NULL,
     task_id TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -49,34 +53,50 @@ _V1_STATEMENTS = ("""CREATE TABLE IF NOT EXISTS instances (
     evidence_ref TEXT,
     occurred_at TEXT NOT NULL,
     PRIMARY KEY(instance_id, task_id)
-)""", """CREATE TABLE IF NOT EXISTS subscriptions (
+)""",
+    """CREATE TABLE IF NOT EXISTS subscriptions (
     platform TEXT NOT NULL,
     destination_id TEXT NOT NULL,
     instance_id TEXT NOT NULL DEFAULT '',
     task_id TEXT NOT NULL DEFAULT '',
     delivery_cursor INTEGER NOT NULL DEFAULT 0,
     UNIQUE(platform, destination_id, instance_id, task_id)
-)""", """CREATE TABLE IF NOT EXISTS notification_outbox (
+)""",
+    """CREATE TABLE IF NOT EXISTS notification_outbox (
     notification_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
     destination_key TEXT NOT NULL,
     payload TEXT NOT NULL,
     delivered_at TEXT,
     UNIQUE(event_id, destination_key)
-)""", """CREATE TABLE IF NOT EXISTS commands (
+)""",
+    """CREATE TABLE IF NOT EXISTS commands (
     command_id TEXT PRIMARY KEY,
     instance_id TEXT NOT NULL,
     task_id TEXT NOT NULL,
     status TEXT NOT NULL,
     payload TEXT NOT NULL,
     consumed_at TEXT
-)""")
+)""",
+)
 
 # V2 is deliberately self-healing for databases that declared v1 after creating
 # only a subset of its tables. The version column is handled conditionally.
 MIGRATIONS = (
     Migration(statements=_V1_STATEMENTS),
-    Migration(statements=(*_V1_STATEMENTS, "ALTER TABLE tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1")),
+    Migration(
+        statements=(
+            *_V1_STATEMENTS,
+            "ALTER TABLE tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
+        )
+    ),
+    Migration(
+        statements=(
+            "ALTER TABLE commands ADD COLUMN action_id TEXT NOT NULL DEFAULT ''",
+            "CREATE UNIQUE INDEX IF NOT EXISTS commands_action_id_unique "
+            "ON commands(action_id) WHERE action_id <> ''",
+        )
+    ),
 )
 
 
@@ -111,12 +131,14 @@ class MonitorStore:
                 connection.execute("BEGIN IMMEDIATE")
                 try:
                     for statement in migration.statements:
-                        if statement.startswith("ALTER TABLE tasks ADD COLUMN version"):
+                        if statement.startswith("ALTER TABLE"):
+                            table = statement.split()[2]
+                            column_name = statement.split("ADD COLUMN", 1)[1].strip().split()[0]
                             columns = {
                                 str(column[1])
-                                for column in connection.execute("PRAGMA table_info(tasks)")
+                                for column in connection.execute(f"PRAGMA table_info({table})")
                             }
-                            if "version" in columns:
+                            if column_name in columns:
                                 continue
                         connection.execute(statement)
                     connection.execute(f"PRAGMA user_version = {version}")

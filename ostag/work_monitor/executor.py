@@ -293,7 +293,12 @@ class CommandExecutor:
                     updated.attempt_id != task.attempt_id
                     or updated.attempt_order > task.attempt_order
                 ):
-                    return {"ok": True, "status": updated.lifecycle, "version": updated.version}
+                    return {
+                        "ok": True,
+                        "code": "OK",
+                        "status": updated.lifecycle,
+                        "version": updated.version,
+                    }
                 self.sleep(0.2)
             return {"ok": False, "code": "RETRY_NOT_VERIFIED"}
         if command.action == "cancel":
@@ -303,14 +308,19 @@ class CommandExecutor:
                 except (RuntimeError, OSError, ValueError):
                     return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
                 if updated.lifecycle == "cancelled" or updated.terminal == "cancelled":
-                    return {"ok": True, "status": "cancelled", "version": updated.version}
+                    return {
+                        "ok": True,
+                        "code": "OK",
+                        "status": "cancelled",
+                        "version": updated.version,
+                    }
                 self.sleep(0.2)
             return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
         try:
             updated = port.get_task(command.task_id)
         except (RuntimeError, OSError, ValueError):
             return {"ok": False, "code": "STATUS_UNAVAILABLE"}
-        return {"ok": True, "status": updated.lifecycle, "version": updated.version}
+        return {"ok": True, "code": "OK", "status": updated.lifecycle, "version": updated.version}
 
     def reconcile(self, command: RemoteCommand) -> dict[str, object]:
         """Read authoritative state after a crash; never issue the action again."""
@@ -323,10 +333,10 @@ class CommandExecutor:
             return {"ok": False, "code": "STATUS_UNAVAILABLE"}
         if command.action == "cancel":
             if task.lifecycle == "cancelled" or task.terminal == "cancelled":
-                return {"ok": True, "status": "cancelled", "version": task.version}
+                return {"ok": True, "code": "OK", "status": "cancelled", "version": task.version}
             return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
         if command.action == "retry":
             if task.version > command.expected_version or task.lifecycle != "failed":
-                return {"ok": True, "status": task.lifecycle, "version": task.version}
+                return {"ok": True, "code": "OK", "status": task.lifecycle, "version": task.version}
             return {"ok": False, "code": "RETRY_NOT_CONFIRMED"}
         return {"ok": False, "code": "STATUS_UNAVAILABLE"}
