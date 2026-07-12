@@ -50,7 +50,8 @@ def test_all_models_are_frozen() -> None:
             "task_id": "task-42",
             "instance_id": "macbook-pro",
             "action": "pause",
-            "expected_status": "running",
+            "expected_version": 7,
+            "expected_lifecycle": "running",
             "requested_by": "ou_owner",
             "issued_at": "2026-07-12T01:00:00Z",
             "expires_at": "2026-07-12T01:05:00Z",
@@ -89,7 +90,8 @@ def test_task_snapshot_and_remote_command_reject_unknown_keys() -> None:
                 "task_id": "task-42",
                 "instance_id": "macbook-pro",
                 "action": "pause",
-                "expected_status": "running",
+                "expected_version": 7,
+                "expected_lifecycle": "running",
                 "requested_by": "ou_owner",
                 "issued_at": "2026-07-12T01:00:00Z",
                 "expires_at": "2026-07-12T01:05:00Z",
@@ -106,9 +108,28 @@ def test_remote_command_requires_expires_at() -> None:
                 "task_id": "task-42",
                 "instance_id": "macbook-pro",
                 "action": "pause",
-                "expected_status": "running",
+                "expected_version": 7,
+                "expected_lifecycle": "running",
                 "requested_by": "ou_owner",
                 "issued_at": "2026-07-12T01:00:00Z",
+            }
+        )
+
+
+@pytest.mark.parametrize("version", [0, -1, True])
+def test_remote_command_expected_version_is_positive(version: object) -> None:
+    with pytest.raises(ValueError, match="expected_version"):
+        RemoteCommand.from_dict(
+            {
+                "command_id": "cmd-1",
+                "task_id": "task-42",
+                "instance_id": "macbook-pro",
+                "action": "cancel",
+                "expected_version": version,
+                "expected_lifecycle": "running",
+                "requested_by": "u",
+                "issued_at": "2026-07-12T01:00:00Z",
+                "expires_at": "2026-07-12T01:05:00Z",
             }
         )
 
@@ -140,35 +161,43 @@ def test_task_version_must_be_a_positive_integer(version: object) -> None:
 
 
 @pytest.mark.parametrize("status", ["triage", "todo", "ready", "running", "blocked", "done"])
-def test_task_and_command_accept_each_kanban_status(status: str) -> None:
+def test_task_accepts_each_kanban_status(status: str) -> None:
     assert TaskSnapshot.from_dict(_task_payload(status=status)).status == status
+
+
+@pytest.mark.parametrize(
+    "lifecycle", ["queued", "running", "paused", "failed", "cancelled", "completed", "blocked"]
+)
+def test_command_accepts_each_control_lifecycle(lifecycle: str) -> None:
     command = RemoteCommand.from_dict(
         {
             "command_id": "cmd-1",
             "task_id": "task-42",
             "instance_id": "macbook-pro",
             "action": "pause",
-            "expected_status": status,
+            "expected_version": 7,
+            "expected_lifecycle": lifecycle,
             "requested_by": "ou_owner",
             "issued_at": "2026-07-12T01:00:00Z",
             "expires_at": "2026-07-12T01:05:00Z",
         }
     )
-    assert command.expected_status == status
+    assert command.expected_lifecycle == lifecycle
 
 
 @pytest.mark.parametrize("status", ["queued", "awaiting_approval", "completed", "failed"])
 def test_task_and_command_reject_non_contract_status(status: str) -> None:
     with pytest.raises(ValueError, match="status"):
         TaskSnapshot.from_dict(_task_payload(status=status))
-    with pytest.raises(ValueError, match="expected_status"):
+    with pytest.raises(ValueError, match="expected_lifecycle"):
         RemoteCommand.from_dict(
             {
                 "command_id": "cmd-1",
                 "task_id": "task-42",
                 "instance_id": "macbook-pro",
                 "action": "pause",
-                "expected_status": status,
+                "expected_version": 7,
+                "expected_lifecycle": "unknown",
                 "requested_by": "ou_owner",
                 "issued_at": "2026-07-12T01:00:00Z",
                 "expires_at": "2026-07-12T01:05:00Z",
@@ -252,7 +281,8 @@ def test_model_serialization_field_order_is_deterministic() -> None:
             "task_id": "task-42",
             "instance_id": "macbook-pro",
             "action": "pause",
-            "expected_status": "running",
+            "expected_version": 7,
+            "expected_lifecycle": "running",
             "requested_by": "ou_owner",
             "issued_at": "2026-07-12T01:00:00Z",
             "expires_at": "2026-07-12T01:05:00Z",
@@ -277,7 +307,8 @@ def test_model_serialization_field_order_is_deterministic() -> None:
         "task_id",
         "instance_id",
         "action",
-        "expected_status",
+        "expected_version",
+        "expected_lifecycle",
         "requested_by",
         "issued_at",
         "expires_at",

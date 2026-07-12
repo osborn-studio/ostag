@@ -3,10 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import io
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ostag.main import main_async
+from ostag.core.run_ledger import RunLedger
+from ostag.core.schemas import LedgerEvent
 from ostag.work_monitor.reporter import Reporter, TransportResponse
 
 
@@ -81,6 +85,9 @@ def test_tail_maps_ledger_events_redacts_and_restarts_without_duplicates(tmp_pat
         "task.awaiting_approval",
         "task.completed",
     ]
+    assert [event.task.version for event in events] == [1, 2, 3, 4]
+    assert {event.task.title for event in events} == {"Ship [REDACTED]"}
+    assert {event.task.agent for event in events} == {"codex"}
     serialized = json.dumps([event.to_dict() for event in events])
     assert (
         "private" not in serialized
@@ -91,6 +98,40 @@ def test_tail_maps_ledger_events_redacts_and_restarts_without_duplicates(tmp_pat
     restarted = _reporter(tmp_path)
     assert restarted.tail_ledger_once() == 0
     assert len(restarted.pending_events()) == 4
+
+
+def test_tail_consumes_real_runledger_stage_receipt_and_terminal_records(tmp_path: Path) -> None:
+    ledger = RunLedger(tmp_path / "ledger.jsonl")
+    ledger.append(
+        LedgerEvent(
+            "l1",
+            "run-real",
+            "run_created",
+            {"run": {"intent": {"raw_text": "Real task"}, "executor_id": "codex"}},
+        )
+    )
+    ledger.append(
+        LedgerEvent(
+            "l2",
+            "run-real",
+            "run_status_changed",
+            {"status": "running", "detail": "stage: executing"},
+        )
+    )
+    ledger.append(
+        LedgerEvent(
+            "l3", "run-real", "action_proposed", {"receipt": {"summary": "approval required"}}
+        )
+    )
+    ledger.append(LedgerEvent("l4", "run-real", "run_finished", {"status": "cancelled"}))
+    reporter = _reporter(tmp_path)
+    assert reporter.tail_ledger_once() == 4
+    assert [event.kind for event in reporter.pending_events()] == [
+        "task.created",
+        "task.started",
+        "task.awaiting_approval",
+        "task.cancelled",
+    ]
 
 
 def test_cursor_advances_only_after_spool_commit_and_handles_rotation(tmp_path: Path) -> None:
@@ -187,13 +228,39 @@ def test_sequences_remain_monotonic_after_spool_is_fully_acknowledged(tmp_path: 
     assert reporter.heartbeat().sequence == 2
 
 
+def test_duplicate_event_is_idempotent_without_sequence_gap(tmp_path: Path) -> None:
+    reporter = _reporter(tmp_path, FakeTransport([TransportResponse(200, b'{"ack_sequence":1}')]))
+    first = reporter.heartbeat()
+    payload = first.to_dict()
+    payload.pop("instance_id")
+    payload.pop("sequence")
+    duplicate = reporter.enqueue(payload)
+    assert duplicate.sequence == first.sequence
+    assert len(reporter.pending_events()) == 1
+    assert reporter.status()["next_sequence"] == 2
+    assert reporter.flush_once() == 1
+    assert reporter.enqueue(payload).sequence == 1
+    assert reporter.pending_events() == []
+
+
+def test_malformed_or_out_of_range_2xx_ack_keeps_spool_and_backs_off(tmp_path: Path) -> None:
+    for body in (b"not-json", b'{"ack_sequence":999}', b'{"ack_sequence":-1}'):
+        path = tmp_path / str(abs(hash(body)))
+        reporter = _reporter(path, FakeTransport([TransportResponse(200, body)]))
+        reporter.heartbeat()
+        assert reporter.flush_once() == 0
+        assert reporter.status()["pending_events"] == 1
+        assert reporter.status()["failure_count"] == 1
+
+
 def test_poll_commands_delegates_and_acknowledges_results(tmp_path: Path) -> None:
     command = {
         "command_id": "c1",
         "task_id": "t1",
         "instance_id": "macbook",
         "action": "cancel",
-        "expected_status": "running",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
         "requested_by": "u1",
         "issued_at": "2026-07-12T00:59:00Z",
         "expires_at": "2026-07-12T01:05:00Z",
@@ -211,6 +278,69 @@ def test_poll_commands_delegates_and_acknowledges_results(tmp_path: Path) -> Non
     assert json.loads(transport.requests[1][2])["result"]["status"] == "cancelled"
 
 
+def test_command_ack_failure_is_persisted_and_destructive_action_not_reexecuted(
+    tmp_path: Path,
+) -> None:
+    command = {
+        "command_id": "c1",
+        "task_id": "t1",
+        "instance_id": "macbook",
+        "action": "cancel",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
+        "requested_by": "u1",
+        "issued_at": "2026-07-12T00:59:00Z",
+        "expires_at": "2026-07-12T01:05:00Z",
+    }
+    transport = FakeTransport(
+        [
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(500, b""),
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(200, b"{}"),
+        ]
+    )
+    calls: list[str] = []
+    reporter = _reporter(tmp_path, transport)
+    assert (
+        reporter.poll_commands_once(lambda c: calls.append(c.command_id) or {"status": "cancelled"})
+        == 0
+    )
+    restarted = _reporter(tmp_path, transport)
+    assert (
+        restarted.poll_commands_once(
+            lambda c: calls.append(c.command_id) or {"status": "cancelled"}
+        )
+        == 1
+    )
+    assert calls == ["c1"]
+    assert restarted.command_states() == {"c1": "acked"}
+
+
+def test_run_once_schedules_heartbeat_and_poll_at_independent_intervals(tmp_path: Path) -> None:
+    now = [NOW]
+    transport = FakeTransport(
+        [TransportResponse(200, b'{"ack_sequence":1}'), TransportResponse(200, b'{"commands":[]}')]
+    )
+    reporter = Reporter(
+        instance_id="macbook",
+        secret="top-secret",
+        central_url="https://monitor.example",
+        ledger_path=tmp_path / "ledger",
+        spool_path=tmp_path / "spool",
+        transport=transport,
+        clock=lambda: now[0],
+        interval_seconds=30,
+        command_poll_seconds=10,
+        capabilities=lambda: frozenset({"cancel"}),
+    )
+    first = reporter.run_once(lambda _: {})
+    assert first["heartbeat"] is True and first["polled"] is True
+    upload = json.loads(transport.requests[0][2])
+    assert upload["supported_actions"] == ["cancel"]
+    assert reporter.run_once(lambda _: {})["polled"] is False
+
+
 async def test_monitor_ingest_file_stdin_status_and_dry_run_example(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -223,3 +353,23 @@ async def test_monitor_ingest_file_stdin_status_and_dry_run_example(
     assert payload["queued"] is True and "secret" not in payload
     assert await main_async(["monitor", "reporter", "status", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["pending_events"] == 1
+
+    stdin_payload = event.read_text(encoding="utf-8").replace("osstack-task-demo-v1", "stdin-event")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin_payload))
+    assert await main_async(["monitor", "ingest", "--stdin", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["sequence"] == 2
+
+
+async def test_reporter_run_once_offline_and_start_missing_credentials_never_leak_secret(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("OSTAG_MONITOR_INSTANCE_ID", "demo")
+    monkeypatch.setenv("OSTAG_MONITOR_INSTANCE_SECRET", "never-print-this")
+    monkeypatch.setenv("OSTAG_MONITOR_SPOOL_DB", str(tmp_path / "spool"))
+    assert await main_async(["monitor", "reporter", "run-once", "--json"]) == 0
+    output = capsys.readouterr().out
+    assert "never-print-this" not in output
+    monkeypatch.setenv("OSTAG_MONITOR_ENABLED", "true")
+    assert await main_async(["monitor", "reporter", "start", "--json"]) == 1
+    output = capsys.readouterr().out
+    assert "monitor_not_configured" in output and "never-print-this" not in output

@@ -56,6 +56,8 @@ class Reporter:
         clock: Callable[[], datetime] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         interval_seconds: int = 30,
+        command_poll_seconds: int = 10,
+        capabilities: Callable[[], frozenset[str]] | None = None,
     ) -> None:
         if not instance_id:
             raise ValueError("instance_id is required")
@@ -68,6 +70,8 @@ class Reporter:
         self.clock = clock or (lambda: datetime.now(UTC))
         self.sleep = sleep
         self.interval_seconds = interval_seconds
+        self.command_poll_seconds = command_poll_seconds
+        self.capabilities = capabilities or (lambda: frozenset())
         self._before_spool_commit: Callable[[], None] = lambda: None
         self.spool_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
@@ -87,7 +91,22 @@ class Reporter:
                     event_id TEXT NOT NULL UNIQUE,
                     payload TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS event_history (
+                    event_id TEXT PRIMARY KEY, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS task_metadata (
+                    task_id TEXT PRIMARY KEY, title TEXT NOT NULL, agent TEXT NOT NULL,
+                    project TEXT NOT NULL, version INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS command_state (
+                    command_id TEXT PRIMARY KEY, state TEXT NOT NULL,
+                    command_payload TEXT NOT NULL, result_payload TEXT
+                );
                 """
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO event_history(event_id,payload) "
+                "SELECT event_id,payload FROM spool"
             )
 
     def _state(self, key: str, default: str = "") -> str:
@@ -112,6 +131,11 @@ class Reporter:
     def _enqueue_in_transaction(
         self, db: sqlite3.Connection, payload: dict[str, object]
     ) -> MonitorEvent:
+        existing = db.execute(
+            "SELECT payload FROM event_history WHERE event_id=?", (str(payload["event_id"]),)
+        ).fetchone()
+        if existing is not None:
+            return MonitorEvent.from_dict(json.loads(existing["payload"]))
         row = db.execute("SELECT value FROM state WHERE key='next_sequence'").fetchone()
         sequence = 1 if row is None else int(row["value"])
         raw_task = payload.get("task")
@@ -131,6 +155,10 @@ class Reporter:
                 event.event_id,
                 json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True),
             ),
+        )
+        db.execute(
+            "INSERT INTO event_history(event_id,payload) VALUES(?,?)",
+            (event.event_id, json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True)),
         )
         self._set_state(db, "next_sequence", sequence + 1)
         return event
@@ -161,6 +189,7 @@ class Reporter:
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     if mapped is not None:
+                        mapped = self._apply_task_metadata(db, mapped)
                         self._enqueue_in_transaction(db, mapped)
                         count += 1
                     self._before_spool_commit()
@@ -172,6 +201,26 @@ class Reporter:
                 if end <= start:  # pragma: no cover - defensive
                     break
         return count
+
+    def _apply_task_metadata(
+        self, db: sqlite3.Connection, mapped: dict[str, object]
+    ) -> dict[str, object]:
+        task = dict(mapped["task"])  # type: ignore[arg-type]
+        task_id = str(task["task_id"])
+        row = db.execute("SELECT * FROM task_metadata WHERE task_id=?", (task_id,)).fetchone()
+        if row is None:
+            version = 1
+            title, agent, project = str(task["title"]), str(task["agent"]), str(task["project"])
+            db.execute(
+                "INSERT INTO task_metadata VALUES(?,?,?,?,?)",
+                (task_id, title, agent, project, version),
+            )
+        else:
+            version = int(row["version"]) + 1
+            title, agent, project = str(row["title"]), str(row["agent"]), str(row["project"])
+            db.execute("UPDATE task_metadata SET version=? WHERE task_id=?", (version, task_id))
+        task.update({"title": title, "agent": agent, "project": project, "version": version})
+        return {**mapped, "task": task}
 
     def _map_ledger_record(self, record: dict[str, object]) -> dict[str, object] | None:
         event_type = str(record.get("event_type", ""))
@@ -226,7 +275,7 @@ class Reporter:
                 "summary": str(summary_source or ""),
                 "error_class": "execution_failed" if kind == "task.failed" else None,
                 "evidence_ref": f"ledger:{record.get('event_id', '')}",
-                "version": max(1, int(self._state("mapped_version", "0")) + 1),
+                "version": 1,
             },
         }
 
@@ -263,7 +312,10 @@ class Reporter:
         if not events:
             return 0
         body = json.dumps(
-            {"events": [event.to_dict() for event in events]},
+            {
+                "events": [event.to_dict() for event in events],
+                "supported_actions": sorted(self.capabilities()),
+            },
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -277,8 +329,17 @@ class Reporter:
         if not 200 <= response.status < 300:
             self._record_failure()
             return 0
-        result = json.loads(response.body or b"{}")
-        ack = int(result.get("ack_sequence", 0))
+        try:
+            result = json.loads(response.body or b"{}")
+            ack = result["ack_sequence"]
+            if isinstance(ack, bool) or not isinstance(ack, int):
+                raise ValueError("invalid ack")
+            sequences = [event.sequence for event in events]
+            if ack < 0 or ack > max(sequences) or (ack and ack not in sequences):
+                raise ValueError("ack outside sent contiguous range")
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            self._record_failure()
+            return 0
         with self._connect() as db:
             deleted = db.execute("DELETE FROM spool WHERE sequence<=?", (ack,)).rowcount
             self._set_state(db, "failure_count", 0)
@@ -303,27 +364,103 @@ class Reporter:
         )
         if not 200 <= response.status < 300:
             return 0
-        commands = json.loads(response.body or b"{}").get("commands", [])
+        try:
+            commands = json.loads(response.body or b"{}").get("commands", [])
+        except (json.JSONDecodeError, AttributeError):
+            return 0
+        handled = 0
         for raw in commands:
             command = RemoteCommand.from_dict(raw)
-            result = execute(command)
+            with self._connect() as db:
+                row = db.execute(
+                    "SELECT state,result_payload FROM command_state WHERE command_id=?",
+                    (command.command_id,),
+                ).fetchone()
+                if row is None:
+                    db.execute(
+                        "INSERT INTO command_state VALUES(?,?,?,NULL)",
+                        (
+                            command.command_id,
+                            "received",
+                            json.dumps(command.to_dict(), sort_keys=True),
+                        ),
+                    )
+                    state, stored = "received", None
+                else:
+                    state, stored = str(row["state"]), row["result_payload"]
+            if state == "acked":
+                continue
+            if state == "executed":
+                result = json.loads(stored)
+            else:
+                result = execute(command)
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state='executed',result_payload=? WHERE command_id=?",
+                        (json.dumps(result, sort_keys=True), command.command_id),
+                    )
             body = json.dumps(
                 {"command_id": command.command_id, "result": result}, sort_keys=True
             ).encode()
-            self.transport.request(
+            ack_response = self.transport.request(
                 "POST", f"{self.central_url}/v1/commands/ack", body, self._headers(body)
             )
-        return len(commands)
+            if 200 <= ack_response.status < 300:
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state='acked' WHERE command_id=?",
+                        (command.command_id,),
+                    )
+                handled += 1
+        return handled
 
-    def run_once(self) -> dict[str, object]:
-        tailed = self.tail_ledger_once()
-        flushed = self.flush_once()
-        return {"tailed": tailed, "flushed": flushed, **self.status()}
+    def command_states(self) -> dict[str, str]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT command_id,state FROM command_state ORDER BY command_id"
+            ).fetchall()
+        return {str(row["command_id"]): str(row["state"]) for row in rows}
 
-    def start(self) -> None:
+    def run_once(
+        self, execute: Callable[[RemoteCommand], dict[str, object]] | None = None
+    ) -> dict[str, object]:
+        now = self.clock()
+        report_due = self._due("last_report_at", self.interval_seconds, now)
+        poll_due = self._due("last_command_poll_at", self.command_poll_seconds, now)
+        tailed = self.tail_ledger_once() if report_due else 0
+        if report_due:
+            self.heartbeat()
+            flushed = self.flush_once()
+            self._save_time("last_report_at", now)
+        else:
+            flushed = 0
+        polled = False
+        handled = 0
+        if poll_due and execute is not None:
+            handled = self.poll_commands_once(execute)
+            self._save_time("last_command_poll_at", now)
+            polled = True
+        return {
+            "tailed": tailed,
+            "flushed": flushed,
+            "heartbeat": report_due,
+            "polled": polled,
+            "handled": handled,
+            **self.status(),
+        }
+
+    def _due(self, key: str, seconds: int, now: datetime) -> bool:
+        previous = self._state(key)
+        return not previous or now >= datetime.fromisoformat(previous) + timedelta(seconds=seconds)
+
+    def _save_time(self, key: str, value: datetime) -> None:
+        with self._connect() as db:
+            self._set_state(db, key, value.isoformat())
+
+    def start(self, execute: Callable[[RemoteCommand], dict[str, object]] | None = None) -> None:
         while True:
-            self.run_once()
-            self.sleep(self.interval_seconds)
+            self.run_once(execute)
+            self.sleep(min(self.interval_seconds, self.command_poll_seconds))
 
     def status(self) -> dict[str, object]:
         return {
@@ -335,4 +472,6 @@ class Reporter:
             "last_ledger_event_id": self._state("ledger_event_id"),
             "failure_count": int(self._state("failure_count", "0")),
             "next_attempt_at": self._state("next_attempt_at"),
+            "next_sequence": int(self._state("next_sequence", "1")),
+            "command_states": self.command_states(),
         }

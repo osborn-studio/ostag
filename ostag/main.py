@@ -26,6 +26,7 @@ from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 from ostag.workflows.auto_base import AutoBaseWorkflow
 from ostag.work_monitor.reporter import Reporter
+from ostag.work_monitor.executor import CommandExecutor, OsstackCliControlPort
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -354,22 +355,29 @@ def _emit(payload: object, *, as_json: bool) -> None:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
 
 
-def _reporter_from_config(config) -> Reporter:
-    return Reporter(
+def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
+    port = OsstackCliControlPort(
+        instance_id=config.monitor_instance_id, binary=config.monitor_osstack_bin
+    )
+    executor = CommandExecutor(config.monitor_instance_id, osstack=port)
+    reporter = Reporter(
         instance_id=config.monitor_instance_id,
         secret=config.monitor_instance_secret,
         central_url=config.monitor_central_url,
         ledger_path=config.run_ledger_path,
         spool_path=config.monitor_spool_db,
         interval_seconds=config.monitor_report_interval_seconds,
+        command_poll_seconds=config.monitor_command_poll_seconds,
+        capabilities=executor.capabilities,
     )
+    return reporter, executor
 
 
 def run_monitor_command(args: argparse.Namespace) -> int:
     import sys
 
     config = load_settings(getattr(args, "config", None))
-    reporter = _reporter_from_config(config)
+    reporter, executor = _reporter_from_config(config)
     as_json = getattr(args, "json", False)
     if args.monitor_command == "ingest":
         raw = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
@@ -389,7 +397,7 @@ def run_monitor_command(args: argparse.Namespace) -> int:
         _emit(reporter.status(), as_json=as_json)
         return 0
     if args.reporter_command == "run-once":
-        _emit(reporter.run_once(), as_json=as_json)
+        _emit(reporter.run_once(executor.execute), as_json=as_json)
         return 0
     if args.reporter_command == "start":
         if not config.monitor_enabled:
@@ -414,7 +422,7 @@ def run_monitor_command(args: argparse.Namespace) -> int:
                 as_json=as_json,
             )
             return 1
-        reporter.start()
+        reporter.start(executor.execute)
         return 0
     raise AssertionError(args.reporter_command)
 

@@ -22,11 +22,12 @@ EVENT_KINDS = frozenset(
     }
 )
 COMMAND_ACTIONS = frozenset({"pause", "resume", "retry", "cancel"})
+COMMAND_LIFECYCLES = frozenset(
+    {"queued", "running", "paused", "failed", "cancelled", "completed", "blocked"}
+)
 
 
-def _validate_keys(
-    payload: object, *, required: tuple[str, ...], model_name: str
-) -> None:
+def _validate_keys(payload: object, *, required: tuple[str, ...], model_name: str) -> None:
     if not isinstance(payload, Mapping):
         raise ValueError(f"{model_name} payload must be a mapping")
     if not all(isinstance(key, str) for key in payload):
@@ -133,7 +134,11 @@ class MonitorEvent:
     def __post_init__(self) -> None:
         for field in ("event_id", "instance_id", "occurred_at"):
             _require_string(getattr(self, field), field)
-        if isinstance(self.sequence, bool) or not isinstance(self.sequence, int) or self.sequence <= 0:
+        if (
+            isinstance(self.sequence, bool)
+            or not isinstance(self.sequence, int)
+            or self.sequence <= 0
+        ):
             raise ValueError("sequence must be a positive integer")
         if self.kind not in EVENT_KINDS:
             raise ValueError(f"kind must be one of {sorted(EVENT_KINDS)}")
@@ -175,7 +180,8 @@ class RemoteCommand:
     task_id: str
     instance_id: str
     action: str
-    expected_status: str
+    expected_version: int
+    expected_lifecycle: str
     requested_by: str
     issued_at: str
     expires_at: str
@@ -185,19 +191,35 @@ class RemoteCommand:
         "task_id",
         "instance_id",
         "action",
-        "expected_status",
+        "expected_version",
+        "expected_lifecycle",
         "requested_by",
         "issued_at",
         "expires_at",
     )
 
     def __post_init__(self) -> None:
-        for field in self._KEYS:
+        for field in (
+            "command_id",
+            "task_id",
+            "instance_id",
+            "action",
+            "expected_lifecycle",
+            "requested_by",
+            "issued_at",
+            "expires_at",
+        ):
             _require_string(getattr(self, field), field)
         if self.action not in COMMAND_ACTIONS:
             raise ValueError(f"action must be one of {sorted(COMMAND_ACTIONS)}")
-        if self.expected_status not in TASK_STATUSES:
-            raise ValueError(f"expected_status must be one of {sorted(TASK_STATUSES)}")
+        if (
+            isinstance(self.expected_version, bool)
+            or not isinstance(self.expected_version, int)
+            or self.expected_version <= 0
+        ):
+            raise ValueError("expected_version must be a positive integer")
+        if self.expected_lifecycle not in COMMAND_LIFECYCLES:
+            raise ValueError(f"expected_lifecycle must be one of {sorted(COMMAND_LIFECYCLES)}")
 
     @classmethod
     def from_dict(cls, payload: object) -> RemoteCommand:
@@ -205,5 +227,5 @@ class RemoteCommand:
         assert isinstance(payload, Mapping)
         return cls(**{key: payload[key] for key in cls._KEYS})
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, str | int]:
         return {key: getattr(self, key) for key in self._KEYS}

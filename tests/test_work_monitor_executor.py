@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from ostag.work_monitor.executor import CommandExecutor, ControlTask
+from ostag.work_monitor.executor import (
+    CommandExecutor,
+    ControlTask,
+    OsstackCliControlPort,
+    UnavailableOStagControlPort,
+)
 from ostag.work_monitor.models import RemoteCommand
-
 
 NOW = datetime(2026, 7, 12, 1, 0, tzinfo=UTC)
 
@@ -27,95 +33,109 @@ class FakePort:
         self.calls.append((action, task_id))
 
 
-def _command(action: str, status: str = "running") -> RemoteCommand:
+def command(action: str, lifecycle: str = "running", version: int = 3) -> RemoteCommand:
     return RemoteCommand(
         "cmd-1",
         "task-1",
         "mac",
         action,
-        status,
+        version,
+        lifecycle,
         "owner",
         "2026-07-12T00:59:00Z",
         "2026-07-12T01:05:00Z",
     )
 
 
-def test_capabilities_are_negotiated_and_pause_resume_unsupported() -> None:
-    port = FakePort(ControlTask("task-1", "mac", "running", 3, "a1"), frozenset({"cancel"}), [])
+def test_signed_command_fields_are_the_only_preconditions() -> None:
+    port = FakePort(ControlTask("task-1", "mac", "running", 3), frozenset({"cancel"}), [])
+    executor = CommandExecutor("mac", ostag=port, clock=lambda: NOW, sleep=lambda _: None)
+    assert executor.execute(command("cancel", version=2))["code"] == "VERSION_MISMATCH"
+    port.task = ControlTask("task-1", "mac", "blocked", 3)
+    assert executor.execute(command("cancel"))["code"] == "LIFECYCLE_MISMATCH"
+    assert port.calls == []
+
+
+def test_capability_is_rechecked_immediately_before_execution() -> None:
+    class VanishingPort(FakePort):
+        checks = 0
+
+        def capabilities(self) -> frozenset[str]:
+            self.checks += 1
+            return frozenset({"cancel"}) if self.checks == 1 else frozenset()
+
+    port = VanishingPort(ControlTask("task-1", "mac", "running", 3), frozenset(), [])
     executor = CommandExecutor("mac", ostag=port, clock=lambda: NOW)
     assert executor.capabilities() == frozenset({"cancel"})
-    result = executor.execute(_command("pause"))
-    assert result["code"] == "UNSUPPORTED" and port.calls == []
-
-
-def test_instance_status_version_and_expiry_mismatch_never_execute() -> None:
-    port = FakePort(ControlTask("task-1", "other", "running", 3, "a1"), frozenset({"cancel"}), [])
-    executor = CommandExecutor("mac", ostag=port, clock=lambda: NOW)
-    assert executor.execute(_command("cancel"))["code"] == "INSTANCE_MISMATCH"
-    port.task = ControlTask("task-1", "mac", "blocked", 3, "a1")
-    assert executor.execute(_command("cancel"))["code"] == "STATUS_MISMATCH"
-    port.task = ControlTask("task-1", "mac", "running", 3, "a1")
-    assert executor.execute(_command("cancel"), expected_version=2)["code"] == "VERSION_MISMATCH"
-    expired = RemoteCommand(
-        "c2",
-        "task-1",
-        "mac",
-        "cancel",
-        "running",
-        "u",
-        "2026-07-12T00:00:00Z",
-        "2026-07-12T00:30:00Z",
-    )
-    assert executor.execute(expired)["code"] == "EXPIRED"
+    assert executor.execute(command("cancel"))["code"] == "UNSUPPORTED"
     assert port.calls == []
 
 
-def test_osstack_retry_only_failed_and_verifies_new_or_reordered_attempt() -> None:
-    initial = ControlTask("task-1", "mac", "failed", 4, "attempt-1", attempt_order=2)
-    updated = ControlTask("task-1", "mac", "running", 5, "attempt-2", attempt_order=3)
-    port = FakePort(initial, frozenset({"retry"}), [], statuses=[initial, updated])
-    executor = CommandExecutor("mac", osstack=port, clock=lambda: NOW)
-    result = executor.execute(
-        _command("retry", "blocked"), authoritative_status="failed", expected_version=4
+def test_first_phase_ostag_control_port_explicitly_advertises_no_actions() -> None:
+    executor = CommandExecutor("mac", ostag=UnavailableOStagControlPort(), clock=lambda: NOW)
+    assert executor.capabilities() == frozenset()
+    assert executor.execute(command("cancel"))["code"] == "UNSUPPORTED"
+
+
+def test_retry_requires_failed_and_verifies_attempt_change() -> None:
+    failed = ControlTask("task-1", "mac", "failed", 3, "a1", 2)
+    updated = ControlTask("task-1", "mac", "running", 4, "a2", 3)
+    port = FakePort(failed, frozenset({"retry"}), [], [failed, updated])
+    result = CommandExecutor("mac", osstack=port, clock=lambda: NOW).execute(
+        command("retry", "failed")
     )
     assert result["status"] == "running" and port.calls == [("retry", "task-1")]
-
-    not_failed = FakePort(
-        ControlTask("task-1", "mac", "running", 4, "a", 2), frozenset({"retry"}), []
+    stale = FakePort(failed, frozenset({"retry"}), [], [failed, failed])
+    assert (
+        CommandExecutor("mac", osstack=stale, clock=lambda: NOW).execute(
+            command("retry", "failed")
+        )["code"]
+        == "RETRY_NOT_VERIFIED"
     )
-    result = CommandExecutor("mac", osstack=not_failed, clock=lambda: NOW).execute(
-        _command("retry")
+
+
+def test_cancel_always_polls_authoritative_cancelled_terminal() -> None:
+    running = ControlTask("task-1", "mac", "running", 3)
+    cancelled = ControlTask("task-1", "mac", "cancelled", 4, terminal="cancelled")
+    port = FakePort(running, frozenset({"cancel"}), [], [running, running, cancelled])
+    result = CommandExecutor("mac", osstack=port, clock=lambda: NOW, sleep=lambda _: None).execute(
+        command("cancel")
     )
-    assert result["code"] == "RETRY_REQUIRES_FAILED" and not_failed.calls == []
+    assert result["status"] == "cancelled"
 
 
-def test_retry_rejects_unverified_attempt_and_cancel_polls_authoritative_terminal() -> None:
-    failed = ControlTask("task-1", "mac", "failed", 4, "a1", 2)
-    stale = ControlTask("task-1", "mac", "failed", 4, "a1", 2)
-    retry_port = FakePort(failed, frozenset({"retry"}), [], statuses=[failed, stale])
-    result = CommandExecutor("mac", osstack=retry_port, clock=lambda: NOW).execute(
-        _command("retry", "blocked"), authoritative_status="failed", expected_version=4
-    )
-    assert result["code"] == "RETRY_NOT_VERIFIED"
+def test_osstack_cli_port_uses_safe_argv_and_parses_json() -> None:
+    calls: list[list[str]] = []
 
-    running = ControlTask("task-1", "mac", "running", 4, "a1")
-    cancelled = ControlTask("task-1", "mac", "done", 5, "a1", terminal="cancelled")
-    cancel_port = FakePort(
-        running, frozenset({"cancel"}), [], statuses=[running, running, cancelled]
-    )
-    result = CommandExecutor(
-        "mac", osstack=cancel_port, clock=lambda: NOW, sleep=lambda _: None
-    ).execute(_command("cancel"))
-    assert result["status"] == "cancelled" and cancel_port.calls == [("cancel", "task-1")]
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        if "capabilities" in argv:
+            out = json.dumps({"actions": ["cancel", "retry", "kanban.move"]})
+        elif "status" in argv:
+            out = json.dumps(
+                {
+                    "task_id": "task-1",
+                    "instance_id": "mac",
+                    "lifecycle": "failed",
+                    "version": 8,
+                    "attempt": {"id": "a8", "order": 8},
+                }
+            )
+        else:
+            out = "{}"
+        return subprocess.CompletedProcess(argv, 0, out, "")
+
+    port = OsstackCliControlPort(instance_id="mac", binary="/opt/osstack", runner=run)
+    assert port.capabilities() == frozenset({"cancel", "retry"})
+    assert port.get_task("task-1").attempt_id == "a8"
+    port.execute("retry", "task-1")
+    assert calls[-1] == ["/opt/osstack", "cockpit", "retry", "task-1", "--json"]
+    assert all(isinstance(call, list) for call in calls)
 
 
-def test_forbidden_aliases_are_never_advertised_or_called() -> None:
-    port = FakePort(
-        ControlTask("task-1", "mac", "running", 1, "a"),
-        frozenset({"kanban.move", "daemon.resume"}),
-        [],
-    )
-    executor = CommandExecutor("mac", osstack=port, clock=lambda: NOW)
-    assert executor.capabilities() == frozenset()
-    assert executor.execute(_command("resume"))["code"] == "UNSUPPORTED"
-    assert port.calls == []
+def test_osstack_cli_nonzero_or_invalid_json_fails_closed() -> None:
+    def bad(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, "not-json", "no")
+
+    port = OsstackCliControlPort(instance_id="mac", runner=bad)
+    assert port.capabilities() == frozenset()
