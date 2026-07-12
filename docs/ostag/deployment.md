@@ -191,9 +191,9 @@ docker compose -f deploy/work-monitor/docker-compose.yml up -d --no-build
 curl --fail --silent http://127.0.0.1:8000/healthz
 ```
 
-The checked-in image command fixes uvicorn at `--workers 1`; set
-`OSTAG_MONITOR_SCHEDULER_OWNER_COUNT=1`. Restrict origin TCP 8000 to EdgeOne
-origin ranges and an operator bastion. Configure TLS, WAF, 1 MiB body limit,
+The checked-in image command fixes uvicorn at `--workers 1`; the scheduler writes
+its runtime owner lease to SQLite and doctor rejects zero or duplicate live owners.
+Restrict origin TCP 8000 to EdgeOne origin ranges and an operator bastion. Configure TLS, WAF, 1 MiB body limit,
 rate limits, no caching, and origin proxying exactly as described in
 `deploy/work-monitor/edgeone-origin.md`.
 

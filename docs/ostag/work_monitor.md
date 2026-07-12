@@ -26,11 +26,14 @@ scripts/secret_hygiene_check.sh
 
 For a reporter, set `OSTAG_MONITOR_ENABLED=true`, its instance ID/secret, and the
 EdgeOne central URL; `ostag --doctor` checks credentials and `/healthz`. For the
-central container set `OSTAG_ENV=production`, `OSTAG_MONITOR_ROLE=central`, and
-`OSTAG_MONITOR_SCHEDULER_OWNER_COUNT=1`; doctor performs a temporary SQLite
-online backup/restore and checks platform callback state and stale instances.
+central container set `OSTAG_ENV=production` and `OSTAG_MONITOR_ROLE=central`;
+the running scheduler publishes a short DB lease and doctor requires exactly one
+unexpired runtime owner. Doctor also performs a temporary SQLite online
+backup/restore and checks platform callback state and stale instances.
 Set `OSTAG_TELEGRAM_WEBHOOK_STATUS=verified` only after inspecting a successful,
 redacted `getWebhookInfo` result on the deployed bot.
+Set `OSTAG_FEISHU_CALLBACK_STATUS=verified` only after a production callback
+challenge/health verification; tests inject this probe and never call the network.
 
 ## Platform setup
 

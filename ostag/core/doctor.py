@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Callable
 from urllib.request import Request, urlopen
 
 from ostag.config import Settings
@@ -22,7 +23,13 @@ class DoctorCheck:
     message: str
 
 
-def run_doctor(config: Settings, event_path: Path | None = None) -> list[DoctorCheck]:
+def run_doctor(
+    config: Settings,
+    event_path: Path | None = None,
+    *,
+    scheduler_owner_probe: Callable[[Settings], int] | None = None,
+    feishu_callback_probe: Callable[[Settings], bool] | None = None,
+) -> list[DoctorCheck]:
     checks = [
         _check_python(),
         _check_safe_defaults(config),
@@ -40,8 +47,8 @@ def run_doctor(config: Settings, event_path: Path | None = None) -> list[DoctorC
             (
                 _check_monitor_central_credentials(config),
                 _check_persistent_volume(config),
-                _check_scheduler_owner(config),
-                _check_monitor_platform(config),
+                _check_scheduler_owner(config, scheduler_owner_probe),
+                _check_monitor_platform(config, feishu_callback_probe),
                 _check_stale_instances(config),
             )
         )
@@ -267,14 +274,28 @@ def _check_persistent_volume(config: Settings) -> DoctorCheck:
     )
 
 
-def _check_scheduler_owner(config: Settings) -> DoctorCheck:
+def _check_scheduler_owner(
+    config: Settings, probe: Callable[[Settings], int] | None = None
+) -> DoctorCheck:
     if not config.monitor_scheduler_enabled:
         return DoctorCheck("scheduler_owner", True, "error", "scheduler is disabled")
-    raw = os.getenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "")
     try:
-        count = int(raw)
-    except ValueError:
-        count = 0
+        if probe is not None:
+            count = probe(config)
+        else:
+            with sqlite3.connect(
+                f"file:{config.monitor_server_db}?mode=ro", uri=True
+            ) as connection:
+                count = int(
+                    connection.execute(
+                        "SELECT count(*) FROM monitor_scheduler_owners WHERE lease_until>?",
+                        (datetime.now(UTC).isoformat(),),
+                    ).fetchone()[0]
+                )
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return DoctorCheck(
+            "scheduler_owner", False, "error", "scheduler runtime ownership cannot be verified"
+        )
     if count != 1:
         return DoctorCheck(
             "scheduler_owner", False, "error", "exactly one scheduler owner is required"
@@ -282,7 +303,9 @@ def _check_scheduler_owner(config: Settings) -> DoctorCheck:
     return DoctorCheck("scheduler_owner", True, "error", "exactly one scheduler owner verified")
 
 
-def _check_monitor_platform(config: Settings) -> DoctorCheck:
+def _check_monitor_platform(
+    config: Settings, feishu_probe: Callable[[Settings], bool] | None = None
+) -> DoctorCheck:
     if config.platform == "feishu":
         configured = all(
             (
@@ -292,12 +315,27 @@ def _check_monitor_platform(config: Settings) -> DoctorCheck:
                 config.feishu_encrypt_key,
             )
         ) and not config.feishu_use_websocket
+        if not configured:
+            return DoctorCheck(
+                "feishu_callback",
+                False,
+                "error",
+                "Feishu credentials or encrypted card callback are missing",
+            )
+        try:
+            verified = (
+                feishu_probe(config)
+                if feishu_probe is not None
+                else os.getenv("OSTAG_FEISHU_CALLBACK_STATUS", "").casefold() == "verified"
+            )
+        except Exception:
+            verified = False
         message = (
-            "Feishu credentials and encrypted card callback are configured"
-            if configured
-            else "Feishu credentials or encrypted card callback are missing"
+            "Feishu callback runtime verification passed"
+            if verified
+            else "Feishu callback runtime verification failed or is unreachable"
         )
-        return DoctorCheck("feishu_callback", configured, "error", message)
+        return DoctorCheck("feishu_callback", verified, "error", message)
     if config.platform == "telegram":
         configured = all(
             (

@@ -7,6 +7,7 @@ import sqlite3
 from ostag.config import load_settings
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
 from ostag.main import main_async
+from ostag.work_monitor.store import MonitorStore
 
 
 LIVE_CREDENTIAL_ENV = (
@@ -131,9 +132,14 @@ def test_production_monitor_doctor_verifies_volume_backup_restore_and_scheduler_
 ) -> None:
     database = tmp_path / "volume" / "monitor.sqlite3"
     database.parent.mkdir()
-    sqlite3.connect(database).execute("CREATE TABLE proof(value TEXT)").connection.close()
+    MonitorStore(database)
     monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
-    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "2")
+    future = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            "INSERT INTO monitor_scheduler_owners VALUES (?,?,?)",
+            (("owner-a", future, future), ("owner-b", future, future)),
+        )
     config = load_settings(
         None,
         env="production",
@@ -168,14 +174,16 @@ def test_production_monitor_doctor_reports_unwritable_volume(monkeypatch, tmp_pa
 
 def test_production_monitor_platform_and_stale_instance_checks(monkeypatch, tmp_path: Path) -> None:
     database = tmp_path / "monitor.sqlite3"
-    sqlite3.connect(database).execute(
-        "CREATE TABLE instances(instance_id TEXT PRIMARY KEY,last_seen_at TEXT)"
-    ).connection.close()
+    MonitorStore(database)
     stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     with sqlite3.connect(database) as connection:
-        connection.execute("INSERT INTO instances VALUES (?,?)", ("mac", stale))
+        connection.execute("INSERT INTO instances VALUES (?,?,?)", ("mac", 1, stale))
     monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
-    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "1")
+    future = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO monitor_scheduler_owners VALUES (?,?,?)", ("owner", future, future)
+        )
     config = load_settings(
         None,
         env="production",
@@ -192,9 +200,9 @@ def test_production_monitor_platform_and_stale_instance_checks(monkeypatch, tmp_
         monitor_offline_seconds=600,
     )
 
-    output = format_checks(run_doctor(config))
+    output = format_checks(run_doctor(config, feishu_callback_probe=lambda _: True))
 
-    assert "feishu_callback" in output
+    assert "feishu_callback" in output and "verification passed" in output
     assert "stale_instances" in output and "mac" in output
     assert "fake-feishu-secret" not in output
 
@@ -203,11 +211,13 @@ def test_production_telegram_doctor_requires_verified_webhook_status(
     monkeypatch, tmp_path: Path
 ) -> None:
     database = tmp_path / "monitor.sqlite3"
-    sqlite3.connect(database).execute(
-        "CREATE TABLE instances(instance_id TEXT PRIMARY KEY,last_seen_at TEXT)"
-    ).connection.close()
+    MonitorStore(database)
     monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
-    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "1")
+    future = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "INSERT INTO monitor_scheduler_owners VALUES (?,?,?)", ("owner", future, future)
+        )
     monkeypatch.setenv("OSTAG_TELEGRAM_WEBHOOK_STATUS", "pending")
     config = load_settings(
         None,
@@ -226,3 +236,50 @@ def test_production_telegram_doctor_requires_verified_webhook_status(
 
     assert "telegram_webhook" in output and "not verified" in output
     assert "fake-telegram-token" not in output
+
+
+def test_scheduler_owner_uses_runtime_probe_not_claimed_environment(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "monitor.sqlite3"
+    MonitorStore(database)
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "1")
+    config = load_settings(
+        None,
+        env="production",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=database,
+    )
+
+    output = format_checks(run_doctor(config, scheduler_owner_probe=lambda _: 2))
+
+    assert "scheduler_owner" in output and "exactly one" in output
+
+
+def test_feishu_callback_runtime_probe_failure_and_exception_are_redacted(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "monitor.sqlite3"
+    MonitorStore(database)
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    config = load_settings(
+        None,
+        env="production",
+        platform="feishu",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=database,
+        feishu_app_id="app",
+        feishu_app_secret="fake-callback-secret",
+        feishu_verification_token="verify",
+        feishu_encrypt_key="encrypt",
+        feishu_use_websocket=False,
+    )
+
+    for probe in (
+        lambda _: False,
+        lambda _: (_ for _ in ()).throw(OSError("fake-callback-secret unreachable")),
+    ):
+        output = format_checks(run_doctor(config, feishu_callback_probe=probe))
+        assert "feishu_callback" in output and "failed or is unreachable" in output
+        assert "fake-callback-secret" not in output

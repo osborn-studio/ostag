@@ -66,12 +66,16 @@ class WorkMonitorScheduler:
 
     async def run_forever(self, stop: asyncio.Event | None = None) -> None:
         stop = stop or asyncio.Event()
-        while not stop.is_set():
-            await self.tick()
-            try:
-                await asyncio.wait_for(stop.wait(), timeout=self.poll_seconds)
-            except TimeoutError:
-                pass
+        try:
+            while not stop.is_set():
+                await self.tick()
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=self.poll_seconds)
+                except TimeoutError:
+                    pass
+        finally:
+            with self.store.transaction() as db:
+                db.execute("DELETE FROM monitor_scheduler_owners WHERE owner_id=?", (self.owner,))
 
     async def run(self, stop: asyncio.Event) -> None:
         await self.run_forever(stop)
@@ -122,6 +126,15 @@ class WorkMonitorScheduler:
 
     async def tick(self, *, drain: bool = True) -> None:
         now = self.clock()
+        owner_lease = now + timedelta(seconds=max(30.0, self.poll_seconds * 3))
+        with self.store.transaction() as db:
+            db.execute("DELETE FROM monitor_scheduler_owners WHERE lease_until<=?", (now.isoformat(),))
+            db.execute(
+                "INSERT INTO monitor_scheduler_owners(owner_id,lease_until,heartbeat_at) "
+                "VALUES (?,?,?) ON CONFLICT(owner_id) DO UPDATE SET "
+                "lease_until=excluded.lease_until,heartbeat_at=excluded.heartbeat_at",
+                (self.owner, owner_lease.isoformat(), now.isoformat()),
+            )
         subscriptions = self._subscriptions()
         with self.store.connect() as db:
             tasks = [dict(r) for r in db.execute("SELECT * FROM tasks")]

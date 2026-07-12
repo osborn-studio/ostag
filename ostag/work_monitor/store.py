@@ -158,6 +158,11 @@ MIGRATIONS = (
             "ALTER TABLE notification_outbox ADD COLUMN ledger_synced INTEGER NOT NULL DEFAULT 0",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS monitor_scheduler_owners (owner_id TEXT PRIMARY KEY, lease_until TEXT NOT NULL, heartbeat_at TEXT NOT NULL)",
+        )
+    ),
 )
 
 

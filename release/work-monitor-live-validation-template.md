@@ -3,6 +3,11 @@
 Status: **INCOMPLETE — external production deployment and real-device validation
 have not been performed by this repository task.**
 
+Security blocker: **credential rotation and a coordinated repository-history scrub
+are required for the legacy value previously committed in
+`docs/ostag/dingtalk_setup.md`.** Do not paste the value into this record. Treat
+rotation as mandatory even if the corresponding integration is believed inactive.
+
 Do not change status to complete until every item below has redacted evidence.
 
 ## Deployment prerequisites and evidence

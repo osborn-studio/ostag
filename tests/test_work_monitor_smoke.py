@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ostag.core.identity import Principal
@@ -13,6 +14,7 @@ from ostag.work_monitor.feishu_cards import render_feishu_card
 from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.projection import Projector
 from ostag.work_monitor.server import ServerAuth, create_app
+from ostag.work_monitor.scheduler import WorkMonitorScheduler
 from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 from ostag.work_monitor.telegram_views import render_telegram_view
@@ -59,12 +61,27 @@ def _signed(body: bytes, instance: str, secret: str, path: str, nonce: str) -> d
     }
 
 
-def test_deterministic_two_instance_control_and_notification_loop(tmp_path: Path) -> None:
+class _FakeTransport:
+    def __init__(self) -> None:
+        self.deliveries: list[tuple[str, str]] = []
+
+    async def send_message(
+        self, destination_id: str, text: str, *, delivery_id: str, chat_type: str = "group"
+    ) -> None:
+        self.deliveries.append((destination_id, delivery_id))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["feishu", "telegram"])
+async def test_deterministic_two_instance_control_and_notification_loop(
+    tmp_path: Path, platform: str
+) -> None:
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     identities = IdentityStore(store.path, enrollment_secret="fixture-enroll")
-    principal = Principal("feishu", "fixture-owner")
-    destination = Destination("feishu", "fixture-private", "private")
+    principal = Principal(platform, "fixture-owner")
+    destination = Destination(platform, f"fixture-{platform}-private", "private")
     identities.bind_private(owner=principal, destination=destination, local_admin=True)
+    identities.subscribe(principal, destination, task_id="task-ostag-1")
     service = WorkMonitorService(store, identities)
     app = create_app(
         service=service,
@@ -121,10 +138,42 @@ def test_deterministic_two_instance_control_and_notification_loop(tmp_path: Path
             headers=_signed(ack_body, "ostag-1", "fixture-a", ack_path, "ack-ostag"),
         )
         assert ack.json() == {"state": "applied"}
+        replay = client.post(
+            ack_path,
+            content=ack_body,
+            headers=_signed(ack_body, "ostag-1", "fixture-a", ack_path, "ack-replay"),
+        )
+        assert replay.json() == {"state": "applied"}
 
     with store.connect() as connection:
-        notification = connection.execute(
-            "SELECT state,payload FROM notification_outbox WHERE event_id LIKE 'control_ack:%'"
-        ).fetchone()
+        notifications = connection.execute(
+            "SELECT state,payload,delivery_id FROM notification_outbox "
+            "WHERE event_id LIKE 'control_ack:%'"
+        ).fetchall()
+    assert len(notifications) == 1
+    notification = notifications[0]
     assert notification is not None and notification["state"] == "pending"
     assert json.loads(notification["payload"])["result"]["status"] == "paused"
+    stable_delivery_id = notification["delivery_id"]
+
+    feishu = _FakeTransport()
+    telegram = _FakeTransport()
+    scheduler = WorkMonitorScheduler(
+        store,
+        identities,
+        {"feishu": feishu, "telegram": telegram},
+        jitter=lambda _: 0,
+    )
+    while await scheduler.drain_once():
+        pass
+
+    selected = feishu if platform == "feishu" else telegram
+    other = telegram if platform == "feishu" else feishu
+    assert selected.deliveries == [(destination.destination_id, stable_delivery_id)]
+    assert other.deliveries == []
+    with store.connect() as connection:
+        delivered = connection.execute(
+            "SELECT state,delivery_id FROM notification_outbox WHERE event_id LIKE 'control_ack:%'"
+        ).fetchall()
+    assert len(delivered) == 1
+    assert tuple(delivered[0]) == ("delivered", stable_delivery_id)

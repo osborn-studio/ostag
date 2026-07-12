@@ -1,14 +1,10 @@
 # OS Tag Secret Hygiene
 
-- Generated at: `2026-07-12T18:36:29Z`
-- Status: `fail`
-- Matches: `1`
+- Generated at: `2026-07-12T18:46:22Z`
+- Status: `pass`
+- Matches: `0`
 - Scope: release bundle and formal handoff artifacts
 
 ## Result
 
-Potential secret-like values were found:
-
-```text
-current/release/secret-hygiene.md:13:current/release/secret-hygiene.md:13:current/release/secret-hygiene.md:13:current/docs/ostag/dingtalk_setup.md:35:OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=vNG4YZ7JnPmQKkapTN6DDzzeW2LD0oRE
-```
+No secret-like values were found in the release bundle or current formal artifacts.

@@ -30,6 +30,22 @@ class Sender:
         self.sent.append((destination_id, text, delivery_id, chat_type))
 
 
+@pytest.mark.asyncio
+async def test_scheduler_publishes_runtime_owner_lease_for_doctor(tmp_path: Path) -> None:
+    store, identities = setup(tmp_path)
+    now = datetime(2026, 7, 13, 3, 0, tzinfo=UTC)
+    scheduler = WorkMonitorScheduler(store, identities, {}, clock=lambda: now)
+
+    await scheduler.tick(drain=False)
+
+    with store.connect() as db:
+        owner = db.execute(
+            "SELECT owner_id,lease_until FROM monitor_scheduler_owners"
+        ).fetchone()
+    assert owner["owner_id"] == scheduler.owner
+    assert datetime.fromisoformat(owner["lease_until"]) > now
+
+
 def setup(tmp_path: Path):
     store = MonitorStore(tmp_path / "monitor.db")
     identities = IdentityStore(store.path)
