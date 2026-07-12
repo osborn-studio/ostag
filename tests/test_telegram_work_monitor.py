@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -25,6 +26,25 @@ def _service(tmp_path: Path) -> WorkMonitorService:
         local_admin=True,
     )
     return WorkMonitorService(store, identities)
+
+
+def _seed_task(service: WorkMonitorService, capabilities: tuple[str, ...]) -> None:
+    with service.store.connect() as db:
+        db.execute("INSERT INTO instances(instance_id,last_sequence) VALUES ('runner-1',1)")
+        db.execute(
+            "INSERT INTO tasks(instance_id,task_id,title,project,status,agent,progress,"
+            "duration_seconds,summary,error_class,evidence_ref,occurred_at,version) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("runner-1", "task-1", "Ship <safe>", "ostag", "running", "codex", 10,
+             1, "", None, None, "2026-07-13T00:00:00+00:00", 1),
+        )
+        payload = json.dumps({"per_task_capabilities": {"task-1": list(capabilities)}})
+        db.execute(
+            "INSERT INTO events(event_id,instance_id,sequence,kind,occurred_at,payload) "
+            "VALUES (?,?,?,?,?,?)",
+            ("heartbeat", "runner-1", 1, "instance.heartbeat",
+             "2026-07-13T00:00:00+00:00", payload),
+        )
 
 
 async def test_message_and_callback_normalize_verified_identity() -> None:
@@ -107,3 +127,117 @@ def test_telegram_html_is_escaped_and_callback_is_opaque_and_compact() -> None:
     assert "<script>" not in text and "&lt;script&gt;&amp;" in text
     assert markup == {"inline_keyboard": [[{"text": "PAUSE", "callback_data": "w_safe"}]]}
     assert len("w_safe".encode()) <= 64
+
+
+def test_governed_callback_propose_then_confirm_applies_exactly_once(tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def transport(method: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append((method, payload))
+        return {"ok": True, "result": {}}
+
+    service = _service(tmp_path)
+    _seed_task(service, ("pause",))
+    settings = Settings(
+        telegram_bot_token="token", telegram_webhook_secret="secret",
+        telegram_webhook_url="https://example.test/webhooks/telegram",
+        monitor_server_db=service.store.path,
+    )
+    app = create_app(settings=settings, service=service, projector=Projector(service.store),
+                     telegram_client=TelegramBotClient("token", transport=transport))
+    headers = {"X-Telegram-Bot-Api-Secret-Token": "secret"}
+
+    def callback(update_id: int, callback_id: str) -> dict[str, object]:
+        return {"update_id": update_id, "callback_query": {"id": f"q-{update_id}",
+                "from": {"id": 7}, "data": callback_id, "message": {"message_id": update_id,
+                "chat": {"id": 7, "type": "private"}}}}
+
+    with TestClient(app) as client:
+        message = {"update_id": 30, "message": {"message_id": 1, "from": {"id": 7},
+                   "chat": {"id": 7, "type": "private"}, "text": "/task task-1"}}
+        assert client.post("/webhooks/telegram", json=message, headers=headers).status_code == 200
+        markup = calls[-1][1]["reply_markup"]
+        action_id = markup["inline_keyboard"][0][0]["callback_data"]  # type: ignore[index]
+        assert client.post("/webhooks/telegram", json=callback(31, action_id),
+                           headers=headers).status_code == 200
+        with service.store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0
+        confirm_id = next(
+            payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"]  # type: ignore[index]
+            for method, payload in reversed(calls)
+            if method == "sendMessage" and payload.get("text") == "请再次确认操作"
+        )
+        assert client.post("/webhooks/telegram", json=callback(32, confirm_id),
+                           headers=headers).status_code == 200
+        with service.store.connect() as db:
+            commands = db.execute("SELECT action_id,status FROM commands").fetchall()
+        assert len(commands) == 1 and commands[0]["status"] == "pending"
+        assert service.ledger.get_receipt(commands[0]["action_id"]).state == "applying"
+        assert len(service.poll_commands("runner-1")) == 1
+        assert client.post("/webhooks/telegram", json=callback(33, confirm_id),
+                           headers=headers).status_code == 200
+        service.store.create_telegram_callback(
+            "w_expired", action="pause", task_id="task-1", destination_id="7",
+            chat_type="private", principal_platform="telegram", actor_id="7", expires_at=1,
+        )
+        assert client.post("/webhooks/telegram", json=callback(34, "w_expired"),
+                           headers=headers).status_code == 200
+        with service.store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 1
+
+
+def test_cancel_group_is_rejected_but_private_admin_can_confirm(tmp_path: Path) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def transport(method: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append((method, payload))
+        return {"ok": True, "result": {}}
+
+    service = _service(tmp_path)
+    _seed_task(service, ("cancel",))
+    group = Destination("telegram", "-100", "group")
+    service.identities.enroll_group(
+        Principal("telegram", "7"), group, scope="all", local_admin=True
+    )
+    settings = Settings(
+        telegram_bot_token="token", telegram_webhook_secret="secret",
+        telegram_webhook_url="https://example.test/webhooks/telegram",
+        telegram_group_allowlist=("-100",), telegram_admin_ids=("7",),
+        monitor_server_db=service.store.path,
+    )
+    app = create_app(settings=settings, service=service, projector=Projector(service.store),
+                     telegram_client=TelegramBotClient("token", transport=transport))
+    headers = {"X-Telegram-Bot-Api-Secret-Token": "secret"}
+
+    def callback(update_id: int, data: str, chat_id: int, chat_type: str) -> dict[str, object]:
+        return {"update_id": update_id, "callback_query": {"id": f"q-{update_id}",
+                "from": {"id": 7}, "data": data, "message": {"message_id": update_id,
+                "chat": {"id": chat_id, "type": chat_type}}}}
+
+    service.store.create_telegram_callback(
+        "w_group", action="cancel", task_id="task-1", destination_id="-100",
+        chat_type="group", principal_platform="telegram", actor_id="7",
+        expires_at=2**31,
+    )
+    service.store.create_telegram_callback(
+        "w_private", action="cancel", task_id="task-1", destination_id="7",
+        chat_type="private", principal_platform="telegram", actor_id="7",
+        expires_at=2**31,
+    )
+    with TestClient(app) as client:
+        assert client.post("/webhooks/telegram", json=callback(40, "w_group", -100, "group"),
+                           headers=headers).status_code == 200
+        with service.store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0
+        assert client.post("/webhooks/telegram", json=callback(41, "w_private", 7, "private"),
+                           headers=headers).status_code == 200
+        confirm_id = next(
+            payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"]  # type: ignore[index]
+            for method, payload in reversed(calls)
+            if method == "sendMessage" and payload.get("text") == "请再次确认操作"
+        )
+        assert client.post("/webhooks/telegram",
+                           json=callback(42, confirm_id, 7, "private"),
+                           headers=headers).status_code == 200
+        with service.store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 1

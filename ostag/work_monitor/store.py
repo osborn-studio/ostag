@@ -116,6 +116,13 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS telegram_callbacks (callback_id TEXT PRIMARY KEY, action TEXT NOT NULL, task_id TEXT NOT NULL, destination_id TEXT NOT NULL, chat_type TEXT NOT NULL, consumed_at TEXT)",
         )
     ),
+    Migration(
+        statements=(
+            "ALTER TABLE telegram_callbacks ADD COLUMN principal_platform TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE telegram_callbacks ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE telegram_callbacks ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0",
+        )
+    ),
 )
 
 
@@ -259,22 +266,33 @@ class MonitorStore:
 
     def create_telegram_callback(
         self, callback_id: str, *, action: str, task_id: str, destination_id: str,
-        chat_type: str,
+        chat_type: str, principal_platform: str = "", actor_id: str = "", expires_at: int = 0,
     ) -> None:
         with self.transaction() as connection:
             connection.execute(
-                "INSERT INTO telegram_callbacks(callback_id,action,task_id,destination_id,chat_type) "
-                "VALUES (?,?,?,?,?)",
-                (callback_id, action, task_id, destination_id, chat_type),
+                "INSERT INTO telegram_callbacks(callback_id,action,task_id,destination_id,chat_type,"
+                "principal_platform,actor_id,expires_at) VALUES (?,?,?,?,?,?,?,?)",
+                (callback_id, action, task_id, destination_id, chat_type,
+                 principal_platform, actor_id, expires_at),
             )
 
-    def consume_telegram_callback(self, callback_id: str) -> dict[str, str] | None:
+    def consume_telegram_callback(
+        self, callback_id: str, *, principal_platform: str = "", actor_id: str = "",
+        destination_id: str = "", chat_type: str = "", now: int = 0,
+    ) -> dict[str, str] | None:
         with self.transaction() as connection:
             row = connection.execute(
-                "SELECT action,task_id,destination_id,chat_type,consumed_at "
+                "SELECT action,task_id,destination_id,chat_type,principal_platform,actor_id,"
+                "expires_at,consumed_at "
                 "FROM telegram_callbacks WHERE callback_id=?", (callback_id,),
             ).fetchone()
-            if row is None or row["consumed_at"] is not None:
+            if row is None or row["consumed_at"] is not None or (
+                principal_platform and row["principal_platform"] != principal_platform
+            ) or (actor_id and row["actor_id"] != actor_id) or (
+                destination_id and row["destination_id"] != destination_id
+            ) or (chat_type and row["chat_type"] != chat_type) or (
+                now and int(row["expires_at"]) <= now
+            ):
                 return None
             connection.execute(
                 "UPDATE telegram_callbacks SET consumed_at=CURRENT_TIMESTAMP WHERE callback_id=?",

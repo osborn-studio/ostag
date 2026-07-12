@@ -43,7 +43,11 @@ exposure before doing so.
 ## Operations and rollback
 
 - Treat callback IDs as one-time opaque values. They contain no actor, task, or
-  authorization claims and remain within Telegram's 64-byte limit.
+  authorization claims and remain within Telegram's 64-byte limit. Every monitor
+  control first creates a governed receipt, then presents a second opaque
+  confirmation valid for five minutes. Only that confirmation approves and
+  applies the receipt; expired, mismatched, or repeated confirmations create no
+  command.
 - Rotate both bot token and webhook secret after suspected exposure. Re-register
   the webhook after rotation.
 - To roll back, call `deleteWebhook`, remove the three Telegram configuration

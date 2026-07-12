@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import json
 import secrets
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ostag.adapters.telegram import TelegramAdapter, TelegramBotClient
 from ostag.core.event import NormalizedEvent
+from ostag.core.identity import Principal
 
 from .identity import Destination, IdentityError
 from .service import AmbiguousTask, TaskNotFound, WorkMonitorService, parse_monitor_command
@@ -79,12 +81,16 @@ def create_telegram_router(
     def active() -> WorkMonitorService:
         return service() if callable(service) else service
 
-    def callback_factory(destination: Destination) -> Callable[[str, str], str]:
+    def callback_factory(
+        principal: Principal, destination: Destination,
+    ) -> Callable[[str, str], str]:
         def create(action: str, task_id: str) -> str:
             callback_id = "w_" + secrets.token_urlsafe(18)
             active().store.create_telegram_callback(
                 callback_id, action=action, task_id=task_id,
                 destination_id=destination.destination_id, chat_type=destination.chat_type,
+                principal_platform=principal.platform, actor_id=principal.actor_id,
+                expires_at=int(time.time()) + 300,
             )
             return callback_id
         return create
@@ -98,7 +104,7 @@ def create_telegram_router(
     def send_view(event: NormalizedEvent, view: object) -> None:
         destination = Destination("telegram", event.destination_id, event.chat_type)
         text, markup = render_telegram_view(
-            view, callback_factory=callback_factory(destination)  # type: ignore[arg-type]
+            view, callback_factory=callback_factory(event.principal, destination)  # type: ignore[arg-type]
         )
         client.send_message(event.destination_id, text, reply_markup=markup)
 
@@ -111,18 +117,21 @@ def create_telegram_router(
         if verified.callback_query_id:
             answer = "操作无效"
             try:
-                mapped = active().store.consume_telegram_callback(event.text)
-                if mapped is None or mapped["destination_id"] != event.destination_id \
-                        or mapped["chat_type"] != event.chat_type:
+                mapped = active().store.consume_telegram_callback(
+                    event.text, principal_platform=principal.platform, actor_id=principal.actor_id,
+                    destination_id=event.destination_id, chat_type=event.chat_type,
+                    now=int(time.time()),
+                )
+                if mapped is None:
                     return {"ok": True}
                 action, reference = mapped["action"], mapped["task_id"]
                 if action == "page":
                     send_view(event, active().board(principal, destination, page=int(reference)))
                     answer = "已翻页"
-                elif action == "confirm_cancel":
-                    require_private_admin(event, destination)
+                elif action == "confirm":
                     active().approve_control(principal, destination, reference)
-                    answer = "取消操作已确认"
+                    active().apply_control(principal, destination, reference)
+                    answer = "操作已确认并下发"
                 else:
                     if action == "cancel":
                         require_private_admin(event, destination)
@@ -130,11 +139,12 @@ def create_telegram_router(
                         principal, destination, task_id=reference, action=action
                     )
                     answer = f"已提交审批 {receipt.action_id}"
-                    if action == "cancel":
-                        confirm_id = callback_factory(destination)("confirm_cancel", receipt.action_id)
-                        client.send_message(event.destination_id, "请再次确认取消操作", reply_markup={
-                            "inline_keyboard": [[{"text": "确认取消", "callback_data": confirm_id}]]
-                        })
+                    confirm_id = callback_factory(principal, destination)(
+                        "confirm", receipt.action_id
+                    )
+                    client.send_message(event.destination_id, "请再次确认操作", reply_markup={
+                        "inline_keyboard": [[{"text": "确认", "callback_data": confirm_id}]]
+                    })
             except (IdentityError, PermissionError):
                 answer = "没有权限"
             except (TaskNotFound, AmbiguousTask, ValueError):
