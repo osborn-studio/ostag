@@ -275,6 +275,8 @@ class Reporter:
         inode = str(stat.st_ino)
         old_inode = self._state("ledger_inode")
         offset = int(self._state("ledger_offset", "0")) if old_inode == inode else 0
+        if old_inode == inode and stat.st_size < offset:
+            offset = 0
         count = 0
         with self.ledger_path.open("rb") as handle:
             handle.seek(offset)
@@ -283,11 +285,19 @@ class Reporter:
                 line = handle.readline()
                 if not line or not line.endswith(b"\n"):
                     break
-                record = json.loads(line)
-                mapped = self._map_ledger_record(record)
+                try:
+                    record = json.loads(line)
+                    if not isinstance(record, dict):
+                        raise ValueError("ledger record must be an object")
+                    mapped = self._map_ledger_record(record)
+                    parse_error = ""
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    record, mapped, parse_error = {}, None, f"malformed ledger line: {exc}"
                 end = handle.tell()
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
+                    if parse_error:
+                        self._record_error_in_transaction(db, parse_error)
                     if mapped is not None:
                         duplicate = db.execute(
                             "SELECT 1 FROM event_history WHERE event_id=?",
@@ -306,6 +316,15 @@ class Reporter:
                 if end <= start:  # pragma: no cover - defensive
                     break
         return count
+
+    def _record_error_in_transaction(self, db: sqlite3.Connection, message: str) -> None:
+        row = db.execute("SELECT value FROM state WHERE key='error_count'").fetchone()
+        self._set_state(db, "error_count", (0 if row is None else int(row["value"])) + 1)
+        self._set_state(db, "last_error", message[:500])
+
+    def _record_error(self, message: str) -> None:
+        with self._connect() as db:
+            self._record_error_in_transaction(db, message)
 
     def _apply_task_metadata(
         self, db: sqlite3.Connection, mapped: dict[str, object]
@@ -465,18 +484,33 @@ class Reporter:
         if not self.central_url or not self._secret:
             return 0
         empty = b"{}"
-        response = self.transport.request(
-            "GET", f"{self.central_url}/v1/commands/{self.instance_id}", empty, self._headers(empty)
-        )
+        try:
+            response = self.transport.request(
+                "GET",
+                f"{self.central_url}/v1/commands/{self.instance_id}",
+                empty,
+                self._headers(empty),
+            )
+        except (OSError, TimeoutError, urllib.error.URLError) as exc:
+            self._record_error(f"command poll transport: {exc}")
+            self._record_failure()
+            return 0
         if not 200 <= response.status < 300:
+            self._record_error(f"command poll HTTP {response.status}")
+            self._record_failure()
             return 0
         try:
             commands = json.loads(response.body or b"{}").get("commands", [])
         except (json.JSONDecodeError, AttributeError):
+            self._record_error("malformed command poll response")
             return 0
         handled = 0
         for raw in commands:
-            command = RemoteCommand.from_dict(raw)
+            try:
+                command = RemoteCommand.from_dict(raw)
+            except (ValueError, TypeError, KeyError) as exc:
+                self._record_error(f"malformed remote command: {exc}")
+                continue
             canonical = json.dumps(command.to_dict(), sort_keys=True, separators=(",", ":"))
             with self._connect() as db:
                 row = db.execute(
@@ -507,16 +541,22 @@ class Reporter:
                     state, stored = str(row["state"]), row["result_payload"]
             if state == "acked":
                 continue
+            if state == "rejected":
+                continue
             if state in {"executed", "executed_unverified"}:
                 result = json.loads(stored)
             elif state == "executing":
                 owner = getattr(execute, "__self__", None)
                 reconcile = getattr(owner, "reconcile", None)
-                result = (
-                    reconcile(command)
-                    if callable(reconcile)
-                    else {"ok": False, "code": "STATUS_UNAVAILABLE"}
-                )
+                try:
+                    result = (
+                        reconcile(command)
+                        if callable(reconcile)
+                        else {"ok": False, "code": "STATUS_UNAVAILABLE"}
+                    )
+                except Exception as exc:
+                    self._record_error(f"command reconcile error: {type(exc).__name__}: {exc}")
+                    result = {"ok": False, "code": "STATUS_UNAVAILABLE"}
                 if not result.get("ok"):
                     result = {
                         "ok": False,
@@ -534,7 +574,19 @@ class Reporter:
                         "UPDATE command_state SET state='executing' WHERE command_id=? AND state='received'",
                         (command.command_id,),
                     )
-                result = execute(command)
+                try:
+                    result = execute(command)
+                except Exception as exc:  # isolate an untrusted command/plugin boundary
+                    self._record_error(f"command execution error: {type(exc).__name__}: {exc}")
+                    with self._connect() as db:
+                        db.execute(
+                            "UPDATE command_state SET state='rejected',result_payload=? WHERE command_id=?",
+                            (
+                                json.dumps({"ok": False, "code": "COMMAND_REJECTED"}),
+                                command.command_id,
+                            ),
+                        )
+                    continue
                 self._after_command_execute()
                 code = str(result.get("code", ""))
                 execution_state = (
@@ -550,9 +602,14 @@ class Reporter:
             body = json.dumps(
                 {"command_id": command.command_id, "result": result}, sort_keys=True
             ).encode()
-            ack_response = self.transport.request(
-                "POST", f"{self.central_url}/v1/commands/ack", body, self._headers(body)
-            )
+            try:
+                ack_response = self.transport.request(
+                    "POST", f"{self.central_url}/v1/commands/ack", body, self._headers(body)
+                )
+            except (OSError, TimeoutError, urllib.error.URLError) as exc:
+                self._record_error(f"command ack transport: {exc}")
+                self._record_failure()
+                continue
             if 200 <= ack_response.status < 300:
                 with self._connect() as db:
                     db.execute(
@@ -560,6 +617,9 @@ class Reporter:
                         (command.command_id,),
                     )
                 handled += 1
+            else:
+                self._record_error(f"command ack HTTP {ack_response.status}")
+                self._record_failure()
         return handled
 
     def command_states(self) -> dict[str, str]:
@@ -630,4 +690,6 @@ class Reporter:
             ],
             "control_replay_guarantee": "at_most_once_with_indeterminate_crash_window",
             "release_gate": "Task3A_idempotent_versioned_upstream_controls_required",
+            "error_count": int(self._state("error_count", "0")),
+            "last_error": self._state("last_error"),
         }

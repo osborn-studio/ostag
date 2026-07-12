@@ -177,6 +177,25 @@ def test_rotated_ledger_overlap_does_not_mutate_task_version_for_duplicate_event
     assert reporter.pending_events()[0].task.version == 1
 
 
+def test_same_inode_truncate_and_malformed_line_are_isolated_and_recovered(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    first = _record("run_status_changed", {"status": "running"}, event_id="first")
+    ledger.write_text(json.dumps(first) + "\n", encoding="utf-8")
+    reporter = _reporter(tmp_path)
+    assert reporter.tail_ledger_once() == 1
+    second = _record("run_finished", {"status": "failed"}, event_id="second")
+    ledger.write_text("{bad}\n", encoding="utf-8")
+    assert reporter.tail_ledger_once() == 0
+    with ledger.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(second) + "\n")
+    assert reporter.tail_ledger_once() == 1
+    assert [event.event_id for event in reporter.pending_events()] == [
+        "monitor-first",
+        "monitor-second",
+    ]
+    assert reporter.status()["error_count"] == 1
+
+
 def test_flush_signs_exact_body_and_only_deletes_acknowledged_sequences(tmp_path: Path) -> None:
     transport = FakeTransport([TransportResponse(200, b'{"ack_sequence":1}')])
     reporter = _reporter(tmp_path, transport)
@@ -334,6 +353,57 @@ def test_command_ack_failure_is_persisted_and_destructive_action_not_reexecuted(
     )
     assert calls == ["c1"]
     assert restarted.command_states() == {"c1": "acked"}
+
+
+def test_command_transport_errors_backoff_without_escaping_loop(tmp_path: Path) -> None:
+    class BrokenTransport:
+        def request(
+            self, method: str, url: str, body: bytes, headers: dict[str, str]
+        ) -> TransportResponse:
+            raise TimeoutError("offline")
+
+    reporter = _reporter(tmp_path, BrokenTransport())  # type: ignore[arg-type]
+    assert reporter.poll_commands_once(lambda _: {}) == 0
+    assert reporter.status()["failure_count"] == 1
+    assert "offline" in reporter.status()["last_error"]
+
+
+def test_bad_command_and_unexpected_execute_error_do_not_block_later_commands(
+    tmp_path: Path,
+) -> None:
+    good1 = {
+        "command_id": "bad-exec",
+        "task_id": "t1",
+        "instance_id": "macbook",
+        "action": "cancel",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
+        "requested_by": "u",
+        "issued_at": "2026-07-12T00:59:00Z",
+        "expires_at": "not-a-date",
+    }
+    good2 = {**good1, "command_id": "good", "task_id": "t2", "expires_at": "2026-07-12T01:05:00Z"}
+    transport = FakeTransport(
+        [
+            TransportResponse(
+                200, json.dumps({"commands": [{"bad": "shape"}, good1, good2]}).encode()
+            ),
+            TransportResponse(200, b"{}"),
+        ]
+    )
+    reporter = _reporter(tmp_path, transport)
+    seen: list[str] = []
+
+    def execute(command: RemoteCommand) -> dict[str, object]:
+        seen.append(command.command_id)
+        if command.command_id == "bad-exec":
+            raise ValueError("bad expires_at")
+        return {"ok": True, "status": "cancelled"}
+
+    assert reporter.poll_commands_once(execute) == 1
+    assert seen == ["bad-exec", "good"]
+    assert reporter.command_states()["bad-exec"] == "rejected"
+    assert reporter.status()["error_count"] == 2
 
 
 def test_replayed_command_id_with_different_signed_payload_fails_closed(tmp_path: Path) -> None:
