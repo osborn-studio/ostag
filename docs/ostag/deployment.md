@@ -173,3 +173,58 @@ OSTAG_DRY_RUN=true python -m ostag.main --platform feishu --dry-run --event exam
 - Keep `MFS_ALLOWED_SCOPES` narrow.
 - Keep unsafe CLI flags disabled unless testing on an isolated machine.
 - Rotate Feishu/Lark secrets if audit logs or shell history expose credentials.
+
+## Production work monitor on Tencent Cloud
+
+Prepare a CVM or Lighthouse Linux host with Docker, a protected registry login,
+and a host persistent directory:
+
+```bash
+sudo install -d -m 0700 -o 10001 -g 10001 /var/lib/ostag /var/backups/ostag
+sudo install -m 0600 /dev/null /opt/ostag/source/deploy/work-monitor/.env
+docker login <registry>
+docker pull <registry>/ostag-work-monitor@sha256:<approved-digest>
+cd /opt/ostag/source
+export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<approved-digest>
+docker compose -f deploy/work-monitor/docker-compose.yml config
+docker compose -f deploy/work-monitor/docker-compose.yml up -d --no-build
+curl --fail --silent http://127.0.0.1:8000/healthz
+```
+
+The checked-in image command fixes uvicorn at `--workers 1`; set
+`OSTAG_MONITOR_SCHEDULER_OWNER_COUNT=1`. Restrict origin TCP 8000 to EdgeOne
+origin ranges and an operator bastion. Configure TLS, WAF, 1 MiB body limit,
+rate limits, no caching, and origin proxying exactly as described in
+`deploy/work-monitor/edgeone-origin.md`.
+
+Back up the live database with SQLite's online API and verify a disposable
+restore before every upgrade:
+
+```bash
+sudo scripts/backup_work_monitor.sh backup \
+  /var/lib/ostag/work_monitor.sqlite3 \
+  /var/backups/ostag/work_monitor-$(date -u +%Y%m%dT%H%M%SZ).sqlite3
+sudo scripts/backup_work_monitor.sh restore \
+  /var/backups/ostag/<selected>.sqlite3 /tmp/ostag-restore-check.sqlite3
+rm /tmp/ostag-restore-check.sqlite3
+```
+
+Deploy a new digest only after local gates and backup verification. Roll back
+without changing the database first; if the new release migrated incompatibly,
+stop the service and restore to a new path, then atomically select it:
+
+```bash
+docker compose -f deploy/work-monitor/docker-compose.yml down
+docker pull <registry>/ostag-work-monitor@sha256:<previous-digest>
+export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<previous-digest>
+sudo scripts/backup_work_monitor.sh restore \
+  /var/backups/ostag/<pre-upgrade>.sqlite3 /var/lib/ostag/work_monitor.restore.sqlite3
+sudo mv /var/lib/ostag/work_monitor.sqlite3 /var/lib/ostag/work_monitor.failed.sqlite3
+sudo mv /var/lib/ostag/work_monitor.restore.sqlite3 /var/lib/ostag/work_monitor.sqlite3
+docker compose -f deploy/work-monitor/docker-compose.yml up -d --no-build
+```
+
+These commands are operator instructions, not evidence they were run. Record
+actual external and mobile validation in
+`release/work-monitor-live-validation-template.md`; it intentionally remains
+incomplete until Tencent, EdgeOne, Feishu, Telegram, and device state is inspected.

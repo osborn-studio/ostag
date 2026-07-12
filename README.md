@@ -38,6 +38,8 @@ strategic direction.
   evidence, and ledger audit. Proposal-only: ambient never writes.
 - **Agent-facing CLI** — every command supports compact `--json`; errors
   carry `code`, `message`, `recovery_hint`.
+- **Remote work monitor** — signed OStag/osstack event streams feed a persistent
+  mobile Feishu/Telegram board; pause/resume/retry/cancel stay receipt-governed.
 
 ## Architecture
 
@@ -101,6 +103,11 @@ ostag memory show|remember|sync ...
 ```
 
 Full reference: [docs/cli_reference.md](docs/cli_reference.md).
+
+Work-monitor architecture, deterministic smoke, production deployment, backup,
+rollback, and the explicitly incomplete external evidence checklist are in
+[docs/ostag/work_monitor.md](docs/ostag/work_monitor.md) and
+[docs/ostag/deployment.md](docs/ostag/deployment.md).
 
 ## Governance model
 

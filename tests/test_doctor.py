@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import sqlite3
 
 from ostag.config import load_settings
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
@@ -16,6 +18,9 @@ LIVE_CREDENTIAL_ENV = (
     "SLACK_APP_TOKEN",
     "DINGTALK_CLIENT_ID",
     "DINGTALK_CLIENT_SECRET",
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_WEBHOOK_SECRET",
+    "TELEGRAM_WEBHOOK_URL",
 )
 
 
@@ -81,3 +86,143 @@ def test_dingtalk_live_cli_doctor_requires_credentials(monkeypatch, tmp_path: Pa
     )
 
     assert exit_code == 1
+
+
+def test_monitor_reporter_doctor_requires_credential_without_leaking_url(tmp_path: Path) -> None:
+    token = "fake-central-token-must-not-leak"
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        monitor_enabled=True,
+        monitor_central_url=f"https://{token}@monitor.example",
+        monitor_instance_secret="",
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "monitor_instance_credential" in output
+    assert token not in output
+    assert doctor_exit_code(run_doctor(config)) == 1
+
+
+def test_monitor_reporter_doctor_reports_unreachable_origin_redacted(
+    monkeypatch, tmp_path: Path
+) -> None:
+    def unavailable(*args, **kwargs):
+        raise OSError("request contained fake-origin-secret")
+
+    monkeypatch.setattr("ostag.core.doctor.urlopen", unavailable)
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        monitor_enabled=True,
+        monitor_central_url="https://monitor.example",
+        monitor_instance_secret="fake-instance-secret",
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "monitor_origin" in output and "unreachable" in output
+    assert "fake-origin-secret" not in output
+
+
+def test_production_monitor_doctor_verifies_volume_backup_restore_and_scheduler_owner(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "volume" / "monitor.sqlite3"
+    database.parent.mkdir()
+    sqlite3.connect(database).execute("CREATE TABLE proof(value TEXT)").connection.close()
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "2")
+    config = load_settings(
+        None,
+        env="production",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=database,
+        monitor_admin_token="fake-admin-token",
+        monitor_instance_secrets=(("mac", "fake-instance-token"),),
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "persistent_volume" in output and "backup and restore verified" in output
+    assert "scheduler_owner" in output and "exactly one" in output
+    assert "fake-admin-token" not in output and "fake-instance-token" not in output
+
+
+def test_production_monitor_doctor_reports_unwritable_volume(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    config = load_settings(
+        None,
+        env="production",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=Path("/proc/ostag/monitor.sqlite3"),
+        monitor_admin_token="configured",
+        monitor_instance_secrets=(("mac", "configured"),),
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "persistent_volume" in output and "not writable" in output
+
+
+def test_production_monitor_platform_and_stale_instance_checks(monkeypatch, tmp_path: Path) -> None:
+    database = tmp_path / "monitor.sqlite3"
+    sqlite3.connect(database).execute(
+        "CREATE TABLE instances(instance_id TEXT PRIMARY KEY,last_seen_at TEXT)"
+    ).connection.close()
+    stale = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    with sqlite3.connect(database) as connection:
+        connection.execute("INSERT INTO instances VALUES (?,?)", ("mac", stale))
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "1")
+    config = load_settings(
+        None,
+        env="production",
+        platform="feishu",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=database,
+        monitor_admin_token="configured",
+        monitor_instance_secrets=(("mac", "configured"),),
+        feishu_app_id="app",
+        feishu_app_secret="fake-feishu-secret",
+        feishu_verification_token="verify",
+        feishu_encrypt_key="encrypt",
+        feishu_use_websocket=False,
+        monitor_offline_seconds=600,
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "feishu_callback" in output
+    assert "stale_instances" in output and "mac" in output
+    assert "fake-feishu-secret" not in output
+
+
+def test_production_telegram_doctor_requires_verified_webhook_status(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "monitor.sqlite3"
+    sqlite3.connect(database).execute(
+        "CREATE TABLE instances(instance_id TEXT PRIMARY KEY,last_seen_at TEXT)"
+    ).connection.close()
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    monkeypatch.setenv("OSTAG_MONITOR_SCHEDULER_OWNER_COUNT", "1")
+    monkeypatch.setenv("OSTAG_TELEGRAM_WEBHOOK_STATUS", "pending")
+    config = load_settings(
+        None,
+        env="production",
+        platform="telegram",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=database,
+        monitor_admin_token="configured",
+        monitor_instance_secrets=(("mac", "configured"),),
+        telegram_bot_token="fake-telegram-token",
+        telegram_webhook_secret="hook-secret",
+        telegram_webhook_url="https://monitor.example/webhooks/telegram",
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "telegram_webhook" in output and "not verified" in output
+    assert "fake-telegram-token" not in output

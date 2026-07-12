@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from ostag.work_monitor.models import TaskSnapshot
 from ostag.work_monitor.redaction import sanitize_task_input
@@ -124,3 +125,16 @@ def test_sanitize_redacts_quoted_and_existing_secret_formats() -> None:
     for secret in secrets.values():
         assert secret not in serialized
     assert serialized.count("[REDACTED]") >= 5
+
+
+def test_secret_hygiene_fixture_is_redacted_before_artifact_serialization() -> None:
+    fixture = json.loads(
+        Path("tests/fixtures/work_monitor_secret_input.json").read_text(encoding="utf-8")
+    )
+
+    serialized = json.dumps(sanitize_task_input(fixture).to_dict(), sort_keys=True)
+
+    assert "fixture-token-that-must-never-ship" not in serialized
+    assert "fixture-bearer-that-must-never-ship" not in serialized
+    assert "sk-fixture0123456789abcdef" not in serialized
+    assert "[REDACTED]" in serialized

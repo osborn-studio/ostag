@@ -13,6 +13,18 @@ ostag --platform dingtalk --live                                      # live tra
 ostag --doctor --platform feishu --dry-run --event examples/feishu_event.json
 ```
 
+When `OSTAG_MONITOR_ENABLED=true`, doctor also validates the reporter's central
+credential and origin health. With `OSTAG_MONITOR_ROLE=central` in production it
+checks central credentials, a non-destructive SQLite backup/restore, exactly one
+scheduler owner, Feishu callback or Telegram webhook state, and stale instances.
+Output is redacted and never prints configured secrets or remote response bodies.
+
+Deterministic local end-to-end monitor smoke:
+
+```bash
+scripts/work_monitor_smoke.sh
+```
+
 ## Submitting work
 
 ```bash

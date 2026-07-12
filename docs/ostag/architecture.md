@@ -47,3 +47,23 @@ only consumes `NormalizedEvent`.
 Dry-run is enabled by default. MFS is disabled by default. Shell execution and
 unsafe CLI backend flags are disabled by default. Audit logs redact common API
 keys and record full input text only in `OSTAG_ENV=dev`.
+
+## Persistent work monitor
+
+```mermaid
+flowchart LR
+  O[OStag reporter] -->|signed outbound HTTPS| E[EdgeOne TLS/WAF]
+  S[osstack bridge] -->|signed outbound HTTPS| E
+  E --> C[Single-worker central service]
+  C --> D[(SQLite in /var/lib/ostag)]
+  C --> F[Feishu card/callback]
+  C --> T[Telegram webhook/message]
+  F --> R[Governed receipt]
+  T --> R
+  R --> C -->|poll command| O
+  O -->|ack result| C
+```
+
+EdgeOne is only the HTTPS/WAF reverse proxy. The CVM/Lighthouse container owns
+projection, receipts, the single scheduler, and outbox; SQLite remains on the
+host persistent volume. Reporters never accept inbound control connections.
