@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -65,6 +66,24 @@ class OsstackTaskReference:
     attempt_id: str = ""
     attempt_order: int = 0
 
+    def __post_init__(self) -> None:
+        if not self.run_id or not self.workspace or not self.state_path:
+            raise ValueError("osstack reference requires run_id, workspace, and state_path")
+        if self.version <= 0:
+            raise ValueError("osstack reference version must be positive")
+        if self.lifecycle not in {
+            "queued",
+            "running",
+            "paused",
+            "failed",
+            "cancelled",
+            "completed",
+            "blocked",
+        }:
+            raise ValueError("invalid osstack reference lifecycle")
+        if self.attempt_order < 0:
+            raise ValueError("attempt_order must not be negative")
+
 
 class OsstackCliControlPort:
     """Fail-closed argv-only adapter over osstack's authoritative CLI."""
@@ -98,20 +117,35 @@ class OsstackCliControlPort:
             return {}
 
     def capabilities(self) -> frozenset[str]:
+        if not self.references:
+            return frozenset()
+        capabilities = [self.capabilities_for(task_id) for task_id in self.references]
+        return frozenset.intersection(*capabilities) if capabilities else frozenset()
+
+    def _known_version(self) -> bool:
         try:
             result = self.runner([self.binary, "version"])
         except (OSError, subprocess.SubprocessError):
+            return False
+        if result.returncode:
+            return False
+        match = re.fullmatch(
+            r"(?:osstack\s+)?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*", result.stdout
+        )
+        return bool(match and match.group(1) == "0.8.1")
+
+    def capabilities_for(self, task_id: str) -> frozenset[str]:
+        if not self._known_version():
             return frozenset()
-        if (
-            result.returncode
-            or not result.stdout.strip().startswith("0.8.1")
-            or not self.references
-        ):
+        try:
+            reference = self._reference(task_id)
+        except RuntimeError:
             return frozenset()
-        actions = {"cancel"}
-        if any(ref.workspace and ref.state_path for ref in self.references.values()):
-            actions.add("retry")
-        return frozenset(actions)
+        if reference.lifecycle == "failed":
+            return frozenset({"retry"})
+        if reference.lifecycle == "running":
+            return frozenset({"cancel"})
+        return frozenset()
 
     def _reference(self, task_id: str) -> OsstackTaskReference:
         try:
@@ -165,7 +199,7 @@ class OsstackCliControlPort:
                 "--json",
             ],
         }
-        if action not in self.capabilities() or action not in commands:
+        if action not in self.capabilities_for(task_id) or action not in commands:
             raise RuntimeError(f"unsupported osstack action: {action}")
         result = self.runner(commands[action])
         if result.returncode:
@@ -215,9 +249,12 @@ class CommandExecutor:
         port = self._port()
         # This query is intentionally repeated here; a rendered capability is stale authority.
         try:
-            supported = (
-                frozenset() if port is None else frozenset(port.capabilities()) & SAFE_ACTIONS
-            )
+            if port is None:
+                supported = frozenset()
+            elif hasattr(port, "capabilities_for"):
+                supported = frozenset(port.capabilities_for(command.task_id)) & SAFE_ACTIONS  # type: ignore[attr-defined]
+            else:
+                supported = frozenset(port.capabilities()) & SAFE_ACTIONS
         except (RuntimeError, OSError, ValueError):
             supported = frozenset()
         if port is None or command.action not in supported:
@@ -268,3 +305,22 @@ class CommandExecutor:
         except (RuntimeError, OSError, ValueError):
             return {"ok": False, "code": "STATUS_UNAVAILABLE"}
         return {"ok": True, "status": updated.lifecycle, "version": updated.version}
+
+    def reconcile(self, command: RemoteCommand) -> dict[str, object]:
+        """Read authoritative state after a crash; never issue the action again."""
+        port = self._port()
+        if port is None:
+            return {"ok": False, "code": "STATUS_UNAVAILABLE"}
+        try:
+            task = port.get_task(command.task_id)
+        except (RuntimeError, OSError, ValueError):
+            return {"ok": False, "code": "STATUS_UNAVAILABLE"}
+        if command.action == "cancel":
+            if task.lifecycle == "cancelled" or task.terminal == "cancelled":
+                return {"ok": True, "status": "cancelled", "version": task.version}
+            return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
+        if command.action == "retry":
+            if task.version > command.expected_version or task.lifecycle != "failed":
+                return {"ok": True, "status": task.lifecycle, "version": task.version}
+            return {"ok": False, "code": "RETRY_NOT_CONFIRMED"}
+        return {"ok": False, "code": "STATUS_UNAVAILABLE"}

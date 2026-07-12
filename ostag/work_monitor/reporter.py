@@ -17,6 +17,7 @@ from typing import Callable, Protocol
 
 from .models import MonitorEvent, RemoteCommand
 from .redaction import sanitize_task_input
+from .executor import OsstackTaskReference
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class Reporter:
         self.command_poll_seconds = command_poll_seconds
         self.capabilities = capabilities or (lambda: frozenset())
         self._before_spool_commit: Callable[[], None] = lambda: None
+        self._after_command_execute: Callable[[], None] = lambda: None
         self.spool_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -102,6 +104,11 @@ class Reporter:
                     command_id TEXT PRIMARY KEY, state TEXT NOT NULL,
                     command_payload TEXT NOT NULL, result_payload TEXT
                 );
+                CREATE TABLE IF NOT EXISTS osstack_references (
+                    task_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, workspace TEXT NOT NULL,
+                    state_path TEXT NOT NULL, version INTEGER NOT NULL, lifecycle TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL, attempt_order INTEGER NOT NULL
+                );
                 """
             )
             db.execute(
@@ -121,12 +128,70 @@ class Reporter:
             (key, str(value)),
         )
 
-    def enqueue(self, payload: dict[str, object]) -> MonitorEvent:
+    def enqueue(
+        self, payload: dict[str, object], *, osstack_reference: OsstackTaskReference | None = None
+    ) -> MonitorEvent:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT payload FROM event_history WHERE event_id=?",
+                (str(payload.get("event_id", "")),),
+            ).fetchone()
+            if existing is not None:
+                db.commit()
+                return MonitorEvent.from_dict(json.loads(existing["payload"]))
+            if osstack_reference is not None:
+                raw_task = payload.get("task")
+                if not isinstance(raw_task, dict):
+                    raise ValueError("osstack reference requires a task event")
+                task_id = str(raw_task.get("task_id", ""))
+                if int(raw_task.get("version", 0)) != osstack_reference.version:
+                    raise ValueError("osstack reference version must match task version")
+                expected_lifecycle = {
+                    "triage": "queued",
+                    "todo": "queued",
+                    "ready": "queued",
+                    "running": "running",
+                    "blocked": "blocked",
+                    "done": "completed",
+                }.get(str(raw_task.get("status", "")))
+                if expected_lifecycle != osstack_reference.lifecycle:
+                    raise ValueError("osstack reference lifecycle must match task status")
+                db.execute(
+                    "INSERT INTO osstack_references VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(task_id) DO UPDATE SET run_id=excluded.run_id,workspace=excluded.workspace,"
+                    "state_path=excluded.state_path,version=excluded.version,lifecycle=excluded.lifecycle,"
+                    "attempt_id=excluded.attempt_id,attempt_order=excluded.attempt_order",
+                    (
+                        task_id,
+                        osstack_reference.run_id,
+                        osstack_reference.workspace,
+                        osstack_reference.state_path,
+                        osstack_reference.version,
+                        osstack_reference.lifecycle,
+                        osstack_reference.attempt_id,
+                        osstack_reference.attempt_order,
+                    ),
+                )
             event = self._enqueue_in_transaction(db, payload)
             db.commit()
         return event
+
+    def osstack_references(self) -> dict[str, OsstackTaskReference]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM osstack_references ORDER BY task_id").fetchall()
+        return {
+            str(row["task_id"]): OsstackTaskReference(
+                run_id=str(row["run_id"]),
+                workspace=str(row["workspace"]),
+                state_path=str(row["state_path"]),
+                version=int(row["version"]),
+                lifecycle=str(row["lifecycle"]),
+                attempt_id=str(row["attempt_id"]),
+                attempt_order=int(row["attempt_order"]),
+            )
+            for row in rows
+        }
 
     def _enqueue_in_transaction(
         self, db: sqlite3.Connection, payload: dict[str, object]
@@ -408,8 +473,27 @@ class Reporter:
                 continue
             if state in {"executed", "executed_unverified"}:
                 result = json.loads(stored)
+            elif state == "executing":
+                owner = getattr(execute, "__self__", None)
+                reconcile = getattr(owner, "reconcile", None)
+                result = (
+                    reconcile(command)
+                    if callable(reconcile)
+                    else {"ok": False, "code": "STATUS_UNAVAILABLE"}
+                )
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state='executed_unverified',result_payload=? WHERE command_id=?",
+                        (json.dumps(result, sort_keys=True), command.command_id),
+                    )
             else:
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state='executing' WHERE command_id=? AND state='received'",
+                        (command.command_id,),
+                    )
                 result = execute(command)
+                self._after_command_execute()
                 code = str(result.get("code", ""))
                 execution_state = (
                     "executed_unverified"

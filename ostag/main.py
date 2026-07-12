@@ -206,6 +206,9 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--stdin", action="store_true")
     ingest.add_argument("--json", action="store_true")
     ingest.add_argument("--config")
+    ingest.add_argument("--osstack-run-id")
+    ingest.add_argument("--workspace")
+    ingest.add_argument("--state-path")
     reporter_parser = monitor_sub.add_parser(
         "reporter", help="Run or inspect the durable reporter."
     )
@@ -360,7 +363,16 @@ def _emit(payload: object, *, as_json: bool) -> None:
 
 
 def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
-    references: dict[str, OsstackTaskReference] = {}
+    reporter = Reporter(
+        instance_id=config.monitor_instance_id,
+        secret=config.monitor_instance_secret,
+        central_url=config.monitor_central_url,
+        ledger_path=config.run_ledger_path,
+        spool_path=config.monitor_spool_db,
+        interval_seconds=config.monitor_report_interval_seconds,
+        command_poll_seconds=config.monitor_command_poll_seconds,
+    )
+    references = reporter.osstack_references()
     if config.monitor_osstack_references.exists():
         try:
             raw_references = json.loads(
@@ -371,31 +383,25 @@ def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
         if isinstance(raw_references, dict):
             for task_id, raw in raw_references.items():
                 if isinstance(raw, dict):
-                    references[str(task_id)] = OsstackTaskReference(
-                        run_id=str(raw.get("run_id", "")),
-                        workspace=str(raw.get("workspace", "")),
-                        state_path=str(raw.get("state_path", "")),
-                        version=int(raw.get("version", 1)),
-                        lifecycle=str(raw.get("lifecycle", "running")),
-                        attempt_id=str(raw.get("attempt_id", "")),
-                        attempt_order=int(raw.get("attempt_order", 0)),
-                    )
+                    try:
+                        references[str(task_id)] = OsstackTaskReference(
+                            run_id=str(raw.get("run_id", "")),
+                            workspace=str(raw.get("workspace", "")),
+                            state_path=str(raw.get("state_path", "")),
+                            version=int(raw.get("version", 1)),
+                            lifecycle=str(raw.get("lifecycle", "running")),
+                            attempt_id=str(raw.get("attempt_id", "")),
+                            attempt_order=int(raw.get("attempt_order", 0)),
+                        )
+                    except (TypeError, ValueError):
+                        continue
     port = OsstackCliControlPort(
         instance_id=config.monitor_instance_id,
         binary=config.monitor_osstack_bin,
         references=references,
     )
     executor = CommandExecutor(config.monitor_instance_id, osstack=port)
-    reporter = Reporter(
-        instance_id=config.monitor_instance_id,
-        secret=config.monitor_instance_secret,
-        central_url=config.monitor_central_url,
-        ledger_path=config.run_ledger_path,
-        spool_path=config.monitor_spool_db,
-        interval_seconds=config.monitor_report_interval_seconds,
-        command_poll_seconds=config.monitor_command_poll_seconds,
-        capabilities=executor.capabilities,
-    )
+    reporter.capabilities = executor.capabilities
     return reporter, executor
 
 
@@ -408,7 +414,31 @@ def run_monitor_command(args: argparse.Namespace) -> int:
     if args.monitor_command == "ingest":
         raw = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
         try:
-            event = reporter.enqueue(json.loads(raw))
+            payload = json.loads(raw)
+            reference_args = (args.osstack_run_id, args.workspace, args.state_path)
+            if any(reference_args) and not all(reference_args):
+                raise ValueError("osstack reference requires run id, workspace, and state path")
+            reference = None
+            if all(reference_args):
+                task = payload.get("task")
+                if not isinstance(task, dict):
+                    raise ValueError("osstack reference requires a task event")
+                lifecycle = {
+                    "todo": "queued",
+                    "ready": "queued",
+                    "running": "running",
+                    "blocked": "blocked",
+                    "done": "completed",
+                    "triage": "queued",
+                }[str(task.get("status", ""))]
+                reference = OsstackTaskReference(
+                    run_id=args.osstack_run_id,
+                    workspace=args.workspace,
+                    state_path=args.state_path,
+                    version=int(task.get("version", 0)),
+                    lifecycle=lifecycle,
+                )
+            event = reporter.enqueue(payload, osstack_reference=reference)
         except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
             _emit(
                 {"error": {"code": "invalid_monitor_event", "message": str(exc)}}, as_json=as_json

@@ -8,6 +8,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from ostag.main import main_async
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import LedgerEvent
@@ -402,6 +404,51 @@ def test_unverified_execution_is_persisted_and_never_reexecutes_on_ack_retry(
     assert calls == ["c1"]
 
 
+def test_crash_after_side_effect_before_result_reconciles_without_reexecution(
+    tmp_path: Path,
+) -> None:
+    command = {
+        "command_id": "c1",
+        "task_id": "t1",
+        "instance_id": "macbook",
+        "action": "cancel",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
+        "requested_by": "u1",
+        "issued_at": "2026-07-12T00:59:00Z",
+        "expires_at": "2026-07-12T01:05:00Z",
+    }
+    transport = FakeTransport(
+        [
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(200, b"{}"),
+        ]
+    )
+
+    class Executor:
+        executes = 0
+        reconciles = 0
+
+        def execute(self, command: RemoteCommand) -> dict[str, object]:
+            self.executes += 1
+            return {"ok": True, "status": "cancelled"}
+
+        def reconcile(self, command: RemoteCommand) -> dict[str, object]:
+            self.reconciles += 1
+            return {"ok": True, "status": "cancelled"}
+
+    executor = Executor()
+    reporter = _reporter(tmp_path, transport)
+    reporter._after_command_execute = lambda: (_ for _ in ()).throw(RuntimeError("killed"))
+    with pytest.raises(RuntimeError, match="killed"):
+        reporter.poll_commands_once(executor.execute)
+    assert reporter.command_states() == {"c1": "executing"}
+    restarted = _reporter(tmp_path, transport)
+    assert restarted.poll_commands_once(executor.execute) == 1
+    assert executor.executes == 1 and executor.reconciles == 1
+
+
 def test_run_once_schedules_heartbeat_and_poll_at_independent_intervals(tmp_path: Path) -> None:
     now = [NOW]
     transport = FakeTransport(
@@ -443,6 +490,34 @@ async def test_monitor_ingest_file_stdin_status_and_dry_run_example(
     monkeypatch.setattr(sys, "stdin", io.StringIO(stdin_payload))
     assert await main_async(["monitor", "ingest", "--stdin", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["sequence"] == 2
+
+    referenced_payload = event.read_text(encoding="utf-8").replace(
+        "osstack-task-demo-v1", "referenced-event"
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(referenced_payload))
+    assert (
+        await main_async(
+            [
+                "monitor",
+                "ingest",
+                "--stdin",
+                "--osstack-run-id",
+                "run-9",
+                "--workspace",
+                "/private/project",
+                "--state-path",
+                "/private/project/LOOP-STATE.json",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    restarted = _reporter(tmp_path)
+    references = restarted.osstack_references()
+    assert references["task_demo"].run_id == "run-9"
+    outbound = json.dumps([item.to_dict() for item in restarted.pending_events()])
+    assert "/private/project" not in outbound
 
 
 async def test_reporter_run_once_offline_and_start_missing_credentials_never_leak_secret(

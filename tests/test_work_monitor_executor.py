@@ -140,14 +140,18 @@ def test_osstack_081_cli_port_uses_real_safe_argv_and_parses_status_fixture() ->
         references={
             "task-1": OsstackTaskReference(
                 "run-7", "/work/project", "/work/project/LOOP-STATE.json", 8, "failed", "a8", 8
-            )
+            ),
+            "task-running": OsstackTaskReference(
+                "run-cancel", "/work/project", "/work/project/LOOP-STATE.json", 1, "running"
+            ),
         },
     )
-    assert port.capabilities() == frozenset({"cancel", "retry"})
+    assert port.capabilities() == frozenset()
+    assert port.capabilities_for("task-1") == frozenset({"retry"})
     assert port.get_task("task-1").attempt_id == "a8"
     assert calls[-1] == ["/opt/osstack", "task", "status", "run-7"]
-    port.execute("cancel", "task-1")
-    assert calls[-1] == ["/opt/osstack", "task", "cancel", "run-7"]
+    port.execute("cancel", "task-running")
+    assert calls[-1] == ["/opt/osstack", "task", "cancel", "run-cancel"]
     port.execute("retry", "task-1")
     assert calls[-1] == [
         "/opt/osstack",
@@ -181,7 +185,7 @@ def test_osstack_081_never_advertises_or_maps_pause_resume() -> None:
         runner=run,
         references={"task-1": OsstackTaskReference("run-1", "/w", "/s")},
     )
-    assert port.capabilities() == frozenset({"cancel", "retry"})
+    assert port.capabilities() == frozenset({"cancel"})
     for action in ("pause", "resume"):
         with pytest.raises(RuntimeError):
             port.execute(action, "task-1")
@@ -201,3 +205,48 @@ def test_post_action_status_exception_returns_not_confirmed_without_second_execu
     executor = CommandExecutor("mac", osstack=port, clock=lambda: NOW, sleep=lambda _: None)
     assert executor.execute(command("cancel"))["code"] == "CANCEL_NOT_CONFIRMED"
     assert port.calls == [("cancel", "task-1")]
+
+
+@pytest.mark.parametrize("stdout", ["osstack 0.8.1\n", "0.8.1\n"])
+def test_version_probe_accepts_real_strict_semver_output(stdout: str) -> None:
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    port = OsstackCliControlPort(
+        instance_id="mac",
+        runner=run,
+        references={"t": OsstackTaskReference("r", "/w", "/s", lifecycle="running")},
+    )
+    assert port.capabilities_for("t") == frozenset({"cancel"})
+
+
+@pytest.mark.parametrize(
+    "stdout", ["osstack 0.8", "prefix 0.8.1 suffix", "osstack 0.8.10", "osstack 0.8.1-beta.1"]
+)
+def test_version_probe_rejects_non_strict_or_unknown_versions(stdout: str) -> None:
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, stdout, "")
+
+    port = OsstackCliControlPort(
+        instance_id="mac",
+        runner=run,
+        references={"t": OsstackTaskReference("r", "/w", "/s")},
+    )
+    assert port.capabilities_for("t") == frozenset()
+
+
+def test_capabilities_for_is_lifecycle_and_reference_specific() -> None:
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, "osstack 0.8.1\n", "")
+
+    port = OsstackCliControlPort(
+        instance_id="mac",
+        runner=run,
+        references={
+            "running": OsstackTaskReference("r1", "/w", "/s", lifecycle="running"),
+            "failed": OsstackTaskReference("r2", "/w", "/s", lifecycle="failed"),
+        },
+    )
+    assert port.capabilities_for("running") == frozenset({"cancel"})
+    assert port.capabilities_for("failed") == frozenset({"retry"})
+    assert port.capabilities() == frozenset()
