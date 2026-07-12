@@ -1,7 +1,7 @@
 [project]
 name = "ostag"
 version = "0.2.0"
-description = "OS Tag: an open control plane for human-agent collaboration — governed, auditable, multi-agent work loops from Feishu/Lark, DingTalk, Slack threads or the CLI."
+description = "OS Tag: an open control plane for human-agent collaboration — governed, auditable, multi-agent work loops from Telegram, Feishu/Lark, DingTalk, Slack threads or the CLI."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

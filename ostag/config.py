@@ -12,7 +12,7 @@ except ImportError:  # pragma: no cover
     load_dotenv = None
 
 
-Platform = Literal["slack", "feishu", "lark", "dingtalk"]
+Platform = Literal["slack", "feishu", "lark", "dingtalk", "telegram"]
 BackendName = Literal["mock", "codex_cli", "claude_cli", "openai_api"]
 
 
@@ -120,6 +120,11 @@ class Settings:
     dingtalk_client_secret: str = ""
     dingtalk_robot_webhook: str = ""
     dingtalk_robot_secret: str = ""
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_webhook_url: str = ""
+    telegram_group_allowlist: tuple[str, ...] = ()
+    telegram_admin_ids: tuple[str, ...] = ()
     auto_base_enabled: bool = True
     auto_base_identity: str = "user"
     auto_base_history_page_size: int = 30
@@ -159,6 +164,20 @@ class Settings:
     monitor_instance_secrets: tuple[tuple[str, str], ...] = ()
     monitor_human_credentials: tuple[tuple[str, str, str, str, str], ...] = ()
     monitor_server_max_body_bytes: int = 1_048_576
+
+    def validate(self) -> Settings:
+        telegram_configured = any((
+            self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url
+        ))
+        if self.env.casefold() in {"prod", "production"} and (
+            self.platform == "telegram" or telegram_configured
+        ):
+            if not all((self.telegram_bot_token, self.telegram_webhook_secret,
+                        self.telegram_webhook_url)):
+                raise ValueError("Telegram production requires token, secret, and webhook URL")
+            if not self.telegram_webhook_url.startswith("https://"):
+                raise ValueError("Telegram production webhook URL must use HTTPS")
+        return self
 
     def monitor_human_credentials_dict(self):
         from ostag.core.identity import Principal
@@ -236,6 +255,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         dingtalk_client_secret=os.getenv("DINGTALK_CLIENT_SECRET", ""),
         dingtalk_robot_webhook=os.getenv("DINGTALK_ROBOT_WEBHOOK", ""),
         dingtalk_robot_secret=os.getenv("DINGTALK_ROBOT_SECRET", ""),
+        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", ""),
+        telegram_webhook_url=os.getenv("TELEGRAM_WEBHOOK_URL", ""),
+        telegram_group_allowlist=_csv("TELEGRAM_GROUP_ALLOWLIST"),
+        telegram_admin_ids=_csv("TELEGRAM_ADMIN_IDS"),
         auto_base_enabled=_bool("OSTAG_AUTO_BASE_ENABLED", True),
         auto_base_identity=os.getenv("OSTAG_AUTO_BASE_IDENTITY", "user"),
         auto_base_history_page_size=_int("OSTAG_AUTO_BASE_HISTORY_PAGE_SIZE", 30),
@@ -292,4 +316,4 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
     if "run_ledger_path" not in overrides and os.getenv("OSTAG_RUN_LEDGER_PATH") is None:
         derived = settings.audit_log.parent / "run_ledger.jsonl"
         settings = Settings(**(settings.__dict__ | {"run_ledger_path": derived}))
-    return settings
+    return settings.validate()

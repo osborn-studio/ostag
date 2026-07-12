@@ -8,6 +8,7 @@ from pathlib import Path
 from ostag.adapters.dingtalk import DingTalkAdapter
 from ostag.adapters.base import Adapter
 from ostag.adapters.feishu import FeishuAdapter
+from ostag.adapters.telegram import TelegramAdapter
 from ostag.adapters.lark import LarkAdapter
 from ostag.adapters.slack import SlackAdapter
 from ostag.config import load_settings
@@ -272,7 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
     policy_set.add_argument("--json", action="store_true")
     policy_set.add_argument("--config")
 
-    parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
+    parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk", "telegram"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--live", action="store_true", help="Disable dry-run and require live credentials."
@@ -295,6 +296,8 @@ def create_adapter(platform: str, config) -> Adapter:
         return SlackAdapter(config)
     if platform == "dingtalk":
         return DingTalkAdapter(config)
+    if platform == "telegram":
+        return TelegramAdapter(config)
     raise NotImplementedError(f"Unsupported platform: {platform}")
 
 

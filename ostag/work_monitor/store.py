@@ -110,6 +110,12 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS instance_nonces (instance_id TEXT NOT NULL, nonce TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(instance_id,nonce))",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS telegram_updates (update_id INTEGER PRIMARY KEY, consumed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+            "CREATE TABLE IF NOT EXISTS telegram_callbacks (callback_id TEXT PRIMARY KEY, action TEXT NOT NULL, task_id TEXT NOT NULL, destination_id TEXT NOT NULL, chat_type TEXT NOT NULL, consumed_at TEXT)",
+        )
+    ),
 )
 
 
@@ -240,6 +246,41 @@ class MonitorStore:
         except sqlite3.IntegrityError:
             return False
         return True
+
+    def consume_telegram_update(self, update_id: int) -> bool:
+        try:
+            with self.transaction() as connection:
+                connection.execute(
+                    "INSERT INTO telegram_updates(update_id) VALUES (?)", (update_id,)
+                )
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
+    def create_telegram_callback(
+        self, callback_id: str, *, action: str, task_id: str, destination_id: str,
+        chat_type: str,
+    ) -> None:
+        with self.transaction() as connection:
+            connection.execute(
+                "INSERT INTO telegram_callbacks(callback_id,action,task_id,destination_id,chat_type) "
+                "VALUES (?,?,?,?,?)",
+                (callback_id, action, task_id, destination_id, chat_type),
+            )
+
+    def consume_telegram_callback(self, callback_id: str) -> dict[str, str] | None:
+        with self.transaction() as connection:
+            row = connection.execute(
+                "SELECT action,task_id,destination_id,chat_type,consumed_at "
+                "FROM telegram_callbacks WHERE callback_id=?", (callback_id,),
+            ).fetchone()
+            if row is None or row["consumed_at"] is not None:
+                return None
+            connection.execute(
+                "UPDATE telegram_callbacks SET consumed_at=CURRENT_TIMESTAMP WHERE callback_id=?",
+                (callback_id,),
+            )
+        return {key: str(row[key]) for key in ("action", "task_id", "destination_id", "chat_type")}
 
     def stage_counts(self, instance_id: str | None = None) -> dict[str, int]:
         parameters: tuple[str, ...] = ()

@@ -128,6 +128,7 @@ def create_app(
     feishu_ws: LifespanOwner | None = None,
     scheduler: LifespanOwner | None = None,
     outbox: LifespanOwner | None = None,
+    telegram_client: object | None = None,
     supervisor_backoff: tuple[float, ...] = (1, 2, 5, 15, 30),
 ) -> FastAPI:
     """Build an inert app; databases and background owners start only in lifespan."""
@@ -207,6 +208,36 @@ def create_app(
             app,
             create_feishu_card_router(active_service),
             security=SecurityContract("verified_platform", card_security),
+        )
+
+    if all((
+        configured.telegram_bot_token,
+        configured.telegram_webhook_secret,
+        configured.telegram_webhook_url,
+    )):
+        from ostag.adapters.telegram import TelegramAdapter, TelegramBotClient
+        from .telegram_routes import TelegramWebhookSecurity, create_telegram_router
+
+        if configured.env.casefold() in {"prod", "production"} \
+                and not configured.telegram_webhook_url.startswith("https://"):
+            raise ValueError("Telegram production webhook URL must use HTTPS")
+        bot_client = telegram_client or TelegramBotClient(configured.telegram_bot_token)
+        if not isinstance(bot_client, TelegramBotClient):
+            raise ValueError("telegram_client must be TelegramBotClient")
+        telegram_adapter = TelegramAdapter(configured, client=bot_client)
+        telegram_security = TelegramWebhookSecurity(
+            secret=configured.telegram_webhook_secret,
+            service=active_service,
+            adapter=telegram_adapter,
+            group_allowlist=configured.telegram_group_allowlist,
+            max_body_bytes=configured.monitor_server_max_body_bytes,
+        )
+        register_telegram_router(
+            app,
+            create_telegram_router(
+                active_service, bot_client, admin_ids=configured.telegram_admin_ids
+            ),
+            security=SecurityContract("verified_platform", telegram_security),
         )
 
     async def bounded_body(request: Request) -> bytes:
@@ -350,6 +381,17 @@ def register_feishu_card_router(
     paths = _route_paths(router.routes)
     if paths != {"/webhooks/feishu/card-action"}:
         raise ValueError("Feishu router may expose only /webhooks/feishu/card-action")
+    register_router(app, router, security=security)
+
+
+def register_telegram_router(
+    app: FastAPI, router: APIRouter, *, security: SecurityContract,
+) -> None:
+    """Register only the production Telegram webhook behind platform verification."""
+    if security.kind != "verified_platform":
+        raise ValueError("Telegram callbacks require verified_platform security")
+    if _route_paths(router.routes) != {"/webhooks/telegram"}:
+        raise ValueError("Telegram router may expose only /webhooks/telegram")
     register_router(app, router, security=security)
 
 
