@@ -175,9 +175,53 @@ class FeishuAdapter:
         elif not isinstance(raw, dict):
             raw = _to_plain_data(raw)
         event = await self.normalize_event(raw)
+        if await self._handle_monitor_card(event, runner):
+            return
         reply = await runner.handle_event(event)
         if reply:
             await self.reply(event, reply)
+
+    async def _handle_monitor_card(self, event: NormalizedEvent, runner: Any) -> bool:
+        service = getattr(runner, "work_monitor", None)
+        if service is None:
+            return False
+        from ostag.core.identity import Principal
+        from ostag.work_monitor.feishu_cards import render_feishu_card
+        from ostag.work_monitor.feishu_routes import issue_feishu_callback
+        from ostag.work_monitor.identity import Destination
+        from ostag.work_monitor.service import parse_monitor_command
+
+        command = parse_monitor_command(event.text)
+        if command is None:
+            return False
+        principal = Principal("feishu", event.sender_id)
+        destination = Destination("feishu", event.destination_id, event.chat_type)
+        fallback = service.handle_event(event)
+        if command.name == "board":
+            view = service.board(principal, destination, page=int(command.argument or "1"))
+            card = render_feishu_card(view)
+        elif command.name == "task":
+            view = service.task(principal, destination, command.argument)
+            factory = None
+            if service.identities.allows(principal, destination, "write"):
+                def factory(action: str, task_id: str) -> str:
+                    return issue_feishu_callback(
+                        service, principal, destination, action=action, task_id=task_id
+                    )
+            card = render_feishu_card(view, callback_factory=factory)
+        elif command.name == "instances":
+            instances = service.instances(principal, destination)
+            card = {"config": {"wide_screen_mode": False}, "header": {
+                "template": "indigo", "title": {"tag": "plain_text", "content": "OStag 实例"}},
+                "elements": [{"tag": "div", "text": {"tag": "plain_text",
+                    "content": str(item.get("instance_id", ""))[:80]}} for item in instances[:10]]}
+        else:
+            return False
+        await self.send_card(
+            event.destination_id, card, fallback, chat_type=event.chat_type,
+            delivery_id=f"monitor-{event.event_id or event.message_id}",
+        )
+        return True
 
     async def normalize_event(self, raw_event: dict[str, Any]) -> NormalizedEvent:
         event = raw_event.get("event", raw_event)

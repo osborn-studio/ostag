@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.config import Settings, load_settings
+from ostag.core.event import NormalizedEvent
 from ostag.work_monitor.feishu_card_security import feishu_signature
 from ostag.work_monitor.feishu_cards import render_feishu_card
 from ostag.work_monitor.identity import IdentityStore
@@ -82,6 +83,57 @@ def test_feishu_cards_escape_untrusted_markdown_and_bound_elements() -> None:
     assert len(card["elements"]) <= 20
     content = card["elements"][0]["content"]
     assert "<script>" not in content and r"\*boom\*" in content
+
+
+@pytest.mark.asyncio
+async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_button(
+    monkeypatch, tmp_path: Path
+) -> None:
+    mappings = []
+    sent = []
+
+    class Store:
+        def create_control_callback(self, callback_id, **mapping):
+            mappings.append((callback_id, mapping))
+
+    class Identities:
+        def allows(self, principal, destination, capability):
+            return capability == "write"
+
+    class Service:
+        store = Store()
+        identities = Identities()
+
+        def handle_event(self, event):
+            return "fallback task"
+
+        def task(self, principal, destination, reference):
+            return TaskDetailView.from_task(
+                {"task_id": reference, "title": "Ship", "status": "running", "progress": 20},
+                capabilities=("pause",),
+            )
+
+    class Runner:
+        work_monitor = Service()
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False,
+                           feishu_app_id="app", feishu_app_secret="secret")
+    adapter = FeishuAdapter(config)
+
+    async def capture(*args, **kwargs):
+        sent.append((args, kwargs))
+
+    monkeypatch.setattr(adapter, "send_card", capture)
+    event = NormalizedEvent(
+        platform="feishu", event_id="evt-1", chat_id="oc_chat", message_id="msg-1",
+        sender_id="ou_user", text="/task task-1", mention_bot=True, chat_type="group",
+        destination_id="oc_chat",
+    )
+    assert await adapter._handle_monitor_card(event, Runner()) is True
+    value = sent[0][0][1]["elements"][1]["actions"][0]["value"]
+    assert set(value) == {"callback_id"} and value["callback_id"].startswith("f_")
+    assert mappings[0][1]["task_id"] == "task-1"
+    assert sent[0][1]["delivery_id"] == "monitor-evt-1"
 
 
 def test_feishu_route_is_absent_until_strict_registration() -> None:

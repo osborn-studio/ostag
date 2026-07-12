@@ -287,13 +287,36 @@ class WorkMonitorScheduler:
             self._renew_lease(item["notification_id"], generation, renew_stop)
         )
         try:
-            await asyncio.wait_for(
-                self.transports[platform].send_message(
-                    destination_id,
-                    text,
-                    delivery_id=item["delivery_id"],
+            transport = self.transports[platform]
+            if platform == "feishu" and payload.get("task_id") and hasattr(transport, "send_card"):
+                from .feishu_cards import render_feishu_card
+                from .feishu_routes import issue_feishu_callback
+                from .service import WorkMonitorService
+
+                principal = Principal(
+                    str(active["principal_platform"]), str(active["actor_id"])
+                )
+                destination = Destination("feishu", destination_id, str(active["chat_type"]))
+                service = WorkMonitorService(self.store, self.identities, ledger=self.ledger)
+                view = service.task(principal, destination, str(payload["task_id"]))
+                factory = None
+                if self.identities.allows(principal, destination, "write"):
+                    def factory(action: str, task_id: str) -> str:
+                        return issue_feishu_callback(
+                            service, principal, destination, action=action, task_id=task_id
+                        )
+                card = render_feishu_card(view, callback_factory=factory)
+                delivery = transport.send_card(
+                    destination_id, card, text, delivery_id=item["delivery_id"],
                     chat_type=active["chat_type"],
-                ),
+                )
+            else:
+                delivery = transport.send_message(
+                    destination_id, text, delivery_id=item["delivery_id"],
+                    chat_type=active["chat_type"],
+                )
+            await asyncio.wait_for(
+                delivery,
                 timeout=self.lease_seconds * 0.8,
             )
         except Exception as exc:
