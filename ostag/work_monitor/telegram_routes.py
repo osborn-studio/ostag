@@ -84,13 +84,14 @@ def create_telegram_router(
     def callback_factory(
         principal: Principal, destination: Destination,
     ) -> Callable[[str, str], str]:
-        def create(action: str, task_id: str) -> str:
+        def create(action: str, task_id: str, *, control_action: str = "") -> str:
             callback_id = "w_" + secrets.token_urlsafe(18)
             active().store.create_telegram_callback(
                 callback_id, action=action, task_id=task_id,
                 destination_id=destination.destination_id, chat_type=destination.chat_type,
                 principal_platform=principal.platform, actor_id=principal.actor_id,
                 expires_at=int(time.time()) + 300,
+                control_action=control_action,
             )
             return callback_id
         return create
@@ -129,6 +130,11 @@ def create_telegram_router(
                     send_view(event, active().board(principal, destination, page=int(reference)))
                     answer = "已翻页"
                 elif action == "confirm":
+                    original_action = mapped["control_action"]
+                    if original_action not in {"pause", "resume", "retry", "cancel"}:
+                        raise ValueError("confirmed control action is missing or invalid")
+                    if original_action == "cancel":
+                        require_private_admin(event, destination)
                     active().approve_control(principal, destination, reference)
                     active().apply_control(principal, destination, reference)
                     answer = "操作已确认并下发"
@@ -140,7 +146,7 @@ def create_telegram_router(
                     )
                     answer = f"已提交审批 {receipt.action_id}"
                     confirm_id = callback_factory(principal, destination)(
-                        "confirm", receipt.action_id
+                        "confirm", receipt.action_id, control_action=action
                     )
                     client.send_message(event.destination_id, "请再次确认操作", reply_markup={
                         "inline_keyboard": [[{"text": "确认", "callback_data": confirm_id}]]

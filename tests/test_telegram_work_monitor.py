@@ -236,8 +236,41 @@ def test_cancel_group_is_rejected_but_private_admin_can_confirm(tmp_path: Path) 
             for method, payload in reversed(calls)
             if method == "sendMessage" and payload.get("text") == "请再次确认操作"
         )
+        with service.store.connect() as db:
+            receipt_id = db.execute(
+                "SELECT task_id FROM telegram_callbacks WHERE callback_id=?", (confirm_id,)
+            ).fetchone()[0]
+        private = Destination("telegram", "7", "private")
+        service.identities.revoke(Principal("telegram", "7"), private, local_admin=True)
         assert client.post("/webhooks/telegram",
                            json=callback(42, confirm_id, 7, "private"),
+                           headers=headers).status_code == 200
+        assert service.ledger.get_receipt(receipt_id).state == "needs_approval"
+        with service.store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0
+        service.identities.bind_private(
+            owner=Principal("telegram", "7"), destination=private, local_admin=True
+        )
+        assert client.post("/webhooks/telegram",
+                           json=callback(43, confirm_id, 7, "private"),
+                           headers=headers).status_code == 200
+        with service.store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0
+
+        service.store.create_telegram_callback(
+            "w_private2", action="cancel", task_id="task-1", destination_id="7",
+            chat_type="private", principal_platform="telegram", actor_id="7",
+            expires_at=2**31, control_action="cancel",
+        )
+        assert client.post("/webhooks/telegram",
+                           json=callback(44, "w_private2", 7, "private"),
+                           headers=headers).status_code == 200
+        confirm2 = next(
+            payload["reply_markup"]["inline_keyboard"][0][0]["callback_data"]  # type: ignore[index]
+            for method, payload in reversed(calls)
+            if method == "sendMessage" and payload.get("text") == "请再次确认操作"
+        )
+        assert client.post("/webhooks/telegram", json=callback(45, confirm2, 7, "private"),
                            headers=headers).status_code == 200
         with service.store.connect() as db:
             assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 1
