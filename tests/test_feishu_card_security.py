@@ -50,7 +50,7 @@ def test_signature_and_decryption_fixed_vectors() -> None:
 def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
     calls: list[str] = []
     security = FeishuCardSecurity(
-        encrypt_key="enc-test", verification_token="verify",
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
         store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
         decryptor=lambda cipher, key: calls.append(cipher) or b"{}",
     )
@@ -78,7 +78,7 @@ def test_signature_is_checked_before_json_and_real_router_has_no_side_effects(tm
 
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     security = FeishuCardSecurity(
-        encrypt_key="enc-test", verification_token="verify", store=store,
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app", store=store,
         clock=lambda: 1_700_000_000, decryptor=decryptor,
     )
     app = FastAPI()
@@ -103,17 +103,20 @@ def test_replay_is_persisted_before_decrypt_and_encrypted_without_key_is_rejecte
     calls: list[str] = []
     body = b'{"encrypt":"ciphertext"}'
     security = FeishuCardSecurity(
-        encrypt_key="enc-test", verification_token="verify",
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
         store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
-        decryptor=lambda cipher, key: calls.append(cipher) or
-            b'{"challenge":"ok","token":"verify","type":"url_verification"}',
+        decryptor=lambda cipher, key: calls.append(cipher) or json.dumps({
+            "schema": "2.0", "header": {
+                "event_type": "url_verification", "token": "verify", "app_id": "app",
+            }, "event": {"challenge": "ok"},
+        }).encode(),
     )
     with TestClient(_app(security)) as client:
         assert client.post("/callback", content=body, headers=_headers(body)).status_code == 200
         assert client.post("/callback", content=body, headers=_headers(body)).status_code == 401
     assert calls == ["ciphertext"]
     no_key = FeishuCardSecurity(
-        encrypt_key="", verification_token="verify",
+        encrypt_key="", verification_token="verify", expected_app_id="app",
         store=MonitorStore(tmp_path / "no-key.sqlite3"), clock=lambda: 1_700_000_000,
         decryptor=lambda cipher, key: (_ for _ in ()).throw(AssertionError("decrypt called")),
     )
@@ -124,7 +127,8 @@ def test_replay_is_persisted_before_decrypt_and_encrypted_without_key_is_rejecte
 def test_verified_payload_derives_principal_and_ignores_button_identity(tmp_path) -> None:
     payload = {
         "schema": "2.0",
-        "header": {"event_id": "evt", "event_type": "card.action.trigger", "token": "verify"},
+        "header": {"event_id": "evt", "event_type": "card.action.trigger",
+                   "token": "verify", "app_id": "app"},
         "event": {
             "operator": {"open_id": "ou_verified"},
             "context": {"open_chat_id": "oc_verified"},
@@ -136,7 +140,7 @@ def test_verified_payload_derives_principal_and_ignores_button_identity(tmp_path
     }
     body = json.dumps(payload, separators=(",", ":")).encode()
     security = FeishuCardSecurity(
-        encrypt_key="enc-test", verification_token="verify",
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
         store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
     )
     with TestClient(_app(security)) as client:
@@ -146,11 +150,61 @@ def test_verified_payload_derives_principal_and_ignores_button_identity(tmp_path
 
 def test_message_event_and_schema_extensions_are_rejected(tmp_path) -> None:
     payload = {"schema": "2.0", "header": {
-        "event_type": "im.message.receive_v1", "token": "verify"}, "event": {}}
+        "event_type": "im.message.receive_v1", "token": "verify", "app_id": "app"}, "event": {}}
     body = json.dumps(payload, separators=(",", ":")).encode()
     security = FeishuCardSecurity(
-        encrypt_key="enc-test", verification_token="verify",
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
         store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
     )
     with TestClient(_app(security)) as client:
         assert client.post("/callback", content=body, headers=_headers(body)).status_code == 422
+
+
+def test_oversized_body_is_rejected_before_signature_decrypt_or_domain(tmp_path) -> None:
+    calls: list[str] = []
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), max_body_bytes=8,
+        decryptor=lambda cipher, key: calls.append(cipher) or b"{}",
+    )
+    body = b'{"encrypt":"ciphertext"}'
+    with TestClient(_app(security)) as client:
+        response = client.post("/callback", content=body, headers=_headers(body))
+    assert response.status_code == 413
+    assert calls == []
+
+
+def test_wrong_verified_app_id_never_reaches_card_service(tmp_path) -> None:
+    calls = {"decrypt": 0, "service": 0}
+    decrypted = json.dumps({
+        "schema": "2.0",
+        "header": {"event_type": "card.action.trigger", "token": "verify",
+                   "app_id": "attacker-app"},
+        "event": {"operator": {"open_id": "ou_user"},
+                  "context": {"open_chat_id": "oc_chat"},
+                  "action": {"tag": "button", "value": {
+                      "command": "pause", "task_id": "task-1"}}},
+    }).encode()
+
+    class Service:
+        def propose_control(self, *args, **kwargs):
+            calls["service"] += 1
+            raise AssertionError("service called")
+
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: calls.__setitem__("decrypt", calls["decrypt"] + 1)
+        or decrypted,
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app, create_feishu_card_router(Service()),
+        security=SecurityContract("verified_platform", security),
+    )
+    body = b'{"encrypt":"ciphertext"}'
+    with TestClient(app) as client:
+        response = client.post("/webhooks/feishu/card-action", content=body,
+                               headers=_headers(body))
+    assert response.status_code == 401
+    assert calls == {"decrypt": 1, "service": 0}

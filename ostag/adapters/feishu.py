@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import threading
+import uuid
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -25,6 +26,7 @@ class FeishuAdapter:
         self._client: Any | None = None
         self._inflight: set[Any] = set()
         self._ws_stop = threading.Event()
+        self._sdk_loop: asyncio.AbstractEventLoop | None = None
 
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
@@ -64,20 +66,25 @@ class FeishuAdapter:
         if not self.app_id or not self.app_secret:
             raise RuntimeError(f"{self.platform.upper()}_APP_ID and APP_SECRET are required.")
         self._loop = asyncio.get_running_loop()
-        worker = asyncio.create_task(asyncio.to_thread(self._start_blocking, self.runner))
-        stopped = asyncio.create_task(stop.wait())
-        done, _ = await asyncio.wait((worker, stopped), return_when=asyncio.FIRST_COMPLETED)
-        if worker in done:
-            stopped.cancel()
-            await asyncio.gather(stopped, return_exceptions=True)
-            await worker
-            return
-        await self.stop()
-        try:
-            await asyncio.wait_for(worker, timeout=5)
-        except TimeoutError:
-            worker.cancel()
-            await asyncio.gather(worker, return_exceptions=True)
+        failure: list[BaseException] = []
+
+        def bridge() -> None:
+            try:
+                self._start_blocking(self.runner)
+            except BaseException as exc:
+                failure.append(exc)
+
+        thread = threading.Thread(target=bridge, name="ostag-feishu-ws-bridge", daemon=False)
+        thread.start()
+        while thread.is_alive() and not stop.is_set():
+            await asyncio.sleep(0.05)
+        if stop.is_set():
+            await self.stop()
+        await asyncio.to_thread(thread.join, 5)
+        if thread.is_alive():
+            raise RuntimeError("Feishu WebSocket bridge did not stop")
+        if failure and not stop.is_set():
+            raise failure[0]
 
     def _start_blocking(self, runner: Any) -> None:
         try:
@@ -107,21 +114,12 @@ class FeishuAdapter:
         )
         self._client = cli
         self._ws_stop.clear()
-        if all(callable(getattr(cli, name, None)) for name in ("_connect", "_disconnect", "_ping_loop")):
-            asyncio.run(self._serve_sdk_client(cli))
-        else:  # Compatibility with SDK test doubles and older SDK releases.
-            cli.start()
-
-    async def _serve_sdk_client(self, client: Any) -> None:
-        await client._connect()
-        ping = asyncio.create_task(client._ping_loop())
         try:
-            while not self._ws_stop.is_set():
-                await asyncio.sleep(0.05)
-        finally:
-            ping.cancel()
-            await asyncio.gather(ping, return_exceptions=True)
-            await client._disconnect()
+            from lark_oapi.ws.client import loop as sdk_loop
+        except ImportError:
+            sdk_loop = None
+        self._sdk_loop = sdk_loop
+        cli.start()
 
     def _run_live_event_handler(self, data: Any, runner: Any) -> None:
         if self._loop is None or self._loop.is_closed():
@@ -139,6 +137,19 @@ class FeishuAdapter:
                 result = closer()
                 if asyncio.iscoroutine(result):
                     await result
+            elif self._sdk_loop is not None and self._sdk_loop.is_running():
+                disconnect = getattr(client, "_disconnect", None)
+
+                async def shutdown_sdk() -> None:
+                    try:
+                        if callable(disconnect):
+                            await disconnect()
+                    finally:
+                        self._sdk_loop.stop()
+
+                self._sdk_loop.call_soon_threadsafe(
+                    lambda: self._sdk_loop.create_task(shutdown_sdk())
+                )
         if self._inflight:
             await asyncio.gather(*(asyncio.wrap_future(item) for item in tuple(self._inflight)),
                                  return_exceptions=True)
@@ -243,7 +254,7 @@ class FeishuAdapter:
 
     async def send_card(
         self, destination_id: str, card: dict[str, Any], fallback_text: str,
-        *, chat_type: str = "group",
+        *, chat_type: str = "group", delivery_id: str | None = None,
     ) -> None:
         """Proactively deliver an interactive card, falling back to plain text."""
         if self.config.dry_run:
@@ -255,15 +266,19 @@ class FeishuAdapter:
             "receive_id": destination_id, "msg_type": "interactive",
             "content": json.dumps(card, ensure_ascii=False),
         }).encode()
+        idempotency_key = delivery_id or str(uuid.uuid4())
         req = urllib.request.Request(
-            f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}",
+            f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+            f"&uuid={idempotency_key}",
             data=payload, method="POST",
             headers={"Authorization": f"Bearer {token}",
                      "Content-Type": "application/json; charset=utf-8"},
         )
         try:
-            await asyncio.to_thread(_urlopen_json, req)
-        except RuntimeError:
+            response = await asyncio.to_thread(_urlopen_json, req)
+            if response.get("code", 0) != 0:
+                raise RuntimeError("Feishu rejected interactive card")
+        except (RuntimeError, TimeoutError):
             await self.send_message(destination_id, fallback_text, chat_type=chat_type)
 
     async def _tenant_access_token(self) -> str:

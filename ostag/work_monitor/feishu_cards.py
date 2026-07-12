@@ -2,23 +2,40 @@
 
 from __future__ import annotations
 
+import json
+import re
 from typing import Any
 
 from .rendering import MobileBoardView, TaskDetailView
 
 
+MAX_CARD_BYTES = 24_000
+MAX_ELEMENTS = 20
+_MARKDOWN = re.compile(r"([\\`*_{}\[\]()#+.!|>~-])")
+
+
+def _safe(value: object, limit: int) -> str:
+    text = str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    escaped = _MARKDOWN.sub(r"\\\1", text)
+    return escaped if len(escaped) <= limit else escaped[: limit - 1] + "…"
+
+
 def render_feishu_card(view: MobileBoardView | TaskDetailView) -> dict[str, Any]:
     if isinstance(view, MobileBoardView):
         elements: list[dict[str, Any]] = []
-        for task in view.cards:
+        for task in view.cards[: min(6, MAX_ELEMENTS // 2)]:
             elements.extend((
-                {"tag": "markdown", "content": f"**{task['title']}**\n`{task['status']}` · **{task['progress']}%**\n{task['task_id']}"},
+                {"tag": "markdown", "content": f"**{_safe(task['title'], 160)}**\n"
+                 f"`{_safe(task['status'], 24)}` · **{int(task['progress'])}%**\n"
+                 f"{_safe(task['task_id'], 80)}"},
                 {"tag": "hr"},
             ))
         return _card("OStag 工作看板", elements)
     task = view.task
     elements = [
-        {"tag": "markdown", "content": f"**{task.get('title')}**\n`{task.get('status')}` · **{task.get('progress', 0)}%**\n任务 `{task.get('task_id')}`"}
+        {"tag": "markdown", "content": f"**{_safe(task.get('title'), 240)}**\n"
+         f"`{_safe(task.get('status'), 24)}` · **{int(task.get('progress', 0))}%**\n"
+         f"任务 `{_safe(task.get('task_id'), 80)}`"}
     ]
     for action in view.capabilities:
         elements.append({
@@ -26,15 +43,18 @@ def render_feishu_card(view: MobileBoardView | TaskDetailView) -> dict[str, Any]
             "actions": [{
                 "tag": "button", "text": {"tag": "plain_text", "content": action.upper()},
                 "type": "danger" if action == "cancel" else "primary",
-                "value": {"command": action, "task_id": str(task.get("task_id", ""))},
+                "value": {"command": action, "task_id": str(task.get("task_id", ""))[:80]},
             }],
         })
     return _card("OStag 任务详情", elements)
 
 
 def _card(title: str, elements: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
+    card = {
         "config": {"wide_screen_mode": False, "enable_forward": False},
         "header": {"template": "indigo", "title": {"tag": "plain_text", "content": title}},
-        "elements": elements,
+        "elements": elements[:MAX_ELEMENTS],
     }
+    if len(json.dumps(card, ensure_ascii=False, separators=(",", ":")).encode()) > MAX_CARD_BYTES:
+        raise ValueError("Feishu card exceeds safe encoded size")
+    return card

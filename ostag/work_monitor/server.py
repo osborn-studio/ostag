@@ -199,7 +199,9 @@ def create_app(
         card_security = FeishuCardSecurity(
             encrypt_key=configured.feishu_encrypt_key,
             verification_token=configured.feishu_verification_token,
+            expected_app_id=configured.feishu_app_id,
             store=lambda: active_service().store,
+            max_body_bytes=configured.monitor_server_max_body_bytes,
         )
         register_feishu_card_router(
             app,

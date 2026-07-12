@@ -42,6 +42,18 @@ def test_feishu_cards_are_vertical_mobile_high_contrast() -> None:
     assert [element["tag"] for element in detail["elements"]] == ["markdown", "action", "action"]
 
 
+def test_feishu_cards_escape_untrusted_markdown_and_bound_elements() -> None:
+    view = MobileBoardView(
+        cards=tuple({"task_id": f"task-{index}", "title": "<script>*boom*</script>",
+                     "status": "blocked", "progress": 1} for index in range(30)),
+        page=1, page_size=30, total=30,
+    )
+    card = render_feishu_card(view)
+    assert len(card["elements"]) <= 20
+    content = card["elements"][0]["content"]
+    assert "<script>" not in content and r"\*boom\*" in content
+
+
 def test_feishu_route_is_absent_until_strict_registration() -> None:
     app = FastAPI()
     with TestClient(app) as client:
@@ -75,7 +87,9 @@ def test_production_composition_registers_cards_only_when_fully_configured(tmp_p
     )
     present = create_app(settings=configured, **base)
     challenge = json.dumps(
-        {"challenge": "verified", "token": "verify", "type": "url_verification"},
+        {"schema": "2.0", "header": {
+            "event_type": "url_verification", "token": "verify", "app_id": "app",
+        }, "event": {"challenge": "verified"}},
         separators=(",", ":"),
     ).encode()
     timestamp = str(int(time.time()))
@@ -160,6 +174,28 @@ async def test_proactive_private_uses_open_id_group_uses_chat_id_and_card_falls_
 
 
 @pytest.mark.asyncio
+async def test_card_business_error_falls_back_once_with_stable_idempotency_key(
+    monkeypatch, tmp_path: Path
+) -> None:
+    requests = []
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False,
+                           feishu_app_id="app", feishu_app_secret="secret")
+    adapter = FeishuAdapter(config)
+    monkeypatch.setattr(adapter, "_tenant_access_token", lambda: asyncio.sleep(0, result="token"))
+
+    async def fake_to_thread(func, req):
+        requests.append(req)
+        return {"code": 999} if json.loads(req.data)["msg_type"] == "interactive" else {"code": 0}
+
+    monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
+    await adapter.send_card("oc_group", {"elements": []}, "fallback",
+                            delivery_id="delivery-1")
+    assert sum(json.loads(req.data)["msg_type"] == "interactive" for req in requests) == 1
+    assert "uuid=delivery-1" in requests[0].full_url
+    assert json.loads(requests[-1].data)["msg_type"] == "text"
+
+
+@pytest.mark.asyncio
 async def test_ws_callback_uses_supervised_loop_without_per_message_thread(tmp_path: Path) -> None:
     handled = asyncio.Event()
 
@@ -183,21 +219,42 @@ async def test_ws_callback_uses_supervised_loop_without_per_message_thread(tmp_p
 @pytest.mark.asyncio
 async def test_ws_sdk_bridge_disconnects_on_graceful_stop(tmp_path: Path) -> None:
     states: list[str] = []
+    handled = asyncio.Event()
+
+    class Runner:
+        async def handle_event(self, event):
+            states.append("handled")
+            handled.set()
+            return ""
 
     class Client:
-        async def _connect(self):
-            states.append("connected")
-
-        async def _ping_loop(self):
-            await asyncio.Event().wait()
-
         async def _disconnect(self):
             states.append("disconnected")
 
-    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=True)
-    adapter = FeishuAdapter(config)
-    serving = asyncio.create_task(adapter._serve_sdk_client(Client()))
-    await asyncio.sleep(0)
-    adapter._ws_stop.set()
-    await asyncio.wait_for(serving, timeout=1)
-    assert states == ["connected", "disconnected"]
+    def public_start_bridge() -> None:
+        sdk_loop = asyncio.new_event_loop()
+        adapter._sdk_loop = sdk_loop
+        adapter._client = Client()
+        states.append("started")
+        sdk_loop.call_soon_threadsafe(
+            adapter._run_live_event_handler,
+            {"header": {"event_id": "evt"}, "event": {
+                "message": {"message_id": "msg", "chat_id": "oc",
+                            "content": "{\"text\":\"hi\"}"},
+                "sender": {"sender_id": {"open_id": "ou"}},
+            }},
+            adapter.runner,
+        )
+        sdk_loop.run_forever()
+        sdk_loop.close()
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=True,
+                           feishu_app_id="app", feishu_app_secret="secret")
+    adapter = FeishuAdapter(config, runner=Runner())
+    adapter._start_blocking = lambda runner: public_start_bridge()
+    stop = asyncio.Event()
+    serving = asyncio.create_task(adapter.run(stop))
+    await asyncio.wait_for(handled.wait(), timeout=1)
+    stop.set()
+    await asyncio.wait_for(serving, timeout=2)
+    assert states == ["started", "handled", "disconnected"]

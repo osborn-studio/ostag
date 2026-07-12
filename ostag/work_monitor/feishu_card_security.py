@@ -54,21 +54,39 @@ class FeishuCardSecurity:
         *,
         encrypt_key: str,
         verification_token: str,
+        expected_app_id: str,
         store: MonitorStore | Callable[[], MonitorStore],
+        max_body_bytes: int = 1_048_576,
         max_clock_skew_seconds: int = 300,
         clock: Callable[[], float] = time.time,
         decryptor: Callable[[str, str], bytes] = decrypt_feishu_payload,
     ) -> None:
+        if not expected_app_id:
+            raise ValueError("expected Feishu app_id is required")
         self.encrypt_key = encrypt_key
         self.verification_token = verification_token
+        self.expected_app_id = expected_app_id
         self.store = store
+        self.max_body_bytes = max_body_bytes
         self.max_clock_skew_seconds = max_clock_skew_seconds
         self.clock = clock
         self.decryptor = decryptor
 
     async def __call__(self, request: Request) -> VerifiedFeishuCallback:
         # 1. Capture the exact transport bytes and signature inputs.
-        body = await request.body()
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > self.max_body_bytes:
+                    raise HTTPException(413, "request body too large")
+            except ValueError as exc:
+                raise HTTPException(400, "invalid content-length") from exc
+        captured = bytearray()
+        async for chunk in request.stream():
+            captured.extend(chunk)
+            if len(captured) > self.max_body_bytes:
+                raise HTTPException(413, "request body too large")
+        body = bytes(captured)
         timestamp = request.headers.get("X-Lark-Request-Timestamp", "")
         nonce = request.headers.get("X-Lark-Request-Nonce", "")
         supplied = request.headers.get("X-Lark-Signature", "")
@@ -121,14 +139,6 @@ class FeishuCardSecurity:
         if not isinstance(payload, dict):
             raise HTTPException(422, "callback payload must be an object")
         # URL verification is the sole non-action callback accepted here.
-        if set(payload) == {"challenge", "token", "type"}:
-            if payload.get("type") != "url_verification" or not self._token(payload.get("token")):
-                raise HTTPException(401, "invalid verification token")
-            challenge = payload.get("challenge")
-            if not isinstance(challenge, str) or not challenge:
-                raise HTTPException(422, "invalid challenge")
-            return VerifiedFeishuCallback(dict(payload), None, None, "challenge")
-
         required = {"schema", "header", "event"}
         if set(payload) != required or payload.get("schema") != "2.0":
             raise HTTPException(422, "unsupported Feishu callback schema")
@@ -136,10 +146,19 @@ class FeishuCardSecurity:
         if not isinstance(header, dict) or not isinstance(event, dict):
             raise HTTPException(422, "invalid Feishu card action")
         allowed_header = {"event_id", "event_type", "create_time", "token", "app_id", "tenant_key"}
-        if not set(header) <= allowed_header or header.get("event_type") != "card.action.trigger":
-            raise HTTPException(422, "only card actions are accepted")
+        if not set(header) <= allowed_header:
+            raise HTTPException(422, "invalid callback header")
         if not self._token(header.get("token")):
             raise HTTPException(401, "invalid verification token")
+        app_id = header.get("app_id")
+        if not isinstance(app_id, str) or not hmac.compare_digest(app_id, self.expected_app_id):
+            raise HTTPException(401, "invalid callback app_id")
+        if header.get("event_type") == "url_verification":
+            if set(event) != {"challenge"} or not isinstance(event["challenge"], str) or not event["challenge"]:
+                raise HTTPException(422, "invalid challenge")
+            return VerifiedFeishuCallback(dict(payload), None, None, "challenge")
+        if header.get("event_type") != "card.action.trigger":
+            raise HTTPException(422, "only card actions are accepted")
         required_event = {"operator", "action", "context"}
         if not required_event <= set(event) or not set(event) <= required_event | {"token", "host"}:
             raise HTTPException(422, "invalid Feishu card action fields")

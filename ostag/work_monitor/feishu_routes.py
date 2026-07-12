@@ -22,7 +22,7 @@ def create_feishu_card_router(
     async def card_action(request: Request) -> dict[str, object]:
         verified: VerifiedFeishuCallback = request.state.feishu_callback
         if verified.kind == "challenge":
-            return {"challenge": verified.payload["challenge"]}
+            return {"challenge": verified.payload["event"]["challenge"]}
         assert verified.principal is not None and verified.destination is not None
         value = verified.payload["event"]["action"]["value"]
         if not {"command", "task_id"} <= set(value) or not set(value) <= {
