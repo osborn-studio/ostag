@@ -191,6 +191,12 @@ class WorkMonitorService:
             return [dict(row) for row in rows]
         return [dict(row) for row in rows if row["instance_id"] in allowed_instances]
 
+    def poll_commands(self, instance_id: str) -> tuple[dict[str, Any], ...]:
+        """Claim commands for an already-authenticated instance."""
+        return self.store.claim_pending_commands(
+            instance_id, claimed_at=self.clock().isoformat()
+        )
+
     def watch(
         self,
         principal: Principal,

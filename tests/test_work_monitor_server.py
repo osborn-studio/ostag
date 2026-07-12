@@ -8,8 +8,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from ostag.core.identity import Principal
 from ostag.core.schemas import ActionReceipt
@@ -20,11 +21,11 @@ from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 
 
-def _event(sequence: int = 1) -> dict[str, object]:
+def _event(sequence: int = 1, *, task_id: str = "task-1", project: str = "ostag") -> dict[str, object]:
     return {
         "event_id": f"event-{sequence}", "instance_id": "runner-1", "sequence": sequence,
         "kind": "task.created", "occurred_at": "2026-07-13T00:00:00+00:00",
-        "task": {"task_id": "task-1", "title": "Ship monitor", "project": "ostag",
+        "task": {"task_id": task_id, "title": f"Ship {task_id}", "project": project,
                  "status": "todo", "agent": "codex", "progress": 0,
                  "duration_seconds": 0, "summary": "", "error_class": None,
                  "evidence_ref": None, "version": 1},
@@ -71,6 +72,25 @@ def test_core_routes_authenticate_and_apply_scope(tmp_path: Path) -> None:
         assert response.status_code == 200
 
 
+def test_group_scope_allows_matching_tasks_and_rejects_cross_scope_access(tmp_path: Path) -> None:
+    app, store = _app(tmp_path)
+    identities = IdentityStore(store.path)
+    identities.enroll_group(
+        Principal("feishu", "alice"), Destination("feishu", "project-chat", "group"),
+        scope="project:ostag", local_admin=True,
+    )
+    headers = _human_headers(**{"X-OStag-Destination": "project-chat", "X-OStag-Chat-Type": "group"})
+    with TestClient(app) as client:
+        for event in (_event(1), _event(2, task_id="task-2", project="secret")):
+            body = json.dumps({"events": [event]}, separators=(",", ":")).encode()
+            assert client.post("/v1/events", content=body, headers=_instance_headers(body)).status_code == 200
+        assert [card["task_id"] for card in client.get("/v1/board", headers=headers).json()["cards"]] == ["task-1"]
+        assert client.get("/v1/tasks/task-1", headers=headers).status_code == 200
+        assert client.get("/v1/tasks/task-2", headers=headers).status_code == 404
+        assert client.post("/v1/subscriptions", headers=headers, json={"task_id": "task-1"}).status_code == 200
+        assert client.post("/v1/subscriptions", headers=headers, json={"task_id": "task-2"}).status_code == 403
+
+
 def test_instance_identity_is_derived_from_hmac_not_payload(tmp_path: Path) -> None:
     app, _ = _app(tmp_path)
     body = b'{"instance_id":"other"}'
@@ -103,6 +123,20 @@ def test_command_poll_is_single_consumer_and_ack_is_instance_scoped(tmp_path: Pa
                            headers=_instance_headers(ack_body)).status_code == 200
 
 
+def test_store_claims_pending_commands_once_with_caller_clock(tmp_path: Path) -> None:
+    store = MonitorStore(tmp_path / "claim.sqlite3")
+    with store.connect() as db:
+        db.execute("INSERT INTO commands(command_id,instance_id,task_id,status,payload) VALUES (?,?,?,?,?)",
+                   ("cmd-1", "runner-1", "task-1", "pending", '{"command_id":"cmd-1"}'))
+    fixed = datetime.fromisoformat("2026-07-13T01:02:03+00:00")
+    service = WorkMonitorService(store, IdentityStore(store.path), clock=lambda: fixed)
+    claimed = service.poll_commands("runner-1")
+    assert claimed == ({"command_id": "cmd-1"},)
+    assert service.poll_commands("runner-1") == ()
+    with store.connect() as db:
+        assert db.execute("SELECT consumed_at FROM commands").fetchone()["consumed_at"] == "2026-07-13T01:02:03+00:00"
+
+
 def test_health_router_hook_and_no_placeholder_webhooks(tmp_path: Path) -> None:
     router = APIRouter()
     router.add_api_route("/extension", lambda: {"ok": True})
@@ -115,13 +149,45 @@ def test_health_router_hook_and_no_placeholder_webhooks(tmp_path: Path) -> None:
 
 
 def test_authentication_happens_before_domain_call(tmp_path: Path) -> None:
-    app, _ = _app(tmp_path)
-    route = next(route for route in app.routes if getattr(route, "path", "") == "/v1/board")
-    original = route.endpoint
-    route.endpoint = lambda: (_ for _ in ()).throw(AssertionError("domain called"))
+    store = MonitorStore(tmp_path / "spy.sqlite3")
+    identities = IdentityStore(store.path)
+
+    class SpyService(WorkMonitorService):
+        calls = 0
+
+        def board(self, *args: object, **kwargs: object):
+            self.calls += 1
+            raise AssertionError("domain called before authentication")
+
+    spy = SpyService(store, identities)
+    app = create_app(service=spy, projector=Projector(store),
+                     auth=ServerAuth({"runner-1": "runner-secret"}, human_token="human-secret"))
     with TestClient(app) as client:
         assert client.get("/v1/board").status_code == 401
-    route.endpoint = original
+    assert spy.calls == 0
+
+
+def _request_with_token(token: str) -> Request:
+    headers = [(b"authorization", f"Bearer {token}".encode())]
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
+
+
+def test_human_and_admin_credentials_are_not_interchangeable() -> None:
+    auth = ServerAuth({}, human_token="human-secret", admin_token="admin-secret")
+    auth.admin(_request_with_token("admin-secret"))
+    for token in ("human-secret", "wrong"):
+        try:
+            auth.admin(_request_with_token(token))
+        except HTTPException as exc:
+            assert exc.status_code == 401
+        else:
+            raise AssertionError("human token authenticated as admin")
+    try:
+        auth.human(_request_with_token("admin-secret"))
+    except HTTPException as exc:
+        assert exc.status_code == 401
+    else:
+        raise AssertionError("admin token authenticated as human")
 
 
 class RestartingOwner:

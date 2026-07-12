@@ -232,18 +232,7 @@ def create_app(
         instance_id = credentials.instance(request, body)
         if body not in (b"", b"{}"):
             raise HTTPException(422, "poll body must be empty")
-        with svc.store.transaction() as db:
-            rows = db.execute(
-                "SELECT command_id,payload FROM commands WHERE instance_id=? AND status='pending' "
-                "AND consumed_at IS NULL ORDER BY rowid",
-                (instance_id,),
-            ).fetchall()
-            if rows:
-                db.executemany(
-                    "UPDATE commands SET consumed_at=? WHERE command_id=? AND consumed_at IS NULL",
-                    [(datetime_now(), row["command_id"]) for row in rows],
-                )
-        return {"commands": [json.loads(str(row["payload"])) for row in rows]}
+        return {"commands": list(svc.poll_commands(instance_id))}
 
     @app.post("/v1/commands/{command_id}/ack")
     async def ack(request: Request, command_id: str) -> dict[str, object]:
@@ -265,11 +254,4 @@ def create_app(
     for extension in routers:
         app.include_router(extension)
     return app
-
-
-def datetime_now() -> str:
-    from datetime import UTC, datetime
-    return datetime.now(UTC).isoformat()
-
-
 app = create_app()

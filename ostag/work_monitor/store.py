@@ -7,7 +7,7 @@ import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 from .models import MonitorEvent, TASK_STATUSES
 
@@ -203,6 +203,22 @@ class MonitorStore:
                 (instance_id, task_id),
             ).fetchone()
         return None if row is None else StoredTask(**dict(row))
+
+    def claim_pending_commands(
+        self, instance_id: str, *, claimed_at: str
+    ) -> tuple[dict[str, Any], ...]:
+        """Atomically return each pending command to one authenticated consumer."""
+        with self.transaction() as connection:
+            rows = connection.execute(
+                "SELECT command_id,payload FROM commands WHERE instance_id=? AND status='pending' "
+                "AND consumed_at IS NULL ORDER BY rowid",
+                (instance_id,),
+            ).fetchall()
+            connection.executemany(
+                "UPDATE commands SET consumed_at=? WHERE command_id=? AND consumed_at IS NULL",
+                [(claimed_at, row["command_id"]) for row in rows],
+            )
+        return tuple(json.loads(str(row["payload"])) for row in rows)
 
     def stage_counts(self, instance_id: str | None = None) -> dict[str, int]:
         parameters: tuple[str, ...] = ()
