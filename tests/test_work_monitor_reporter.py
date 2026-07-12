@@ -5,7 +5,7 @@ import hmac
 import json
 import io
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -49,7 +49,11 @@ def _record(
     }
 
 
-def _reporter(tmp_path: Path, transport: FakeTransport | None = None) -> Reporter:
+def _reporter(
+    tmp_path: Path,
+    transport: FakeTransport | None = None,
+    clock=lambda: NOW,
+) -> Reporter:
     return Reporter(
         instance_id="macbook",
         secret="top-secret",
@@ -57,7 +61,7 @@ def _reporter(tmp_path: Path, transport: FakeTransport | None = None) -> Reporte
         ledger_path=tmp_path / "ledger.jsonl",
         spool_path=tmp_path / "spool.sqlite3",
         transport=transport or FakeTransport(),
-        clock=lambda: NOW,
+        clock=clock,
     )
 
 
@@ -339,12 +343,14 @@ def test_command_ack_failure_is_persisted_and_destructive_action_not_reexecuted(
         ]
     )
     calls: list[str] = []
-    reporter = _reporter(tmp_path, transport)
+    now = [NOW]
+    reporter = _reporter(tmp_path, transport, lambda: now[0])
     assert (
         reporter.poll_commands_once(lambda c: calls.append(c.command_id) or {"status": "cancelled"})
         == 0
     )
-    restarted = _reporter(tmp_path, transport)
+    now[0] += timedelta(seconds=3)
+    restarted = _reporter(tmp_path, transport, lambda: now[0])
     assert (
         restarted.poll_commands_once(
             lambda c: calls.append(c.command_id) or {"status": "cancelled"}
@@ -364,8 +370,10 @@ def test_command_transport_errors_backoff_without_escaping_loop(tmp_path: Path) 
 
     reporter = _reporter(tmp_path, BrokenTransport())  # type: ignore[arg-type]
     assert reporter.poll_commands_once(lambda _: {}) == 0
-    assert reporter.status()["failure_count"] == 1
+    assert reporter.status()["failure_count"] == 0
+    assert reporter.status()["command_failure_count"] == 1
     assert "offline" in reporter.status()["last_error"]
+    assert reporter.poll_commands_once(lambda _: {}) == 0
 
 
 def test_bad_command_and_unexpected_execute_error_do_not_block_later_commands(
@@ -391,7 +399,8 @@ def test_bad_command_and_unexpected_execute_error_do_not_block_later_commands(
             TransportResponse(200, b"{}"),
         ]
     )
-    reporter = _reporter(tmp_path, transport)
+    now = [NOW]
+    reporter = _reporter(tmp_path, transport, lambda: now[0])
     seen: list[str] = []
 
     def execute(command: RemoteCommand) -> dict[str, object]:
@@ -400,10 +409,48 @@ def test_bad_command_and_unexpected_execute_error_do_not_block_later_commands(
             raise ValueError("bad expires_at")
         return {"ok": True, "status": "cancelled"}
 
-    assert reporter.poll_commands_once(execute) == 1
+    assert reporter.poll_commands_once(execute) == 2
     assert seen == ["bad-exec", "good"]
-    assert reporter.command_states()["bad-exec"] == "rejected"
+    assert reporter.command_states()["bad-exec"] == "rejected_acked"
     assert reporter.status()["error_count"] == 2
+
+
+def test_rejected_command_result_is_acked_and_replay_only_retries_ack(tmp_path: Path) -> None:
+    command = {
+        "command_id": "reject",
+        "task_id": "t1",
+        "instance_id": "macbook",
+        "action": "cancel",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
+        "requested_by": "u",
+        "issued_at": "2026-07-12T00:59:00Z",
+        "expires_at": "2026-07-12T01:05:00Z",
+    }
+    transport = FakeTransport(
+        [
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(500, b""),
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(200, b"{}"),
+        ]
+    )
+    now = [NOW]
+    reporter = _reporter(tmp_path, transport, lambda: now[0])
+    calls: list[str] = []
+
+    def reject(command: RemoteCommand) -> dict[str, object]:
+        calls.append(command.command_id)
+        raise RuntimeError("invalid")
+
+    assert reporter.poll_commands_once(reject) == 0
+    assert reporter.command_states() == {"reject": "rejected"}
+    now[0] += timedelta(seconds=3)
+    assert reporter.poll_commands_once(reject) == 1
+    assert calls == ["reject"]
+    assert reporter.command_states() == {"reject": "rejected_acked"}
+    ack_body = json.loads(transport.requests[-1][2])
+    assert ack_body["result"]["code"] == "COMMAND_REJECTED"
 
 
 def test_replayed_command_id_with_different_signed_payload_fails_closed(tmp_path: Path) -> None:
@@ -427,11 +474,13 @@ def test_replayed_command_id_with_different_signed_payload_fails_closed(tmp_path
         ]
     )
     calls: list[str] = []
-    reporter = _reporter(tmp_path, transport)
+    now = [NOW]
+    reporter = _reporter(tmp_path, transport, lambda: now[0])
     assert (
         reporter.poll_commands_once(lambda c: calls.append(c.task_id) or {"status": "cancelled"})
         == 0
     )
+    now[0] += timedelta(seconds=3)
     assert (
         reporter.poll_commands_once(lambda c: calls.append(c.task_id) or {"status": "cancelled"})
         == 0
@@ -463,7 +512,8 @@ def test_unverified_execution_is_persisted_and_never_reexecutes_on_ack_retry(
         ]
     )
     calls: list[str] = []
-    reporter = _reporter(tmp_path, transport)
+    now = [NOW]
+    reporter = _reporter(tmp_path, transport, lambda: now[0])
 
     def execute(command: RemoteCommand) -> dict[str, object]:
         calls.append(command.command_id)
@@ -471,6 +521,7 @@ def test_unverified_execution_is_persisted_and_never_reexecutes_on_ack_retry(
 
     assert reporter.poll_commands_once(execute) == 0
     assert reporter.command_states() == {"c1": "executed_unverified"}
+    now[0] += timedelta(seconds=3)
     assert reporter.poll_commands_once(execute) == 1
     assert calls == ["c1"]
 

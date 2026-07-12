@@ -483,6 +483,9 @@ class Reporter:
     def poll_commands_once(self, execute: Callable[[RemoteCommand], dict[str, object]]) -> int:
         if not self.central_url or not self._secret:
             return 0
+        next_attempt = self._state("command_next_attempt_at")
+        if next_attempt and self.clock() < datetime.fromisoformat(next_attempt):
+            return 0
         empty = b"{}"
         try:
             response = self.transport.request(
@@ -493,12 +496,13 @@ class Reporter:
             )
         except (OSError, TimeoutError, urllib.error.URLError) as exc:
             self._record_error(f"command poll transport: {exc}")
-            self._record_failure()
+            self._record_command_failure()
             return 0
         if not 200 <= response.status < 300:
             self._record_error(f"command poll HTTP {response.status}")
-            self._record_failure()
+            self._record_command_failure()
             return 0
+        self._clear_command_failure()
         try:
             commands = json.loads(response.body or b"{}").get("commands", [])
         except (json.JSONDecodeError, AttributeError):
@@ -539,11 +543,9 @@ class Reporter:
                     if not hmac.compare_digest(stored_canonical, canonical):
                         continue
                     state, stored = str(row["state"]), row["result_payload"]
-            if state == "acked":
+            if state in {"acked", "rejected_acked"}:
                 continue
-            if state == "rejected":
-                continue
-            if state in {"executed", "executed_unverified"}:
+            if state in {"executed", "executed_unverified", "rejected"}:
                 result = json.loads(stored)
             elif state == "executing":
                 owner = getattr(execute, "__self__", None)
@@ -578,27 +580,33 @@ class Reporter:
                     result = execute(command)
                 except Exception as exc:  # isolate an untrusted command/plugin boundary
                     self._record_error(f"command execution error: {type(exc).__name__}: {exc}")
+                    result = {"ok": False, "code": "COMMAND_REJECTED"}
                     with self._connect() as db:
                         db.execute(
                             "UPDATE command_state SET state='rejected',result_payload=? WHERE command_id=?",
                             (
-                                json.dumps({"ok": False, "code": "COMMAND_REJECTED"}),
+                                json.dumps(result),
                                 command.command_id,
                             ),
                         )
-                    continue
-                self._after_command_execute()
-                code = str(result.get("code", ""))
-                execution_state = (
-                    "executed_unverified"
-                    if code.endswith("_NOT_CONFIRMED") or code == "STATUS_UNAVAILABLE"
-                    else "executed"
-                )
-                with self._connect() as db:
-                    db.execute(
-                        "UPDATE command_state SET state=?,result_payload=? WHERE command_id=?",
-                        (execution_state, json.dumps(result, sort_keys=True), command.command_id),
+                    state = "rejected"
+                else:
+                    self._after_command_execute()
+                    code = str(result.get("code", ""))
+                    execution_state = (
+                        "executed_unverified"
+                        if code.endswith("_NOT_CONFIRMED") or code == "STATUS_UNAVAILABLE"
+                        else "executed"
                     )
+                    with self._connect() as db:
+                        db.execute(
+                            "UPDATE command_state SET state=?,result_payload=? WHERE command_id=?",
+                            (
+                                execution_state,
+                                json.dumps(result, sort_keys=True),
+                                command.command_id,
+                            ),
+                        )
             body = json.dumps(
                 {"command_id": command.command_id, "result": result}, sort_keys=True
             ).encode()
@@ -608,19 +616,33 @@ class Reporter:
                 )
             except (OSError, TimeoutError, urllib.error.URLError) as exc:
                 self._record_error(f"command ack transport: {exc}")
-                self._record_failure()
+                self._record_command_failure()
                 continue
             if 200 <= ack_response.status < 300:
                 with self._connect() as db:
                     db.execute(
-                        "UPDATE command_state SET state='acked' WHERE command_id=?",
-                        (command.command_id,),
+                        "UPDATE command_state SET state=? WHERE command_id=?",
+                        ("rejected_acked" if state == "rejected" else "acked", command.command_id),
                     )
                 handled += 1
             else:
                 self._record_error(f"command ack HTTP {ack_response.status}")
-                self._record_failure()
+                self._record_command_failure()
         return handled
+
+    def _record_command_failure(self) -> None:
+        failures = int(self._state("command_failure_count", "0")) + 1
+        delay = min(300, 2 ** min(failures, 8))
+        with self._connect() as db:
+            self._set_state(db, "command_failure_count", failures)
+            self._set_state(
+                db, "command_next_attempt_at", (self.clock() + timedelta(seconds=delay)).isoformat()
+            )
+
+    def _clear_command_failure(self) -> None:
+        with self._connect() as db:
+            self._set_state(db, "command_failure_count", 0)
+            self._set_state(db, "command_next_attempt_at", "")
 
     def command_states(self) -> dict[str, str]:
         with self._connect() as db:
@@ -692,4 +714,6 @@ class Reporter:
             "release_gate": "Task3A_idempotent_versioned_upstream_controls_required",
             "error_count": int(self._state("error_count", "0")),
             "last_error": self._state("last_error"),
+            "command_failure_count": int(self._state("command_failure_count", "0")),
+            "command_next_attempt_at": self._state("command_next_attempt_at"),
         }
