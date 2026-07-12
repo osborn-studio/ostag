@@ -33,6 +33,8 @@ class LarkAdapter(FeishuAdapter):
             sender_id=event.sender_id,
             text=event.text,
             mention_bot=event.mention_bot,
+            chat_type=event.chat_type,
+            destination_id=event.destination_id,
             thread_id=event.thread_id,
             raw=event.raw,
         )

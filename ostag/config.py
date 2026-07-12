@@ -118,6 +118,7 @@ class Settings:
     monitor_enabled: bool = False
     monitor_instance_id: str = "local"
     monitor_instance_secret: str = ""
+    monitor_enrollment_secret: str = ""
     monitor_central_url: str = ""
     monitor_spool_db: Path = Path("./logs/work_monitor_spool.sqlite3")
     monitor_report_interval_seconds: int = 30
@@ -223,6 +224,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_enabled=_bool("OSTAG_MONITOR_ENABLED", False),
         monitor_instance_id=os.getenv("OSTAG_MONITOR_INSTANCE_ID", "local"),
         monitor_instance_secret=os.getenv("OSTAG_MONITOR_INSTANCE_SECRET", ""),
+        monitor_enrollment_secret=os.getenv("OSTAG_MONITOR_ENROLLMENT_SECRET", ""),
         monitor_central_url=os.getenv("OSTAG_MONITOR_CENTRAL_URL", ""),
         monitor_spool_db=Path(
             os.getenv("OSTAG_MONITOR_SPOOL_DB", "./logs/work_monitor_spool.sqlite3")

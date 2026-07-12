@@ -23,6 +23,7 @@ from ostag.core.safety import check_message_length, sanitize_user_text
 from ostag.core.schemas import ContextPacket, LedgerEvent, Run, SchemaError, new_id
 from ostag.mfs.client import MFSClient
 from ostag.workflows.auto_base import AutoBaseWorkflow
+from ostag.work_monitor.service import WorkMonitorService, parse_monitor_command
 
 
 class OSTagRunner:
@@ -35,6 +36,7 @@ class OSTagRunner:
         channel_brain_store: ChannelBrainStore | None = None,
         run_ledger: RunLedger | None = None,
         approvals: ApprovalService | None = None,
+        work_monitor: WorkMonitorService | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
@@ -43,20 +45,17 @@ class OSTagRunner:
         self.channel_brain = channel_brain_store or ChannelBrainStore(config)
         self.run_ledger = run_ledger or RunLedger(config.run_ledger_path)
         executors = (
-            build_apply_executors(self.auto_base)
-            if hasattr(self.auto_base, "requirements")
-            else {}
+            build_apply_executors(self.auto_base) if hasattr(self.auto_base, "requirements") else {}
         )
         self.approvals = approvals or ApprovalService(config, self.run_ledger, executors)
         self.budget = BudgetService(config, self.run_ledger)
+        self.work_monitor = work_monitor
         # Run id of the most recent handled event; set by handle_event so CLI
         # callers can report which run their submission created.
         self.last_run_id = ""
 
     def _finish(self, run: Run, reply: str, *, ok: bool, detail: str = "") -> str:
-        self.run_ledger.record_status(
-            run.run_id, "succeeded" if ok else "failed", detail=detail
-        )
+        self.run_ledger.record_status(run.run_id, "succeeded" if ok else "failed", detail=detail)
         return reply
 
     def _build_context_packet(
@@ -107,6 +106,12 @@ class OSTagRunner:
             )
             return reply
 
+        # Monitor queries are deterministic and authorization-sensitive. Route
+        # them before generic workflows/backends and use only normalized,
+        # adapter-derived actor and destination fields.
+        if self.work_monitor is not None and parse_monitor_command(event.text) is not None:
+            return self.work_monitor.handle_event(event)
+
         run = self.run_ledger.open_run(event, executor_id=self.config.backend)
         self.last_run_id = run.run_id
         self.run_ledger.record_status(run.run_id, "running")
@@ -136,9 +141,8 @@ class OSTagRunner:
         if receipt_command is not None:
             reply = await self.approvals.handle_text_command(
                 receipt_command,
-                actor_id=event.sender_id,
+                principal=event.principal,
                 chat_id=event.chat_id,
-                platform=event.platform,
             )
             write_audit_log(
                 self.config.audit_log,
@@ -250,10 +254,7 @@ class OSTagRunner:
             try:
                 self.budget.check(event.chat_id, policy, cost, date=today)
             except SchemaError as exc:
-                reply = (
-                    "OS Tag 已暂停这个群今天的付费问答："
-                    f"{exc}。{exc.recovery_hint}"
-                )
+                reply = f"OS Tag 已暂停这个群今天的付费问答：{exc}。{exc.recovery_hint}"
                 write_audit_log(
                     self.config.audit_log,
                     event=event,

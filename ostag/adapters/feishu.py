@@ -65,14 +65,12 @@ class FeishuAdapter:
             )
             .build()
         )
-        cli = (
-            lark.ws.Client(
-                self.app_id,
-                self.app_secret,
-                event_handler=event_handler,
-                log_level=lark.LogLevel.INFO,
-                domain=self.api_base_url,
-            )
+        cli = lark.ws.Client(
+            self.app_id,
+            self.app_secret,
+            event_handler=event_handler,
+            log_level=lark.LogLevel.INFO,
+            domain=self.api_base_url,
         )
         cli.start()
 
@@ -105,11 +103,16 @@ class FeishuAdapter:
         mentions = message.get("mentions") or content.get("mentions") or []
         mention_bot = bool(mentions) or _mentions_bot(text, self.config.bot_name)
         cleaned_text = strip_mentions(text, self.config.bot_name)
+        chat_id = message.get("chat_id") or event.get("chat_id", "")
+        raw_chat_type = str(message.get("chat_type") or event.get("chat_type") or "")
+        chat_type = "private" if raw_chat_type in {"p2p", "private"} else "group"
 
         return NormalizedEvent(
             platform="feishu",
-            event_id=header.get("event_id") or event.get("event_id") or message.get("message_id", ""),
-            chat_id=message.get("chat_id") or event.get("chat_id", ""),
+            event_id=header.get("event_id")
+            or event.get("event_id")
+            or message.get("message_id", ""),
+            chat_id=chat_id,
             message_id=message.get("message_id") or event.get("message_id", ""),
             sender_id=(
                 sender.get("sender_id", {}).get("open_id")
@@ -119,6 +122,8 @@ class FeishuAdapter:
             ),
             text=cleaned_text,
             mention_bot=mention_bot,
+            chat_type=chat_type,
+            destination_id=chat_id,
             thread_id=message.get("thread_id") or message.get("root_id"),
             raw=raw_event,
         )

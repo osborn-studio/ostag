@@ -11,7 +11,9 @@ from ostag.core.permissions import (
     level_allows,
     parse_actor_permissions,
     resolve_permission,
+    resolve_principal_permission,
 )
+from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
 
 
@@ -74,3 +76,26 @@ def test_unknown_verb_is_rejected() -> None:
     with pytest.raises(SchemaError) as excinfo:
         ensure_verb_allowed("member", "admin", "detonate")
     assert excinfo.value.code == "unsupported_verb"
+
+
+def test_principal_permissions_do_not_alias_same_actor_across_platforms(tmp_path: Path) -> None:
+    config = _config(
+        tmp_path,
+        actor_permissions=("feishu:same:write",),
+        default_permission_level="read",
+    )
+
+    assert resolve_principal_permission(config, Principal("feishu", "same")) == "write"
+    assert resolve_principal_permission(config, Principal("telegram", "same")) == "read"
+
+
+@pytest.mark.parametrize("platform", ["slack", "feishu", "lark", "dingtalk", "telegram"])
+def test_remote_local_admin_name_never_escalates(tmp_path: Path, platform: str) -> None:
+    config = _config(tmp_path, default_permission_level="read")
+    assert resolve_principal_permission(config, Principal(platform, LOCAL_ADMIN_ACTOR)) == "read"
+
+
+def test_remote_permission_resolution_warns_for_legacy_bare_grant(tmp_path: Path) -> None:
+    config = _config(tmp_path, actor_permissions=("dev:write",))
+    with pytest.warns(UserWarning, match="platform:actor_id:level"):
+        assert resolve_principal_permission(config, Principal("feishu", "dev")) == "propose"

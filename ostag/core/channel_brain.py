@@ -4,8 +4,6 @@ import json
 from dataclasses import dataclass, field, fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
-
 from ostag.config import Settings
 from ostag.core.event import NormalizedEvent
 from ostag.mfs.memory import memory_root

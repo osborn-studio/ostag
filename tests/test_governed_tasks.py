@@ -72,6 +72,8 @@ def _event(text: str) -> NormalizedEvent:
         sender_id="ou_sender",
         text=text,
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={
             "event": {
                 "message": {
@@ -130,9 +132,7 @@ async def test_governed_task_creation_is_proposed_not_executed(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_approved_task_receipt_creates_task_and_backfills(tmp_path: Path) -> None:
-    config = _config(
-        tmp_path, apply_enabled=True, actor_permissions=("ou_sender:write",)
-    )
+    config = _config(tmp_path, apply_enabled=True, actor_permissions=("ou_sender:write",))
     fake_cli = FakeCLI()
     workflow = AutoBaseWorkflow(config, cli=fake_cli)
     workflow.current_run_id = "run_task2"
@@ -189,9 +189,7 @@ async def test_confirmation_policy_satisfied_by_receipt_under_governed(
         governed_writes=False,
     )
     direct_workflow = AutoBaseWorkflow(direct_config, cli=FakeCLI())
-    direct_reply = await direct_workflow.handle(
-        _event("请为 市场周报 创建飞书任务并分配给 @李四")
-    )
+    direct_reply = await direct_workflow.handle(_event("请为 市场周报 创建飞书任务并分配给 @李四"))
     assert direct_reply is not None
     assert "人工确认" in direct_reply
 

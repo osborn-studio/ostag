@@ -89,9 +89,7 @@ async def test_cli_reject_with_restricted_actor_denied(
     ledger = RunLedger(ledger_env)
     ledger.record_receipt(ActionReceipt.from_dict(payload), chat_id="chat1")
 
-    exit_code = await main_async(
-        ["reject", payload["action_id"], "--actor", "viewer", "--json"]
-    )
+    exit_code = await main_async(["reject", payload["action_id"], "--actor", "viewer", "--json"])
 
     assert exit_code == 1
     error = json.loads(capsys.readouterr().out)["error"]
@@ -113,6 +111,8 @@ async def test_cli_continue_returns_run_snapshot(
             sender_id="U1",
             text="do things",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
 
@@ -130,9 +130,7 @@ async def test_cli_propose_invalid_json_error(
     bad_file = tmp_path / "bad.json"
     bad_file.write_text("{not json", encoding="utf-8")
 
-    exit_code = await main_async(
-        ["receipts", "propose", "--file", str(bad_file), "--json"]
-    )
+    exit_code = await main_async(["receipts", "propose", "--file", str(bad_file), "--json"])
 
     assert exit_code == 1
     error = json.loads(capsys.readouterr().out)["error"]

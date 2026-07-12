@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -19,7 +18,11 @@ def _config(tmp_path: Path, **overrides: object):
     return load_settings(
         None,
         audit_log=tmp_path / "audit.log",
-        actor_permissions=("boss:admin", "dev:write", "member:propose", "viewer:read"),
+        actor_permissions=(
+            "boss:admin", "dev:write", "member:propose", "viewer:read",
+            "feishu:boss:admin", "feishu:dev:write", "feishu:member:propose",
+            "feishu:viewer:read",
+        ),
         **overrides,
     )
 
@@ -124,11 +127,7 @@ async def test_permission_denied_is_ledgered_as_security_event(tmp_path: Path) -
         )
 
     assert excinfo.value.code == "permission_denied"
-    security = [
-        record
-        for record in ledger._read_all()
-        if record["event_type"] == "security_event"
-    ]
+    security = [record for record in ledger._read_all() if record["event_type"] == "security_event"]
     assert security
     assert "viewer" in security[0]["payload"]["reason"]
 
@@ -251,6 +250,8 @@ async def test_status_and_continue_return_run_snapshot(tmp_path: Path) -> None:
             sender_id="dev",
             text="做点什么",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
     ledger.record_status(run.run_id, "succeeded")
@@ -292,6 +293,8 @@ async def test_runner_routes_chat_commands_to_approvals(tmp_path: Path) -> None:
         sender_id="dev",
         text="approve 1",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
     reply = await runner.handle_event(event)
 
@@ -316,6 +319,8 @@ async def test_runner_chat_command_permission_denied_replies_hint(tmp_path: Path
         sender_id="viewer",
         text=f"apply {receipt.action_id}",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
     reply = await runner.handle_event(event)
 
@@ -338,6 +343,8 @@ async def test_runner_normal_chat_still_reaches_backend(tmp_path: Path) -> None:
         sender_id="dev",
         text="请总结一下今天的讨论",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
     reply = await runner.handle_event(event)
 

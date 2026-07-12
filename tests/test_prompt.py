@@ -13,6 +13,8 @@ def test_prompt_contract_contains_runtime_fields() -> None:
         sender_id="sender",
         text="raw",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         thread_id="thread",
     )
 
@@ -40,6 +42,8 @@ def test_prompt_contract_uses_explicit_empty_mfs_placeholder() -> None:
         sender_id="sender",
         text="raw",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     prompt = build_chat_prompt(PromptContext(event=event, user_text="hello", mfs_context=""))

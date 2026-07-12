@@ -26,6 +26,9 @@ from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 from ostag.workflows.auto_base import AutoBaseWorkflow
 from ostag.work_monitor.reporter import Reporter
+from ostag.work_monitor.identity import IdentityStore
+from ostag.work_monitor.service import WorkMonitorService
+from ostag.work_monitor.store import MonitorStore
 from ostag.work_monitor.executor import (
     CommandExecutor,
     OsstackCliControlPort,
@@ -332,7 +335,15 @@ async def main_async(argv: list[str] | None = None) -> int:
         print(format_checks(checks))
         return doctor_exit_code(checks)
 
-    runner = OSTagRunner(config)
+    work_monitor = None
+    if config.monitor_enabled:
+        monitor_store = MonitorStore(config.monitor_spool_db)
+        identities = IdentityStore(
+            config.monitor_spool_db,
+            enrollment_secret=config.monitor_enrollment_secret,
+        )
+        work_monitor = WorkMonitorService(monitor_store, identities)
+    runner = OSTagRunner(config, work_monitor=work_monitor)
     adapter = create_adapter(config.platform, config)
 
     if config.dry_run:
@@ -555,6 +566,8 @@ async def run_submit_command(args: argparse.Namespace) -> int:
         sender_id=args.actor,
         text=args.text,
         mention_bot=True,
+        chat_type="private",
+        destination_id=args.chat,
         thread_id=args.thread,
     )
     try:

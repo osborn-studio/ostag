@@ -16,7 +16,13 @@ from typing import Any, Protocol, runtime_checkable
 from ostag.config import Settings
 from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy
 from ostag.core.followups import FollowUpService
-from ostag.core.permissions import effective_flag, ensure_verb_allowed, resolve_permission
+from ostag.core.identity import Principal
+from ostag.core.permissions import (
+    effective_flag,
+    ensure_verb_allowed,
+    resolve_permission,
+    resolve_principal_permission,
+)
 from ostag.core.receipts import (
     ReceiptCommand,
     is_stale,
@@ -153,15 +159,25 @@ class ApprovalService:
         self,
         command: ReceiptCommand,
         *,
-        actor_id: str,
+        principal: Principal | None = None,
+        actor_id: str = "",
         chat_id: str | None = None,
         platform: str = "",
     ) -> dict[str, Any]:
         """Execute a receipt verb. Raises SchemaError on any violation."""
+        if principal is not None:
+            actor_id = principal.actor_id
+            platform = principal.platform
         policy = self._channel_policy(platform, chat_id)
-        level = resolve_permission(
-            self.config, actor_id, channel_grants=policy.actor_permissions if policy else ()
-        )
+        if principal is not None:
+            level = resolve_principal_permission(
+                self.config, principal, channel_grants=policy.actor_permissions if policy else ()
+            )
+        else:
+            # Compatibility for the local CLI; adapter-driven production paths pass Principal.
+            level = resolve_permission(
+                self.config, actor_id, channel_grants=policy.actor_permissions if policy else ()
+            )
         try:
             ensure_verb_allowed(actor_id, level, command.verb)
         except SchemaError as exc:
@@ -318,14 +334,15 @@ class ApprovalService:
         self,
         command: ReceiptCommand,
         *,
-        actor_id: str,
+        principal: Principal | None = None,
+        actor_id: str = "",
         chat_id: str,
         platform: str = "",
     ) -> str:
         """Chat-facing wrapper: always returns a reply string."""
         try:
             result = await self.execute(
-                command, actor_id=actor_id, chat_id=chat_id, platform=platform
+                command, principal=principal, actor_id=actor_id, chat_id=chat_id, platform=platform
             )
         except SchemaError as exc:
             return f"OS Tag 无法执行 {command.verb}：{exc}。{exc.recovery_hint}"

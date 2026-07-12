@@ -98,6 +98,8 @@ class DingTalkAdapter:
             sender_id=sender_id,
             text=cleaned_text,
             mention_bot=mention_bot,
+            chat_type="private" if str(data.get("conversationType")) == "1" else "group",
+            destination_id=chat_id,
             thread_id=str(data.get("conversationId") or ""),
             raw=raw_event,
         )
@@ -252,13 +254,17 @@ def _parse_json_string(value: str) -> Any:
 
 
 def _is_direct_chat(data: dict[str, Any]) -> bool:
-    value = str(
-        data.get("conversationType")
-        or data.get("conversation_type")
-        or data.get("chatType")
-        or data.get("chat_type")
-        or ""
-    ).strip().lower()
+    value = (
+        str(
+            data.get("conversationType")
+            or data.get("conversation_type")
+            or data.get("chatType")
+            or data.get("chat_type")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     return value in {"1", "single", "single_chat", "private", "private_chat", "p2p"}
 
 

@@ -115,9 +115,7 @@ def test_ambient_monitor_rate_limits_daily_reminders(tmp_path: Path) -> None:
         "feishu", "oc_demo", [requirement], today=date(2026, 6, 30)
     )
     assert (
-        monitor.evaluate_requirements(
-            "feishu", "oc_demo", [requirement], today=date(2026, 6, 30)
-        )
+        monitor.evaluate_requirements("feishu", "oc_demo", [requirement], today=date(2026, 6, 30))
         == []
     )
 
@@ -134,6 +132,8 @@ async def test_runner_reports_ambient_status(tmp_path: Path, monkeypatch) -> Non
         sender_id="ou_demo",
         text="主动巡检状态",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)
@@ -172,6 +172,8 @@ async def test_runner_reports_ambient_scheduler_status(tmp_path: Path, monkeypat
         sender_id="ou_demo",
         text="主动巡检状态",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)
@@ -351,8 +353,8 @@ def test_format_morning_daily_digest_groups_due_tasks_and_mentions_manager() -> 
         manager_ids=("ou_manager",),
     )
 
-    assert "<at user_id=\"ou_manager\">管理者</at>" in text
-    assert "<at user_id=\"ou_owner\">葛德彬</at>" in text
+    assert '<at user_id="ou_manager">管理者</at>' in text
+    assert '<at user_id="ou_owner">葛德彬</at>' in text
     assert "读取和展示QD资产分配值" in text
     assert "证券字段中可自定义新增字段和内容" not in text
     assert "今日重点任务" in text
@@ -391,8 +393,8 @@ def test_format_evening_daily_digest_summarizes_done_and_open_tasks() -> None:
     assert "仍未完成" in text
     assert "读取和展示QD资产分配值" in text
     assert "证券字段中可自定义新增字段和内容" in text
-    assert "<at user_id=\"ou_owner\">葛德彬</at>" in text
-    assert "<at user_id=\"ou_left\">左士文</at>" in text
+    assert '<at user_id="ou_owner">葛德彬</at>' in text
+    assert '<at user_id="ou_left">左士文</at>' in text
 
 
 async def test_ambient_scheduler_sends_proposal_for_enabled_channel(
@@ -464,16 +466,14 @@ async def test_ambient_scheduler_sends_proposal_for_enabled_channel(
                 "需求持续时长",
             ),
             50,
-        )
+        ),
     ]
     assert adapter.sent == [
         ("oc_demo", "主动巡检建议：需求「交易盯盘」还没有负责人，建议指定 owner。")
     ]
 
 
-async def test_ambient_scheduler_projects_only_existing_fields(
-    tmp_path: Path, monkeypatch
-) -> None:
+async def test_ambient_scheduler_projects_only_existing_fields(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OSTAG_AMBIENT_ENABLED", "true")
     monkeypatch.setenv("OSTAG_AMBIENT_CHAT_IDS", "oc_demo")
     config = load_settings(
@@ -521,9 +521,7 @@ async def test_ambient_scheduler_projects_only_existing_fields(
     )
 
 
-async def test_ambient_scheduler_projects_dingtalk_field_names(
-    tmp_path: Path, monkeypatch
-) -> None:
+async def test_ambient_scheduler_projects_dingtalk_field_names(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OSTAG_AMBIENT_ENABLED", "true")
     monkeypatch.setenv("OSTAG_AMBIENT_CHAT_IDS", "cid_demo")
     config = load_settings(
@@ -641,7 +639,7 @@ async def test_ambient_scheduler_sends_morning_digest_once_per_day(
     assert second.sent == 0
     assert len(adapter.sent) == 1
     assert "今日重点任务" in adapter.sent[0][1]
-    assert "<at user_id=\"ou_manager\">管理者</at>" in adapter.sent[0][1]
+    assert '<at user_id="ou_manager">管理者</at>' in adapter.sent[0][1]
 
 
 async def test_daily_digest_mode_suppresses_continuous_proposals(

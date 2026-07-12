@@ -1074,8 +1074,6 @@ def build_rows_for_fields(
 
     selected_fields: list[FieldInfo] = []
     rows: list[list[Any]] = []
-    field_names = [field.name for field in writable]
-
     for field in writable:
         if field_value_for_record(
             field,

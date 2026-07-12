@@ -300,9 +300,7 @@ class AmbientScheduler:
                 self._audit(chat_id, "", status="error", error=f"{type(exc).__name__}: {exc}")
         return AmbientRunResult(checked=checked, sent=sent, skipped=skipped, errors=errors)
 
-    def _due_daily_digest(
-        self, chat_id: str, snapshots: list[RequirementSnapshot]
-    ) -> str | None:
+    def _due_daily_digest(self, chat_id: str, snapshots: list[RequirementSnapshot]) -> str | None:
         kind = self._digest_kind_due()
         if not kind:
             return None
@@ -367,6 +365,8 @@ class AmbientScheduler:
                     sender_id="ambient_scheduler",
                     text="ambient scheduled scan",
                     mention_bot=True,
+                    chat_type="group",
+                    destination_id=chat_id,
                 ),
                 executor_id="ambient",
             )
@@ -413,6 +413,8 @@ class AmbientScheduler:
             sender_id="ambient_scheduler",
             text="ambient scheduled scan",
             mention_bot=False,
+            chat_type="group",
+            destination_id=chat_id,
         )
         write_audit_log(
             self.config.audit_log,
@@ -434,8 +436,12 @@ def snapshots_from_records(data: dict[str, Any]) -> list[RequirementSnapshot]:
             RequirementSnapshot(
                 record_id=record.record_id,
                 title=_first_text(record.fields, ("需求名称", "需求描述", "标题", "Name")),
-                owner=_first_text(record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")),
-                owner_ids=_user_ids(record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")),
+                owner=_first_text(
+                    record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")
+                ),
+                owner_ids=_user_ids(
+                    record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")
+                ),
                 status=_first_text(record.fields, ("需求状态", "状态", "Status")),
                 priority=_first_text(record.fields, ("优先级", "Priority", "priority")),
                 due_date=_first_date(
@@ -463,11 +469,7 @@ def format_weekly_requirement_review(
         for item in requirements
         if _is_done(item) and item.due_date is not None and week_start <= item.due_date <= today
     ]
-    overdue = [
-        item
-        for item in open_tasks
-        if item.due_date is not None and item.due_date < today
-    ]
+    overdue = [item for item in open_tasks if item.due_date is not None and item.due_date < today]
     unowned = [item for item in open_tasks if not item.owner]
     missing_status = [item for item in requirements if not item.status]
     stale = [item for item in open_tasks if item.days_stale >= stale_days]
@@ -508,14 +510,8 @@ def format_daily_digest(
     manager_ids: tuple[str, ...] = (),
 ) -> str:
     open_tasks = [item for item in requirements if not _is_done(item)]
-    due_tasks = [
-        item
-        for item in open_tasks
-        if item.due_date is None or item.due_date <= today
-    ]
-    completed_today = [
-        item for item in requirements if _is_done(item) and item.due_date == today
-    ]
+    due_tasks = [item for item in open_tasks if item.due_date is None or item.due_date <= today]
+    completed_today = [item for item in requirements if _is_done(item) and item.due_date == today]
     people_to_mention = _ordered_people(due_tasks + completed_today, manager_ids)
     mentions = " ".join(_mention(user_id, name) for user_id, name in people_to_mention)
 

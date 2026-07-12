@@ -62,6 +62,8 @@ def test_requirement_management_command_uses_default_base_and_real_mention(tmp_p
         sender_id="ou_sender",
         text="请把 交易-001 分配给 @张三，状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={
             "event": {
                 "message": {
@@ -113,6 +115,8 @@ def test_requirement_management_command_prefers_channel_brain_policy(
         sender_id="ou_sender",
         text="请把 交易-001 状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={"event": {"message": {"mentions": [{"id": "ou_bot", "name": "OS Tag"}]}}},
     )
 
@@ -327,7 +331,9 @@ def test_build_rows_for_fields_coerces_select_options_for_existing_requirement_b
     }
 
 
-def test_extract_requirement_table_records_supports_wrapped_description_and_need_nice_priority() -> None:
+def test_extract_requirement_table_records_supports_wrapped_description_and_need_nice_priority() -> (
+    None
+):
     records = extract_docx_records(
         """
         二、需求清单（逐项填写）
@@ -410,10 +416,7 @@ def test_build_rows_for_fields_writes_requirement_detail_context() -> None:
 
     assert payload["fields"] == ["需求描述", "需求详细描述（可附文档）"]
     assert payload["rows"][0][1] == (
-        "需求编号：交易-001\n"
-        "需求描述：交易持仓表\n"
-        "当前做法 / 痛点：人工做表\n"
-        "期望结果：自动化处理"
+        "需求编号：交易-001\n需求描述：交易持仓表\n当前做法 / 痛点：人工做表\n期望结果：自动化处理"
     )
 
 
@@ -457,7 +460,9 @@ async def test_runner_uses_auto_base_workflow_before_backend(tmp_path: Path) -> 
             raise AssertionError("backend should not run")
 
     config = load_settings(None, audit_log=tmp_path / "audit.log")
-    runner = OSTagRunner(config, backend=FailingBackend(), auto_base_workflow=FakeAutoBaseWorkflow())
+    runner = OSTagRunner(
+        config, backend=FailingBackend(), auto_base_workflow=FakeAutoBaseWorkflow()
+    )
     event = NormalizedEvent(
         platform="feishu",
         event_id="evt",
@@ -466,6 +471,8 @@ async def test_runner_uses_auto_base_workflow_before_backend(tmp_path: Path) -> 
         sender_id="ou_demo",
         text="请把docx里的需求填入表格",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     assert await runner.handle_event(event) == "自动入表完成"
@@ -486,6 +493,8 @@ async def test_auto_base_workflow_answers_status_without_cli(tmp_path: Path) -> 
         sender_id="ou_demo",
         text="自动入表能力是否已经上线？",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await workflow.handle(event)
@@ -573,6 +582,8 @@ async def test_auto_base_workflow_returns_weekly_requirement_review(tmp_path: Pa
         sender_id="ou_sender",
         text="看一下需求表里有哪些逾期或没人负责的需求，做一个本周的周报回顾",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await workflow.handle(event)
@@ -646,6 +657,8 @@ async def test_auto_base_workflow_updates_requirement_owner_and_status(tmp_path:
         sender_id="ou_sender",
         text="请把 交易盯盘 分配给 @张三，状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={
             "event": {
                 "message": {
@@ -663,7 +676,9 @@ async def test_auto_base_workflow_updates_requirement_owner_and_status(tmp_path:
     assert reply is not None
     assert "需求运营完成" in reply
     assert "阶段：已接收请求 → 已加载频道策略 → 已读取需求表结构 → 已定位需求" in reply
-    update_call = next(call for call in fake_cli.calls if call[:2] == ("base", "+record-batch-update"))
+    update_call = next(
+        call for call in fake_cli.calls if call[:2] == ("base", "+record-batch-update")
+    )
     payload = json.loads(update_call[update_call.index("--json") + 1])
     assert payload == {
         "record_id_list": ["rec_001"],
@@ -682,7 +697,10 @@ async def test_auto_base_workflow_creates_lark_task_for_requirement(tmp_path: Pa
         async def json(self, *args):
             self.calls.append(args)
             if args[:2] == ("base", "+table-list"):
-                return {"ok": True, "data": {"tables": [{"table_id": "tblDefault", "name": "需求收集管理"}]}}
+                return {
+                    "ok": True,
+                    "data": {"tables": [{"table_id": "tblDefault", "name": "需求收集管理"}]},
+                }
             if args[:2] == ("base", "+field-list"):
                 return {
                     "ok": True,
@@ -727,6 +745,8 @@ async def test_auto_base_workflow_creates_lark_task_for_requirement(tmp_path: Pa
         sender_id="ou_sender",
         text="请为 市场周报 创建飞书任务并分配给 @李四",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={
             "event": {
                 "message": {
@@ -783,6 +803,8 @@ async def test_auto_base_workflow_reports_stage_on_missing_requirement(tmp_path:
         sender_id="ou_sender",
         text="请把 不存在的需求 状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await workflow.handle(event)
@@ -802,19 +824,31 @@ async def test_auto_base_workflow_blocks_disallowed_writable_field(
     class FakeCLI:
         async def json(self, *args):
             if args[:2] == ("base", "+table-list"):
-                return {"ok": True, "data": {"tables": [{"table_id": "tblDefault", "name": "需求表"}]}}
+                return {
+                    "ok": True,
+                    "data": {"tables": [{"table_id": "tblDefault", "name": "需求表"}]},
+                }
             if args[:2] == ("base", "+field-list"):
                 return {
                     "ok": True,
                     "data": {
                         "fields": [
                             {"name": "需求描述", "type": "text"},
-                            {"name": "需求状态", "type": "select", "options": [{"name": "开发交付中"}]},
+                            {
+                                "name": "需求状态",
+                                "type": "select",
+                                "options": [{"name": "开发交付中"}],
+                            },
                         ]
                     },
                 }
             if args[:2] == ("base", "+record-search"):
-                return {"ok": True, "data": {"records": [{"record_id": "rec1", "fields": {"需求描述": "交易盯盘"}}]}}
+                return {
+                    "ok": True,
+                    "data": {
+                        "records": [{"record_id": "rec1", "fields": {"需求描述": "交易盯盘"}}]
+                    },
+                }
             if args[:2] == ("base", "+record-batch-update"):
                 raise AssertionError("policy should block before write")
             raise AssertionError(f"unexpected lark-cli call: {args}")
@@ -845,6 +879,8 @@ async def test_auto_base_workflow_blocks_disallowed_writable_field(
         sender_id="ou_sender",
         text="请把 交易盯盘 状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await workflow.handle(event)
@@ -886,6 +922,8 @@ async def test_auto_base_workflow_blocks_task_creation_by_policy(
         sender_id="ou_sender",
         text="请为 交易盯盘 创建飞书任务",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await workflow.handle(event)
@@ -929,6 +967,8 @@ async def test_auto_base_workflow_blocks_when_daily_budget_exhausted(
         sender_id="ou_sender",
         text="请把 交易盯盘 状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await workflow.handle(event)
@@ -955,6 +995,8 @@ async def test_slack_event_can_trigger_governed_requirement_status_update(
         sender_id="U123",
         text="请把 交易盯盘 状态改为 开发交付中",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         thread_id="1710000000.000100",
         raw={"type": "app_mention", "channel": "C123"},
     )
@@ -1011,6 +1053,8 @@ async def test_auto_base_workflow_loads_context_across_history_pages(tmp_path: P
         sender_id="ou_demo",
         text="请把 docx 写入表格",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     context = await workflow._load_context(event)
@@ -1054,11 +1098,10 @@ async def test_auto_base_workflow_prefers_current_event_base_over_history_reply(
         chat_id="oc_demo",
         message_id="om_demo",
         sender_id="ou_demo",
-        text=(
-            "请把 docx 写入"
-            "https://tenant.feishu.cn/app/CurrentTargetBase?pageId=pgeDemo"
-        ),
+        text=("请把 docx 写入https://tenant.feishu.cn/app/CurrentTargetBase?pageId=pgeDemo"),
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     context = await workflow._load_context(event)
@@ -1114,9 +1157,7 @@ async def test_auto_base_workflow_rejects_advanced_app_when_table_create_is_inva
             if args[:2] == ("base", "+table-list"):
                 return {"ok": True, "data": {"tables": []}}
             if args[:2] == ("base", "+table-create"):
-                raise AutoBaseError(
-                    '{"code":800010808,"message":"The request token is invalid"}'
-                )
+                raise AutoBaseError('{"code":800010808,"message":"The request token is invalid"}')
             if args[:2] == ("base", "+base-create"):
                 raise AssertionError("should not create a companion Base")
             raise AssertionError(f"unexpected lark-cli call: {args}")

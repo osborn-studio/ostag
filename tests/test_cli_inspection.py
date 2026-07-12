@@ -23,6 +23,8 @@ def _seed_run(tmp_path: Path) -> tuple[str, Path]:
             sender_id="U1",
             text="ship the report",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         ),
         executor_id="mock",
     )

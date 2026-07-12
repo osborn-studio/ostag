@@ -29,6 +29,8 @@ async def test_feishu_raw_event_normalizes_to_core_event() -> None:
     assert event.chat_id == "oc_demo_chat"
     assert event.message_id == "om_demo_message"
     assert event.sender_id == "ou_demo_sender"
+    assert event.chat_type == "group"
+    assert event.destination_id == "oc_demo_chat"
     assert event.mention_bot is True
     assert "下一步" in event.text
 
@@ -93,6 +95,8 @@ async def test_slack_app_mention_normalizes_to_core_event() -> None:
     assert event.chat_id == "C123456"
     assert event.message_id == "1710000000.000100"
     assert event.sender_id == "U123456"
+    assert event.chat_type == "group"
+    assert event.destination_id == "C123456"
     assert event.mention_bot is True
     assert event.thread_id == "1710000000.000100"
     assert event.text == "Summarize the launch blockers and next action."
@@ -110,6 +114,8 @@ async def test_dingtalk_robot_message_normalizes_to_core_event() -> None:
     assert event.chat_id == "cid_demo_conversation"
     assert event.message_id == "msg_demo_message"
     assert event.sender_id == "staff_demo_sender"
+    assert event.chat_type == "group"
+    assert event.destination_id == "cid_demo_conversation"
     assert event.mention_bot is True
     assert event.text == "请总结这个项目下一步应该做什么"
 
@@ -128,6 +134,7 @@ async def test_dingtalk_direct_message_normalizes_nested_json_text() -> None:
     event = await DingTalkAdapter(config).normalize_event(raw)
 
     assert event.platform == "dingtalk"
+    assert event.chat_type == "private"
     assert event.chat_id == "cid_direct"
     assert event.message_id == "msg_direct"
     assert event.sender_id == "staff_demo_sender"
@@ -267,6 +274,8 @@ async def test_feishu_reply_includes_required_message_type(monkeypatch, tmp_path
         sender_id="ou_demo",
         text="hello",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     await adapter.reply(event, "live validation ok")
@@ -297,6 +306,8 @@ async def test_dingtalk_reply_uses_session_webhook(monkeypatch, tmp_path: Path) 
         sender_id="staff",
         text="hello",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={"sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=demo"},
     )
 
@@ -310,9 +321,7 @@ async def test_dingtalk_reply_uses_session_webhook(monkeypatch, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_dingtalk_proactive_send_falls_back_to_dws_bot(
-    monkeypatch, tmp_path: Path
-) -> None:
+async def test_dingtalk_proactive_send_falls_back_to_dws_bot(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 
     class FakeProcess:

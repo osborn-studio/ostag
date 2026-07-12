@@ -25,6 +25,8 @@ async def test_mock_backend_returns_stable_reply(tmp_path: Path) -> None:
         sender_id="sender",
         text="请总结项目下一步",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await OSTagRunner(config).handle_event(event)
@@ -114,6 +116,8 @@ async def test_backend_exception_is_handled_and_audited(tmp_path: Path) -> None:
         sender_id="sender",
         text="hello",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await OSTagRunner(config, backend=SlowBackend()).handle_event(event)
@@ -139,6 +143,8 @@ async def test_runner_remembers_channel_fact_without_backend(tmp_path: Path, mon
         sender_id="ou_demo",
         text="记住：张三负责交易相关需求",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)
@@ -164,6 +170,8 @@ async def test_runner_reports_channel_brain_without_backend(tmp_path: Path, monk
         sender_id="ou_demo",
         text="记住：张三负责交易相关需求",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
     status_event = NormalizedEvent(
         platform="feishu",
@@ -173,6 +181,8 @@ async def test_runner_reports_channel_brain_without_backend(tmp_path: Path, monk
         sender_id="ou_demo",
         text="这个群你记住了什么",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     await runner.handle_event(remember_event)
@@ -197,6 +207,8 @@ async def test_runner_supports_slack_channel_brain(tmp_path: Path, monkeypatch) 
             sender_id="U123",
             text="记住：这个 Slack 频道用于产品需求评审",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
     status = await runner.handle_event(
@@ -208,6 +220,8 @@ async def test_runner_supports_slack_channel_brain(tmp_path: Path, monkeypatch) 
             sender_id="U123",
             text="这个群你记住了什么",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
 
@@ -226,6 +240,8 @@ async def test_backend_error_reply_does_not_expose_private_cli_output(tmp_path: 
         sender_id="sender",
         text="hello",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await OSTagRunner(config, backend=FailingCLIBackend()).handle_event(event)

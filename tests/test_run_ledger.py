@@ -21,6 +21,8 @@ def _event(text: str = "帮我总结一下") -> NormalizedEvent:
         sender_id="sender1",
         text=text,
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         thread_id="thread1",
     )
 
@@ -169,6 +171,8 @@ async def test_runner_ignores_non_mention_without_creating_run(tmp_path: Path) -
         sender_id="sender1",
         text="普通闲聊",
         mention_bot=False,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)
