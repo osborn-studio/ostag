@@ -18,10 +18,15 @@ trap 'rm -rf "$scan_root" "$matches" "$json_tmp" "$md_tmp"' EXIT
 if [[ -f release/ostag-release-bundle.tar.gz ]]; then
   mkdir -p "$scan_root/bundle" "$scan_root/current"
   tar -xzf release/ostag-release-bundle.tar.gz -C "$scan_root/bundle"
-  cp -R release docs README.md .env.example "$scan_root/current/"
+  cp -R ostag scripts deploy release docs README.md .env.example "$scan_root/current/"
 else
   mkdir -p "$scan_root/source"
-  cp -R release docs README.md .env.example "$scan_root/source/" 2>/dev/null || true
+  cp -R ostag scripts deploy release docs README.md .env.example "$scan_root/source/" \
+    2>/dev/null || true
+fi
+
+if [[ -n "${OSTAG_SECRET_HYGIENE_EXTRA_SCAN_ROOT:-}" ]]; then
+  cp -R "$OSTAG_SECRET_HYGIENE_EXTRA_SCAN_ROOT" "$scan_root/fixture-input"
 fi
 
 # Never scan a previous report: failure details are transient and reports contain
@@ -30,7 +35,7 @@ find "$scan_root" -type f \( -name 'secret-hygiene.json' -o -name 'secret-hygien
 
 set +e
 rg -n --hidden --glob '!*.tar.gz' --glob '!*.sha256' \
-  '([A-Z0-9_]*(SECRET|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_/-]{8,})|(app_secret[[:space:]]*[:=][[:space:]]*[A-Za-z0-9_/-]{8,})|(sk-[A-Za-z0-9_-]{16,})' \
+  '([A-Z0-9_]*(SECRET|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*[[:space:]]*([=][[:space:]]*|:[[:space:]]+)[A-Za-z0-9_/-]{8,})|(app_secret[[:space:]]*([=][[:space:]]*|:[[:space:]]+)[A-Za-z0-9_/-]{8,})|(sk-[A-Za-z0-9_-]{16,})|(https://alidocs\.dingtalk\.com/i/nodes/[A-Za-z0-9_-]{24,})' \
   "$scan_root" > "$matches"
 code=$?
 set -e
@@ -75,7 +80,7 @@ PY
     echo "No secret-like values were found in the release bundle or current formal artifacts."
   else
     echo "Potential secret-like values were found. Raw matches are intentionally not persisted."
-    echo "Findings digest (SHA-256): `$findings_digest`"
+    echo "Findings digest (SHA-256): \`$findings_digest\`"
   fi
 } > "$md_tmp"
 

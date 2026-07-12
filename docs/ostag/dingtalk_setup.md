@@ -97,7 +97,7 @@ configured DingTalk AI Table:
 ```text
 Base: OS Tag 需求管理
 Table: 需求收集管理
-URL: https://alidocs.dingtalk.com/i/nodes/vNG4YZ7JnPmQKkapTN6DDzzeW2LD0oRE?iframeQuery=sheetId%3DEMSgbTd
+URL: https://alidocs.dingtalk.com/i/nodes/<document_token>?iframeQuery=sheetId%3DEMSgbTd
 Source parity target: 飞书「🛠️ 需求收集与管理 底表」/「需求收集管理」
 ```
 
