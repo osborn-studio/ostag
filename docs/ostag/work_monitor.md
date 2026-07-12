@@ -6,8 +6,11 @@ into one SQLite board. Feishu and Telegram render that projection; remote contro
 actions remain receipt-governed and are executed only by the originating reporter.
 
 Production uses one Docker container and one uvicorn worker on Tencent CVM or
-Lighthouse. `/var/lib/ostag` is a host directory, not an EdgeOne store or an
-anonymous Docker volume. One process owns the scheduler and notification outbox.
+Lighthouse. Local/default Compose uses the declared `work-monitor-data` named
+volume, whose initial ownership comes from image UID 10001. Production adds
+`docker-compose.production.yml` to replace it with a pre-created, UID 10001-owned
+host directory at `/var/lib/ostag`. Neither mode stores SQLite in EdgeOne. One
+process owns the scheduler and notification outbox.
 
 Required protected environment values include `OSTAG_MONITOR_ADMIN_TOKEN`,
 `OSTAG_MONITOR_INSTANCE_SECRETS`, and platform credentials. Keep the env file

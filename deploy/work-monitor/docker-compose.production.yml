@@ -1,0 +1,6 @@
+services:
+  work-monitor:
+    volumes:
+      - type: bind
+        source: ${OSTAG_MONITOR_DATA_DIR:-/var/lib/ostag}
+        target: /var/lib/ostag

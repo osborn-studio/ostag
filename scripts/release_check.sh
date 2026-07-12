@@ -23,6 +23,12 @@ uv run pytest
 scripts/work_monitor_smoke.sh
 scripts/secret_hygiene_check.sh
 docker compose -f deploy/work-monitor/docker-compose.yml config >/dev/null
+OSTAG_MONITOR_DATA_DIR=/var/lib/ostag docker compose \
+  -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml config >/dev/null
+if [[ "${OSTAG_RUN_CONTAINER_SMOKE:-0}" == "1" ]]; then
+  scripts/work_monitor_container_smoke.sh
+fi
 uv run python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json --doctor
 uv run python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
 uv run python -m ostag.main --platform lark --dry-run --event examples/lark_event.json

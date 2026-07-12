@@ -186,8 +186,11 @@ docker login <registry>
 docker pull <registry>/ostag-work-monitor@sha256:<approved-digest>
 cd /opt/ostag/source
 export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<approved-digest>
-docker compose -f deploy/work-monitor/docker-compose.yml config
-docker compose -f deploy/work-monitor/docker-compose.yml up -d --no-build
+export OSTAG_MONITOR_DATA_DIR=/var/lib/ostag
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml config
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml up -d --no-build
 curl --fail --silent http://127.0.0.1:8000/healthz
 ```
 
@@ -214,17 +217,31 @@ without changing the database first; if the new release migrated incompatibly,
 stop the service and restore to a new path, then atomically select it:
 
 ```bash
-docker compose -f deploy/work-monitor/docker-compose.yml down
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml down
 docker pull <registry>/ostag-work-monitor@sha256:<previous-digest>
 export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<previous-digest>
 sudo scripts/backup_work_monitor.sh restore \
   /var/backups/ostag/<pre-upgrade>.sqlite3 /var/lib/ostag/work_monitor.restore.sqlite3
 sudo mv /var/lib/ostag/work_monitor.sqlite3 /var/lib/ostag/work_monitor.failed.sqlite3
 sudo mv /var/lib/ostag/work_monitor.restore.sqlite3 /var/lib/ostag/work_monitor.sqlite3
-docker compose -f deploy/work-monitor/docker-compose.yml up -d --no-build
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml up -d --no-build
 ```
 
 These commands are operator instructions, not evidence they were run. Record
 actual external and mobile validation in
 `release/work-monitor-live-validation-template.md`; it intentionally remains
 incomplete until Tencent, EdgeOne, Feishu, Telegram, and device state is inspected.
+
+For local verification, default Compose intentionally uses a named volume so the
+non-root container can initialize SQLite without host ownership mismatch:
+
+```bash
+docker compose -f deploy/work-monitor/docker-compose.yml up -d --build
+docker compose -f deploy/work-monitor/docker-compose.yml down  # volume retained
+```
+
+Run `scripts/work_monitor_container_smoke.sh` to build, verify Feishu/Crypto
+imports, health, SQLite write, restart, and persistence. It retains its unique
+test volume unless `OSTAG_CONTAINER_SMOKE_CLEANUP_VOLUME=1` is explicitly set.
