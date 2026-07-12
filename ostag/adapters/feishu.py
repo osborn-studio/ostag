@@ -94,12 +94,15 @@ class FeishuAdapter:
             )
             .build()
         )
+        log_level = getattr(lark.LogLevel, "ERROR", None)
+        if log_level is None:
+            raise RuntimeError("Feishu SDK must provide ERROR log level; refusing ticket-bearing logs")
         cli = lark.ws.Client(
             self.app_id,
             self.app_secret,
             event_handler=event_handler,
             # INFO logs include the short-lived WebSocket endpoint ticket.
-            log_level=getattr(lark.LogLevel, "ERROR", lark.LogLevel.INFO),
+            log_level=log_level,
             domain=self.api_base_url,
         )
         self._client = cli

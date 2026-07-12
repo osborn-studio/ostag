@@ -2,16 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
 from fastapi import APIRouter, FastAPI
+from fastapi.testclient import TestClient
 
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.config import load_settings
 from ostag.work_monitor.feishu_cards import render_feishu_card
+from ostag.work_monitor.identity import IdentityStore
+from ostag.work_monitor.projection import Projector
 from ostag.work_monitor.rendering import MobileBoardView, TaskDetailView
-from ostag.work_monitor.server import SecurityContract, register_feishu_card_router
+from ostag.work_monitor.server import (
+    SecurityContract,
+    ServerAuth,
+    create_app,
+    register_feishu_card_router,
+)
+from ostag.work_monitor.service import WorkMonitorService
+from ostag.work_monitor.store import MonitorStore
 
 
 def test_feishu_cards_are_vertical_mobile_high_contrast() -> None:
@@ -44,6 +56,59 @@ def test_feishu_route_is_absent_until_strict_registration() -> None:
         register_feishu_card_router(
             FastAPI(), extra, security=SecurityContract("verified_platform", lambda: None)
         )
+
+
+def test_production_composition_registers_cards_only_when_fully_configured(tmp_path: Path) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    service = WorkMonitorService(store, IdentityStore(store.path))
+    base = dict(service=service, projector=Projector(store), auth=ServerAuth({}))
+    absent = create_app(
+        settings=load_settings(None, audit_log=tmp_path / "audit.log"), **base
+    )
+    configured = load_settings(
+        None, audit_log=tmp_path / "audit.log", feishu_app_id="app",
+        feishu_app_secret="secret", feishu_encrypt_key="encrypt",
+        feishu_verification_token="verify", feishu_use_websocket=False,
+    )
+    present = create_app(settings=configured, **base)
+    def paths(app):
+        return {getattr(route, "path", None) for route in app.routes}
+    assert "/webhooks/feishu/card-action" not in paths(absent)
+    assert "/webhooks/feishu/card-action" in paths(present)
+    assert "/webhooks/feishu" not in paths(present)
+
+
+def test_production_composition_supervises_auto_ws_restart_and_shutdown(
+    monkeypatch, tmp_path: Path
+) -> None:
+    starts = 0
+    stopped = threading.Event()
+
+    def fake_start(self, runner):
+        nonlocal starts
+        starts += 1
+        if starts == 1:
+            raise RuntimeError("crash")
+        while not self._ws_stop.wait(0.005):
+            pass
+        stopped.set()
+
+    monkeypatch.setattr("ostag.adapters.feishu.FeishuAdapter._start_blocking", fake_start)
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    settings = load_settings(
+        None, audit_log=tmp_path / "audit.log", feishu_app_id="app",
+        feishu_app_secret="secret", monitor_server_db=store.path,
+    )
+    app = create_app(
+        settings=settings, service=WorkMonitorService(store, IdentityStore(store.path)),
+        projector=Projector(store), auth=ServerAuth({}), supervisor_backoff=(0.001, 0.002),
+    )
+    with TestClient(app):
+        deadline = time.monotonic() + 1
+        while starts < 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert starts >= 2
+    assert stopped.wait(1)
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,8 @@ from ostag.work_monitor.feishu_card_security import (
     decrypt_feishu_payload,
     feishu_signature,
 )
+from ostag.work_monitor.feishu_routes import create_feishu_card_router
+from ostag.work_monitor.server import SecurityContract, register_feishu_card_router
 from ostag.work_monitor.store import MonitorStore
 
 
@@ -59,6 +61,42 @@ def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
         tampered = b'{"encrypt":"changed"}'
         assert client.post("/callback", content=tampered, headers=_headers(body)).status_code == 401
     assert calls == []
+
+
+def test_signature_is_checked_before_json_and_real_router_has_no_side_effects(tmp_path) -> None:
+    calls = {"decryptor": 0, "runner": 0, "service": 0, "receipt": 0}
+
+    class SpyService:
+        def propose_control(self, *args, **kwargs):
+            calls["service"] += 1
+            calls["receipt"] += 1
+            raise AssertionError("service called")
+
+    def decryptor(cipher: str, key: str) -> bytes:
+        calls["decryptor"] += 1
+        raise AssertionError("decryptor called")
+
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", store=store,
+        clock=lambda: 1_700_000_000, decryptor=decryptor,
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app, create_feishu_card_router(SpyService()),
+        security=SecurityContract("verified_platform", security),
+    )
+    with TestClient(app) as client:
+        invalid_json = b"not-json"
+        response = client.post("/webhooks/feishu/card-action", content=invalid_json,
+                               headers=_headers(invalid_json) | {"X-Lark-Signature": "bad"})
+        assert response.status_code == 401
+        original = b'{"encrypt":"ciphertext"}'
+        tampered = b'{"encrypt":"tampered"}'
+        response = client.post("/webhooks/feishu/card-action", content=tampered,
+                               headers=_headers(original, nonce="tamper"))
+        assert response.status_code == 401
+    assert calls == {"decryptor": 0, "runner": 0, "service": 0, "receipt": 0}
 
 
 def test_replay_is_persisted_before_decrypt_and_encrypted_without_key_is_rejected(tmp_path) -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi import APIRouter, HTTPException, Request
 
 from ostag.core.schemas import SchemaError
@@ -11,7 +13,9 @@ from .identity import IdentityError
 from .service import TaskNotFound, WorkMonitorService
 
 
-def create_feishu_card_router(service: WorkMonitorService) -> APIRouter:
+def create_feishu_card_router(
+    service: WorkMonitorService | Callable[[], WorkMonitorService],
+) -> APIRouter:
     router = APIRouter()
 
     @router.post("/webhooks/feishu/card-action")
@@ -31,7 +35,8 @@ def create_feishu_card_router(service: WorkMonitorService) -> APIRouter:
         if not isinstance(task_id, str) or not task_id:
             raise HTTPException(422, "task_id is required")
         try:
-            receipt = service.propose_control(
+            active_service = service() if callable(service) else service
+            receipt = active_service.propose_control(
                 verified.principal, verified.destination, task_id=task_id, action=command
             )
             return {"toast": {"type": "success", "content": "操作已提交审批"},

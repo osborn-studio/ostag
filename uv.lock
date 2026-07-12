@@ -801,6 +801,7 @@ dingtalk = [
 ]
 feishu = [
     { name = "lark-oapi" },
+    { name = "pycryptodome" },
 ]
 openai = [
     { name = "openai" },
@@ -819,6 +820,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
     { name = "lark-oapi", marker = "extra == 'feishu'", specifier = ">=1.4.22" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.93.0" },
+    { name = "pycryptodome", marker = "extra == 'feishu'", specifier = ">=3.23.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },

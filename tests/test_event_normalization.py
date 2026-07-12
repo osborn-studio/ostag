@@ -187,9 +187,12 @@ async def test_non_mention_message_is_ignored(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_path: Path) -> None:
+async def test_feishu_live_start_runs_blocking_sdk_in_thread(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     started = []
     threaded = []
+    client_options = []
 
     class FakeProcessor:
         def __init__(self, callback):
@@ -210,7 +213,7 @@ async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_pa
 
     class FakeClient:
         def __init__(self, *_args, **_kwargs):
-            pass
+            client_options.append(_kwargs)
 
         def start(self):
             started.append(True)
@@ -221,7 +224,7 @@ async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_pa
 
     fake_lark = types.SimpleNamespace(
         EventDispatcherHandler=FakeEventDispatcherHandler,
-        LogLevel=types.SimpleNamespace(INFO="INFO"),
+        LogLevel=types.SimpleNamespace(INFO="INFO", ERROR="ERROR"),
         ws=types.SimpleNamespace(Client=FakeClient),
     )
     fake_dispatcher = types.SimpleNamespace(P2ImMessageReceiveV1Processor=FakeProcessor)
@@ -242,6 +245,8 @@ async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_pa
 
     assert started == [True]
     assert threaded
+    assert client_options[0]["log_level"] == "ERROR"
+    assert "ticket" not in capsys.readouterr().out.casefold()
 
 
 @pytest.mark.asyncio

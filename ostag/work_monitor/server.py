@@ -131,27 +131,42 @@ def create_app(
     supervisor_backoff: tuple[float, ...] = (1, 2, 5, 15, 30),
 ) -> FastAPI:
     """Build an inert app; databases and background owners start only in lifespan."""
-    configured = settings
+    configured = settings or load_settings()
     runtime = _Runtime(service, projector)
+    auto_feishu_ws: LifespanOwner | None = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        nonlocal configured, auth
+        nonlocal auth, auto_feishu_ws
         if runtime.service is None or runtime.projector is None:
-            configured = configured or load_settings()
             store = MonitorStore(configured.monitor_server_db)
             identities = IdentityStore(store.path, enrollment_secret=configured.monitor_enrollment_secret)
             runtime.service = WorkMonitorService(store, identities)
             runtime.projector = Projector(store)
         if auth is None:
-            assert configured is not None
             auth = ServerAuth(
                 dict(configured.monitor_instance_secrets),
                 human_credentials=configured.monitor_human_credentials_dict(),
                 admin_token=configured.monitor_admin_token,
             )
+        if (
+            feishu_ws is None
+            and auto_feishu_ws is None
+            and configured.feishu_use_websocket
+            and configured.feishu_app_id
+            and configured.feishu_app_secret
+        ):
+            from ostag.adapters.feishu import FeishuAdapter
+            from ostag.core.runner import OSTagRunner
+
+            assert runtime.service is not None
+            runner = OSTagRunner(configured, work_monitor=runtime.service)
+            auto_feishu_ws = FeishuAdapter(configured, runner=runner)
         stop = asyncio.Event()
-        owners = tuple(owner for owner in (feishu_ws, scheduler, outbox) if owner is not None)
+        owners = tuple(
+            owner for owner in (feishu_ws or auto_feishu_ws, scheduler, outbox)
+            if owner is not None
+        )
         tasks = [asyncio.create_task(_supervise(owner, stop, supervisor_backoff)) for owner in owners]
         try:
             yield
@@ -166,6 +181,31 @@ def create_app(
                     await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan)
+
+    def active_service() -> WorkMonitorService:
+        if runtime.service is None:
+            raise HTTPException(status_code=503, detail="service not started")
+        return runtime.service
+
+    if all((
+        configured.feishu_app_id,
+        configured.feishu_app_secret,
+        configured.feishu_encrypt_key,
+        configured.feishu_verification_token,
+    )):
+        from .feishu_card_security import FeishuCardSecurity
+        from .feishu_routes import create_feishu_card_router
+
+        card_security = FeishuCardSecurity(
+            encrypt_key=configured.feishu_encrypt_key,
+            verification_token=configured.feishu_verification_token,
+            store=lambda: active_service().store,
+        )
+        register_feishu_card_router(
+            app,
+            create_feishu_card_router(active_service),
+            security=SecurityContract("verified_platform", card_security),
+        )
 
     async def bounded_body(request: Request) -> bytes:
         limit = configured.monitor_server_max_body_bytes if configured else 1_048_576
@@ -305,7 +345,7 @@ def register_feishu_card_router(
     """Register only the card-action callback behind verified-platform security."""
     if security.kind != "verified_platform":
         raise ValueError("Feishu card callbacks require verified_platform security")
-    paths = {route.path for route in router.routes}
+    paths = {getattr(route, "path", None) for route in router.routes}
     if paths != {"/webhooks/feishu/card-action"}:
         raise ValueError("Feishu router may expose only /webhooks/feishu/card-action")
     register_router(app, router, security=security)

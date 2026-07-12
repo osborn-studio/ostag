@@ -54,7 +54,7 @@ class FeishuCardSecurity:
         *,
         encrypt_key: str,
         verification_token: str,
-        store: MonitorStore,
+        store: MonitorStore | Callable[[], MonitorStore],
         max_clock_skew_seconds: int = 300,
         clock: Callable[[], float] = time.time,
         decryptor: Callable[[str, str], bytes] = decrypt_feishu_payload,
@@ -72,18 +72,9 @@ class FeishuCardSecurity:
         timestamp = request.headers.get("X-Lark-Request-Timestamp", "")
         nonce = request.headers.get("X-Lark-Request-Nonce", "")
         supplied = request.headers.get("X-Lark-Signature", "")
-        try:
-            envelope = json.loads(body)
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise HTTPException(400, "invalid callback JSON") from exc
-        if not isinstance(envelope, dict):
-            raise HTTPException(400, "invalid callback envelope")
-        ciphertext = envelope.get("encrypt")
 
-        # 2. Verify the original signature before parsing/decrypting trusted content.
+        # 2. Verify the original signature before any JSON parsing or decryption.
         if not self.encrypt_key:
-            if ciphertext is not None:
-                raise HTTPException(401, "encrypted callback requires FEISHU_ENCRYPT_KEY")
             raise HTTPException(401, "FEISHU_ENCRYPT_KEY is required for card callbacks")
         expected = feishu_signature(timestamp, nonce, self.encrypt_key, body)
         if not timestamp or not nonce or not hmac.compare_digest(supplied, expected):
@@ -97,13 +88,21 @@ class FeishuCardSecurity:
         now = int(self.clock())
         if abs(now - signed_at) > self.max_clock_skew_seconds:
             raise HTTPException(401, "stale Feishu callback")
-        if not self.store.consume_instance_nonce(
+        replay_store = self.store() if callable(self.store) else self.store
+        if not replay_store.consume_instance_nonce(
             "feishu-card", nonce, now=now,
             expires_at=max(now, signed_at) + self.max_clock_skew_seconds,
         ):
             raise HTTPException(401, "replayed Feishu callback")
 
-        # 4. Only authenticated ciphertext reaches the decryptor.
+        # 4. Only authenticated and non-replayed bytes may be parsed/decrypted.
+        try:
+            envelope = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise HTTPException(400, "invalid callback JSON") from exc
+        if not isinstance(envelope, dict):
+            raise HTTPException(400, "invalid callback envelope")
+        ciphertext = envelope.get("encrypt")
         if ciphertext is not None:
             if set(envelope) != {"encrypt"} or not isinstance(ciphertext, str) or not ciphertext:
                 raise HTTPException(400, "invalid encrypted callback envelope")
