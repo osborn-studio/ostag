@@ -69,7 +69,7 @@ reporter 先脱敏并落入本地 SQLite outbox，再以 HMAC 签名批量上报
 
 `NormalizedEvent` 增加由 adapter 从签名验证后的平台原始事件推导的 `chat_type: private|group`（以及可信 destination ID）；权限判断不得从用户文本、卡片 value 或 Telegram callback data 推断私聊/群聊。
 
-飞书 card-action endpoint 使用平台原生安全流程，不复用实例 reporter HMAC。它处理 URL verification challenge；校验 verification token、飞书请求签名、timestamp 时间窗和持久 replay key。若 `FEISHU_ENCRYPT_KEY` 非空，必须先按飞书协议解密再验证/解析；若未配置 encrypt key，则明确拒绝任何 encrypted payload。校验失败不得创建 `NormalizedEvent`、receipt 或审计成功记录。
+飞书 card-action endpoint 使用平台原生安全流程，不复用实例 reporter HMAC。固定处理顺序为：读取不变的 raw body/ciphertext 与 timestamp、nonce；用 encrypt key 派生的飞书平台算法做 constant-time 原始签名比较；检查 timestamp 时间窗和持久 replay key；仅在这些检查全部通过后解密；最后校验解密 payload 的 verification token 和严格 schema，再处理 URL verification challenge 或 card action。若未配置 encrypt key，则明确拒绝 encrypted payload。坏签名或篡改密文在解密前拒绝，decryptor、`OSTagRunner`、receipt 和成功审计均不得被调用。
 
 ## 4. 数据契约与状态
 
