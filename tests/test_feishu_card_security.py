@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import json
+
+from fastapi import Depends, FastAPI, Request
+from fastapi.testclient import TestClient
+
+from ostag.work_monitor.feishu_card_security import (
+    FeishuCardSecurity,
+    decrypt_feishu_payload,
+    feishu_signature,
+)
+from ostag.work_monitor.store import MonitorStore
+
+
+def _headers(body: bytes, *, key: str = "enc-test", nonce: str = "nonce-fixed",
+             timestamp: str = "1700000000") -> dict[str, str]:
+    return {
+        "X-Lark-Request-Timestamp": timestamp,
+        "X-Lark-Request-Nonce": nonce,
+        "X-Lark-Signature": feishu_signature(timestamp, nonce, key, body),
+        "Content-Type": "application/json",
+    }
+
+
+def _app(security: FeishuCardSecurity) -> FastAPI:
+    app = FastAPI()
+
+    @app.post("/callback", dependencies=[Depends(security)])
+    async def callback(request: Request):
+        verified = request.state.feishu_callback
+        return {"kind": verified.kind, "actor": getattr(verified.principal, "actor_id", "")}
+
+    return app
+
+
+def test_signature_and_decryption_fixed_vectors() -> None:
+    body = b'{"encrypt":"ciphertext"}'
+    assert feishu_signature("1700000000", "nonce-fixed", "enc-test", body) == (
+        "99fa8ef5c278d891e7e19c219028a9304a0c9d09e1ef320255d5c0b791af0d64"
+    )
+    ciphertext = "AAECAwQFBgcICQoLDA0ODxwbggt+8Cqrzo9mVpkJ9zClJ87DUxbFIhqyvGOQQlYWwQ1JprJBVJ1RtUCLXHxVppVQBXY6obipP5hO8GpfwcI="
+    assert json.loads(decrypt_feishu_payload(ciphertext, "enc-test")) == {
+        "challenge": "ok", "token": "verify", "type": "url_verification"
+    }
+
+
+def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
+    calls: list[str] = []
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: calls.append(cipher) or b"{}",
+    )
+    body = b'{"encrypt":"ciphertext"}'
+    with TestClient(_app(security)) as client:
+        bad = _headers(body) | {"X-Lark-Signature": "bad"}
+        assert client.post("/callback", content=body, headers=bad).status_code == 401
+        tampered = b'{"encrypt":"changed"}'
+        assert client.post("/callback", content=tampered, headers=_headers(body)).status_code == 401
+    assert calls == []
+
+
+def test_replay_is_persisted_before_decrypt_and_encrypted_without_key_is_rejected(tmp_path) -> None:
+    calls: list[str] = []
+    body = b'{"encrypt":"ciphertext"}'
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: calls.append(cipher) or
+            b'{"challenge":"ok","token":"verify","type":"url_verification"}',
+    )
+    with TestClient(_app(security)) as client:
+        assert client.post("/callback", content=body, headers=_headers(body)).status_code == 200
+        assert client.post("/callback", content=body, headers=_headers(body)).status_code == 401
+    assert calls == ["ciphertext"]
+    no_key = FeishuCardSecurity(
+        encrypt_key="", verification_token="verify",
+        store=MonitorStore(tmp_path / "no-key.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: (_ for _ in ()).throw(AssertionError("decrypt called")),
+    )
+    with TestClient(_app(no_key)) as client:
+        assert client.post("/callback", content=body, headers=_headers(body)).status_code == 401
+
+
+def test_verified_payload_derives_principal_and_ignores_button_identity(tmp_path) -> None:
+    payload = {
+        "schema": "2.0",
+        "header": {"event_id": "evt", "event_type": "card.action.trigger", "token": "verify"},
+        "event": {
+            "operator": {"open_id": "ou_verified"},
+            "context": {"open_chat_id": "oc_verified"},
+            "action": {"tag": "button", "value": {
+                "command": "pause", "task_id": "task-1",
+                "actor": "ou_attacker", "chat_type": "private",
+            }},
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+    )
+    with TestClient(_app(security)) as client:
+        response = client.post("/callback", content=body, headers=_headers(body))
+    assert response.json() == {"kind": "action", "actor": "ou_verified"}
+
+
+def test_message_event_and_schema_extensions_are_rejected(tmp_path) -> None:
+    payload = {"schema": "2.0", "header": {
+        "event_type": "im.message.receive_v1", "token": "verify"}, "event": {}}
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+    )
+    with TestClient(_app(security)) as client:
+        assert client.post("/callback", content=body, headers=_headers(body)).status_code == 422

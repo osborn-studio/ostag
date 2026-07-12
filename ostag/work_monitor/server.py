@@ -297,4 +297,16 @@ def register_router(
     } or not callable(security.dependency):
         raise ValueError("unsupported router security contract")
     app.include_router(router, dependencies=[Depends(security.dependency)])
+
+
+def register_feishu_card_router(
+    app: FastAPI, router: APIRouter, *, security: SecurityContract,
+) -> None:
+    """Register only the card-action callback behind verified-platform security."""
+    if security.kind != "verified_platform":
+        raise ValueError("Feishu card callbacks require verified_platform security")
+    paths = {route.path for route in router.routes}
+    if paths != {"/webhooks/feishu/card-action"}:
+        raise ValueError("Feishu router may expose only /webhooks/feishu/card-action")
+    register_router(app, router, security=security)
 app = create_app()

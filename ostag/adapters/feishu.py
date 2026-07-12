@@ -18,8 +18,13 @@ AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>")
 class FeishuAdapter:
     platform = "feishu"
 
-    def __init__(self, config: Settings):
+    def __init__(self, config: Settings, *, runner: Any | None = None):
         self.config = config
+        self.runner = runner
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._client: Any | None = None
+        self._inflight: set[Any] = set()
+        self._ws_stop = threading.Event()
 
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
@@ -48,7 +53,31 @@ class FeishuAdapter:
         if not self.app_id or not self.app_secret:
             raise RuntimeError(f"{self.platform.upper()}_APP_ID and APP_SECRET are required.")
 
+        self.runner = runner
+        self._loop = asyncio.get_running_loop()
         await asyncio.to_thread(self._start_blocking, runner)
+
+    async def run(self, stop: asyncio.Event) -> None:
+        """Run one supervised WS bridge with one event loop and no per-event threads."""
+        if self.runner is None:
+            raise RuntimeError("FeishuAdapter.run requires a bound runner")
+        if not self.app_id or not self.app_secret:
+            raise RuntimeError(f"{self.platform.upper()}_APP_ID and APP_SECRET are required.")
+        self._loop = asyncio.get_running_loop()
+        worker = asyncio.create_task(asyncio.to_thread(self._start_blocking, self.runner))
+        stopped = asyncio.create_task(stop.wait())
+        done, _ = await asyncio.wait((worker, stopped), return_when=asyncio.FIRST_COMPLETED)
+        if worker in done:
+            stopped.cancel()
+            await asyncio.gather(stopped, return_exceptions=True)
+            await worker
+            return
+        await self.stop()
+        try:
+            await asyncio.wait_for(worker, timeout=5)
+        except TimeoutError:
+            worker.cancel()
+            await asyncio.gather(worker, return_exceptions=True)
 
     def _start_blocking(self, runner: Any) -> None:
         try:
@@ -69,18 +98,47 @@ class FeishuAdapter:
             self.app_id,
             self.app_secret,
             event_handler=event_handler,
-            log_level=lark.LogLevel.INFO,
+            # INFO logs include the short-lived WebSocket endpoint ticket.
+            log_level=getattr(lark.LogLevel, "ERROR", lark.LogLevel.INFO),
             domain=self.api_base_url,
         )
-        cli.start()
+        self._client = cli
+        self._ws_stop.clear()
+        if all(callable(getattr(cli, name, None)) for name in ("_connect", "_disconnect", "_ping_loop")):
+            asyncio.run(self._serve_sdk_client(cli))
+        else:  # Compatibility with SDK test doubles and older SDK releases.
+            cli.start()
+
+    async def _serve_sdk_client(self, client: Any) -> None:
+        await client._connect()
+        ping = asyncio.create_task(client._ping_loop())
+        try:
+            while not self._ws_stop.is_set():
+                await asyncio.sleep(0.05)
+        finally:
+            ping.cancel()
+            await asyncio.gather(ping, return_exceptions=True)
+            await client._disconnect()
 
     def _run_live_event_handler(self, data: Any, runner: Any) -> None:
-        thread = threading.Thread(
-            target=lambda: asyncio.run(self._handle_live_event(data, runner)),
-            name=f"ostag-{self.platform}-event",
-            daemon=True,
-        )
-        thread.start()
+        if self._loop is None or self._loop.is_closed():
+            raise RuntimeError("Feishu event loop is not running")
+        future = asyncio.run_coroutine_threadsafe(self._handle_live_event(data, runner), self._loop)
+        self._inflight.add(future)
+        future.add_done_callback(self._inflight.discard)
+
+    async def stop(self) -> None:
+        self._ws_stop.set()
+        client = self._client
+        if client is not None:
+            closer = getattr(client, "stop", None) or getattr(client, "close", None)
+            if callable(closer):
+                result = closer()
+                if asyncio.iscoroutine(result):
+                    await result
+        if self._inflight:
+            await asyncio.gather(*(asyncio.wrap_future(item) for item in tuple(self._inflight)),
+                                 return_exceptions=True)
 
     async def _handle_live_event(self, data: Any, runner: Any) -> None:
         raw = data.raw if hasattr(data, "raw") else data
@@ -153,13 +211,14 @@ class FeishuAdapter:
         )
         await asyncio.to_thread(_urlopen_json, req)
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, chat_type: str = "group") -> None:
         if not text:
             return
         if self.config.dry_run:
             print(text)
             return
         token = await self._tenant_access_token()
+        receive_id_type = "open_id" if chat_type == "private" else "chat_id"
         payload = json.dumps(
             {
                 "receive_id": chat_id,
@@ -167,7 +226,7 @@ class FeishuAdapter:
                 "content": json.dumps({"text": text}, ensure_ascii=False),
             }
         ).encode()
-        url = f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type=chat_id"
+        url = f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
         req = urllib.request.Request(
             url,
             data=payload,
@@ -178,6 +237,31 @@ class FeishuAdapter:
             },
         )
         await asyncio.to_thread(_urlopen_json, req)
+
+    async def send_card(
+        self, destination_id: str, card: dict[str, Any], fallback_text: str,
+        *, chat_type: str = "group",
+    ) -> None:
+        """Proactively deliver an interactive card, falling back to plain text."""
+        if self.config.dry_run:
+            print(fallback_text)
+            return
+        receive_id_type = "open_id" if chat_type == "private" else "chat_id"
+        token = await self._tenant_access_token()
+        payload = json.dumps({
+            "receive_id": destination_id, "msg_type": "interactive",
+            "content": json.dumps(card, ensure_ascii=False),
+        }).encode()
+        req = urllib.request.Request(
+            f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}",
+            data=payload, method="POST",
+            headers={"Authorization": f"Bearer {token}",
+                     "Content-Type": "application/json; charset=utf-8"},
+        )
+        try:
+            await asyncio.to_thread(_urlopen_json, req)
+        except RuntimeError:
+            await self.send_message(destination_id, fallback_text, chat_type=chat_type)
 
     async def _tenant_access_token(self) -> str:
         body = json.dumps(
