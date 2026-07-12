@@ -90,3 +90,32 @@ def test_sanitize_result_still_enforces_strict_snapshot_validation() -> None:
         assert "status" in str(exc)
     else:
         raise AssertionError("strict TaskSnapshot validation was bypassed")
+
+
+def test_sanitize_redacts_quoted_and_existing_secret_formats() -> None:
+    secrets = {
+        "quoted_password": "hunter2",
+        "quoted_bearer": "super secret",
+        "openai": "sk-1234567890abcdefghij",
+        "slack": "xoxb-1234567890-secret",
+        "aws": "AKIA1234567890ABCDEF",
+    }
+    snapshot = sanitize_task_input(
+        {
+            "task_id": "task-42",
+            "title": f'password="{secrets["quoted_password"]}"',
+            "project": "ostag",
+            "status": "running",
+            "agent": "codex",
+            "progress": 1,
+            "duration_seconds": 2,
+            "summary": f'Authorization: Bearer "{secrets["quoted_bearer"]}"',
+            "error_class": f'{secrets["openai"]} {secrets["slack"]}',
+            "evidence_ref": secrets["aws"],
+        }
+    )
+
+    serialized = json.dumps(snapshot.to_dict(), sort_keys=True)
+    for secret in secrets.values():
+        assert secret not in serialized
+    assert serialized.count("[REDACTED]") >= 5

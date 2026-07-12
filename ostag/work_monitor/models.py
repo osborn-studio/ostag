@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, Mapping
+from typing import Any, ClassVar
 
 
 TASK_STATUSES = frozenset({"triage", "todo", "ready", "running", "blocked", "done"})
@@ -24,11 +25,16 @@ COMMAND_ACTIONS = frozenset({"pause", "resume", "retry", "cancel"})
 
 
 def _validate_keys(
-    payload: Mapping[str, Any], *, required: frozenset[str], model_name: str
+    payload: object, *, required: tuple[str, ...], model_name: str
 ) -> None:
+    if not isinstance(payload, Mapping):
+        raise ValueError(f"{model_name} payload must be a mapping")
+    if not all(isinstance(key, str) for key in payload):
+        raise ValueError(f"{model_name} payload must contain only string keys")
     keys = set(payload)
-    unknown = keys - required
-    missing = required - keys
+    required_keys = set(required)
+    unknown = keys - required_keys
+    missing = required_keys - keys
     if unknown:
         raise ValueError(f"{model_name} unknown keys: {', '.join(sorted(unknown))}")
     if missing:
@@ -56,19 +62,17 @@ class TaskSnapshot:
     error_class: str | None
     evidence_ref: str | None
 
-    _KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "task_id",
-            "title",
-            "project",
-            "status",
-            "agent",
-            "progress",
-            "duration_seconds",
-            "summary",
-            "error_class",
-            "evidence_ref",
-        }
+    _KEYS: ClassVar[tuple[str, ...]] = (
+        "task_id",
+        "title",
+        "project",
+        "status",
+        "agent",
+        "progress",
+        "duration_seconds",
+        "summary",
+        "error_class",
+        "evidence_ref",
     )
 
     def __post_init__(self) -> None:
@@ -93,8 +97,9 @@ class TaskSnapshot:
                 _require_string(value, field)
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> TaskSnapshot:
+    def from_dict(cls, payload: object) -> TaskSnapshot:
         _validate_keys(payload, required=cls._KEYS, model_name=cls.__name__)
+        assert isinstance(payload, Mapping)
         return cls(**{key: payload[key] for key in cls._KEYS})
 
     def to_dict(self) -> dict[str, Any]:
@@ -110,8 +115,13 @@ class MonitorEvent:
     occurred_at: str
     task: TaskSnapshot | None
 
-    _KEYS: ClassVar[frozenset[str]] = frozenset(
-        {"event_id", "instance_id", "sequence", "kind", "occurred_at", "task"}
+    _KEYS: ClassVar[tuple[str, ...]] = (
+        "event_id",
+        "instance_id",
+        "sequence",
+        "kind",
+        "occurred_at",
+        "task",
     )
 
     def __post_init__(self) -> None:
@@ -128,8 +138,9 @@ class MonitorEvent:
             raise ValueError("task events require a TaskSnapshot")
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> MonitorEvent:
+    def from_dict(cls, payload: object) -> MonitorEvent:
         _validate_keys(payload, required=cls._KEYS, model_name=cls.__name__)
+        assert isinstance(payload, Mapping)
         raw_task = payload["task"]
         task = None if raw_task is None else TaskSnapshot.from_dict(raw_task)
         return cls(
@@ -163,17 +174,15 @@ class RemoteCommand:
     issued_at: str
     expires_at: str
 
-    _KEYS: ClassVar[frozenset[str]] = frozenset(
-        {
-            "command_id",
-            "task_id",
-            "instance_id",
-            "action",
-            "expected_status",
-            "requested_by",
-            "issued_at",
-            "expires_at",
-        }
+    _KEYS: ClassVar[tuple[str, ...]] = (
+        "command_id",
+        "task_id",
+        "instance_id",
+        "action",
+        "expected_status",
+        "requested_by",
+        "issued_at",
+        "expires_at",
     )
 
     def __post_init__(self) -> None:
@@ -185,8 +194,9 @@ class RemoteCommand:
             raise ValueError(f"expected_status must be one of {sorted(TASK_STATUSES)}")
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> RemoteCommand:
+    def from_dict(cls, payload: object) -> RemoteCommand:
         _validate_keys(payload, required=cls._KEYS, model_name=cls.__name__)
+        assert isinstance(payload, Mapping)
         return cls(**{key: payload[key] for key in cls._KEYS})
 
     def to_dict(self) -> dict[str, str]:

@@ -207,3 +207,70 @@ def test_event_kind_contract_is_complete_and_rejects_unknown_kind() -> None:
                 "task": _task_payload(status="running"),
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("factory", "payload"),
+    [
+        (TaskSnapshot.from_dict, 42),
+        (TaskSnapshot.from_dict, {1: "not-a-string-key"}),
+        (MonitorEvent.from_dict, ["not", "a", "mapping"]),
+        (RemoteCommand.from_dict, "not-a-mapping"),
+    ],
+)
+def test_from_dict_rejects_malformed_top_level_payloads(factory: object, payload: object) -> None:
+    with pytest.raises(ValueError, match="mapping|string keys"):
+        factory(payload)  # type: ignore[operator]
+
+
+def test_monitor_event_rejects_malformed_nested_task_as_value_error() -> None:
+    with pytest.raises(ValueError, match="TaskSnapshot.*mapping"):
+        MonitorEvent.from_dict(
+            {
+                "event_id": "evt-42",
+                "instance_id": "macbook-pro",
+                "sequence": 7,
+                "kind": "task.progress",
+                "occurred_at": "2026-07-12T01:00:00Z",
+                "task": 42,
+            }
+        )
+
+
+def test_model_serialization_field_order_is_deterministic() -> None:
+    task = TaskSnapshot.from_dict(_task_payload())
+    command = RemoteCommand.from_dict(
+        {
+            "command_id": "cmd-1",
+            "task_id": "task-42",
+            "instance_id": "macbook-pro",
+            "action": "pause",
+            "expected_status": "running",
+            "requested_by": "ou_owner",
+            "issued_at": "2026-07-12T01:00:00Z",
+            "expires_at": "2026-07-12T01:05:00Z",
+        }
+    )
+
+    assert list(task.to_dict()) == [
+        "task_id",
+        "title",
+        "project",
+        "status",
+        "agent",
+        "progress",
+        "duration_seconds",
+        "summary",
+        "error_class",
+        "evidence_ref",
+    ]
+    assert list(command.to_dict()) == [
+        "command_id",
+        "task_id",
+        "instance_id",
+        "action",
+        "expected_status",
+        "requested_by",
+        "issued_at",
+        "expires_at",
+    ]

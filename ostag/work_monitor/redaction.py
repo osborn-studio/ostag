@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+from ostag.core.safety import redact_secrets
+
 from .models import TaskSnapshot
 
 
@@ -22,11 +24,14 @@ PUBLIC_TASK_FIELDS = (
 )
 MAX_TEXT_LENGTH = 500
 _SECRET_PATTERNS = (
-    re.compile(r"(?i)\bAuthorization\s*:\s*(?:Basic|Bearer)\s+[^\s,;\"']+"),
-    re.compile(r"(?i)\bBearer\s+[^\s,;\"']+"),
     re.compile(
-        r"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|secret)"
-        r"\s*[:=]\s*[^\s,;\"']+"
+        r'''(?ix)\bAuthorization\s*:\s*(?:Basic|Bearer)\s+
+        (?:"[^"]*"|'[^']*'|[^\s,;"']+)'''
+    ),
+    re.compile(r'''(?ix)\bBearer\s+(?:"[^"]*"|'[^']*'|[^\s,;"']+)'''),
+    re.compile(
+        r'''(?ix)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|token|password|secret)
+        \s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;"']+)'''
     ),
 )
 
@@ -34,7 +39,7 @@ _SECRET_PATTERNS = (
 def _sanitize_text(value: str) -> str:
     for pattern in _SECRET_PATTERNS:
         value = pattern.sub("[REDACTED]", value)
-    return value[:MAX_TEXT_LENGTH]
+    return redact_secrets(value)[:MAX_TEXT_LENGTH]
 
 
 def sanitize_task_input(payload: Mapping[str, Any]) -> TaskSnapshot:
