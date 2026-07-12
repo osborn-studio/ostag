@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Mapping
 
 
-TASK_STATUSES = frozenset(
-    {"queued", "running", "blocked", "awaiting_approval", "completed", "failed"}
-)
+TASK_STATUSES = frozenset({"triage", "todo", "ready", "running", "blocked", "done"})
 EVENT_KINDS = frozenset(
     {
         "task.created",
