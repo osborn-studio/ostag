@@ -12,13 +12,16 @@ from typing import Iterator
 from .models import MonitorEvent, TASK_STATUSES
 
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS instances (
+@dataclass(frozen=True)
+class Migration:
+    statements: tuple[str, ...]
+
+
+_V1_STATEMENTS = ("""CREATE TABLE IF NOT EXISTS instances (
     instance_id TEXT PRIMARY KEY,
     last_sequence INTEGER NOT NULL DEFAULT 0,
     last_seen_at TEXT
-);
-CREATE TABLE IF NOT EXISTS events (
+)""", """CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
     instance_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
@@ -26,15 +29,13 @@ CREATE TABLE IF NOT EXISTS events (
     occurred_at TEXT NOT NULL,
     payload TEXT NOT NULL,
     UNIQUE(instance_id, sequence)
-);
-CREATE TABLE IF NOT EXISTS pending_events (
+)""", """CREATE TABLE IF NOT EXISTS pending_events (
     instance_id TEXT NOT NULL,
     sequence INTEGER NOT NULL,
     event_id TEXT NOT NULL UNIQUE,
     payload TEXT NOT NULL,
     PRIMARY KEY(instance_id, sequence)
-);
-CREATE TABLE IF NOT EXISTS tasks (
+)""", """CREATE TABLE IF NOT EXISTS tasks (
     instance_id TEXT NOT NULL,
     task_id TEXT NOT NULL,
     title TEXT NOT NULL,
@@ -46,35 +47,37 @@ CREATE TABLE IF NOT EXISTS tasks (
     summary TEXT NOT NULL,
     error_class TEXT,
     evidence_ref TEXT,
-    version INTEGER NOT NULL,
     occurred_at TEXT NOT NULL,
     PRIMARY KEY(instance_id, task_id)
-);
-CREATE TABLE IF NOT EXISTS subscriptions (
+)""", """CREATE TABLE IF NOT EXISTS subscriptions (
     platform TEXT NOT NULL,
     destination_id TEXT NOT NULL,
     instance_id TEXT NOT NULL DEFAULT '',
     task_id TEXT NOT NULL DEFAULT '',
     delivery_cursor INTEGER NOT NULL DEFAULT 0,
     UNIQUE(platform, destination_id, instance_id, task_id)
-);
-CREATE TABLE IF NOT EXISTS notification_outbox (
+)""", """CREATE TABLE IF NOT EXISTS notification_outbox (
     notification_id TEXT PRIMARY KEY,
     event_id TEXT NOT NULL,
     destination_key TEXT NOT NULL,
     payload TEXT NOT NULL,
     delivered_at TEXT,
     UNIQUE(event_id, destination_key)
-);
-CREATE TABLE IF NOT EXISTS commands (
+)""", """CREATE TABLE IF NOT EXISTS commands (
     command_id TEXT PRIMARY KEY,
     instance_id TEXT NOT NULL,
     task_id TEXT NOT NULL,
     status TEXT NOT NULL,
     payload TEXT NOT NULL,
     consumed_at TEXT
-);
-"""
+)""")
+
+# V2 is deliberately self-healing for databases that declared v1 after creating
+# only a subset of its tables. The version column is handled conditionally.
+MIGRATIONS = (
+    Migration(statements=_V1_STATEMENTS),
+    Migration(statements=(*_V1_STATEMENTS, "ALTER TABLE tasks ADD COLUMN version INTEGER NOT NULL DEFAULT 1")),
+)
 
 
 @dataclass(frozen=True)
@@ -91,8 +94,36 @@ class MonitorStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._migrate()
+
+    def _migrate(self) -> None:
         with self.connect() as connection:
-            connection.executescript(SCHEMA)
+            row = connection.execute("PRAGMA user_version").fetchone()
+            current_version = int(row[0])
+            if current_version > len(MIGRATIONS):
+                raise RuntimeError(
+                    f"database schema version {current_version} is newer than supported "
+                    f"version {len(MIGRATIONS)}"
+                )
+            for version, migration in enumerate(MIGRATIONS, start=1):
+                if version <= current_version:
+                    continue
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    for statement in migration.statements:
+                        if statement.startswith("ALTER TABLE tasks ADD COLUMN version"):
+                            columns = {
+                                str(column[1])
+                                for column in connection.execute("PRAGMA table_info(tasks)")
+                            }
+                            if "version" in columns:
+                                continue
+                        connection.execute(statement)
+                    connection.execute(f"PRAGMA user_version = {version}")
+                    connection.commit()
+                except BaseException:
+                    connection.rollback()
+                    raise
 
     def connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -119,6 +150,13 @@ class MonitorStore:
                 "SELECT last_sequence FROM instances WHERE instance_id = ?", (instance_id,)
             ).fetchone()
         return 0 if row is None else int(row["last_sequence"])
+
+    def last_seen_at(self, instance_id: str) -> str | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT last_seen_at FROM instances WHERE instance_id = ?", (instance_id,)
+            ).fetchone()
+        return None if row is None else row["last_seen_at"]
 
     def pending_sequences(self, instance_id: str) -> tuple[int, ...]:
         with self.connect() as connection:

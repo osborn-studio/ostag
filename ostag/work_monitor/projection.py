@@ -28,7 +28,10 @@ class Projector:
         with self.store.transaction() as connection:
             connection.execute(
                 "INSERT INTO instances(instance_id, last_sequence, last_seen_at) VALUES (?, 0, ?) "
-                "ON CONFLICT(instance_id) DO NOTHING",
+                "ON CONFLICT(instance_id) DO UPDATE SET last_seen_at = "
+                "CASE WHEN instances.last_seen_at IS NULL "
+                "OR excluded.last_seen_at > instances.last_seen_at "
+                "THEN excluded.last_seen_at ELSE instances.last_seen_at END",
                 (event.instance_id, event.occurred_at),
             )
             row = connection.execute(
@@ -85,9 +88,9 @@ class Projector:
                 next_sequence += 1
 
             connection.execute(
-                "UPDATE instances SET last_sequence = ?, last_seen_at = ? "
+                "UPDATE instances SET last_sequence = ? "
                 "WHERE instance_id = ? AND last_sequence < ?",
-                (applied[-1], event.occurred_at, event.instance_id, applied[-1]),
+                (applied[-1], event.instance_id, applied[-1]),
             )
             return ApplyResult(stored=True, applied_sequences=tuple(applied))
 
