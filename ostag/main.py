@@ -586,7 +586,7 @@ class _CollectingAdapter:
     def __init__(self) -> None:
         self.messages: list[dict[str, str]] = []
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.messages.append({"chat_id": chat_id, "text": text})
 
 

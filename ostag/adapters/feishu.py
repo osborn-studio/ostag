@@ -4,7 +4,6 @@ import asyncio
 import json
 import re
 import threading
-import uuid
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -27,6 +26,8 @@ class FeishuAdapter:
         self._inflight: set[Any] = set()
         self._ws_stop = threading.Event()
         self._sdk_loop: asyncio.AbstractEventLoop | None = None
+        self._bridge_ready = threading.Event()
+        self._stop_requested = threading.Event()
 
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
@@ -57,6 +58,8 @@ class FeishuAdapter:
 
         self.runner = runner
         self._loop = asyncio.get_running_loop()
+        self._bridge_ready.clear()
+        self._stop_requested.clear()
         await asyncio.to_thread(self._start_blocking, runner)
 
     async def run(self, stop: asyncio.Event) -> None:
@@ -76,6 +79,8 @@ class FeishuAdapter:
 
         thread = threading.Thread(target=bridge, name="ostag-feishu-ws-bridge", daemon=False)
         thread.start()
+        while thread.is_alive() and not self._bridge_ready.is_set() and not stop.is_set():
+            await asyncio.sleep(0.01)
         while thread.is_alive() and not stop.is_set():
             await asyncio.sleep(0.05)
         if stop.is_set():
@@ -119,6 +124,9 @@ class FeishuAdapter:
         except ImportError:
             sdk_loop = None
         self._sdk_loop = sdk_loop
+        self._bridge_ready.set()
+        if self._stop_requested.is_set():
+            return
         cli.start()
 
     def _run_live_event_handler(self, data: Any, runner: Any) -> None:
@@ -130,6 +138,7 @@ class FeishuAdapter:
 
     async def stop(self) -> None:
         self._ws_stop.set()
+        self._stop_requested.set()
         client = self._client
         if client is not None:
             closer = getattr(client, "stop", None) or getattr(client, "close", None)
@@ -225,7 +234,11 @@ class FeishuAdapter:
         )
         await asyncio.to_thread(_urlopen_json, req)
 
-    async def send_message(self, chat_id: str, text: str, *, chat_type: str = "group") -> None:
+    async def send_message(
+        self, chat_id: str, text: str, *, delivery_id: str, chat_type: str = "group"
+    ) -> None:
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive messages")
         if not text:
             return
         if self.config.dry_run:
@@ -240,7 +253,8 @@ class FeishuAdapter:
                 "content": json.dumps({"text": text}, ensure_ascii=False),
             }
         ).encode()
-        url = f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+        url = (f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+               f"&uuid={delivery_id}")
         req = urllib.request.Request(
             url,
             data=payload,
@@ -254,7 +268,7 @@ class FeishuAdapter:
 
     async def send_card(
         self, destination_id: str, card: dict[str, Any], fallback_text: str,
-        *, chat_type: str = "group", delivery_id: str | None = None,
+        *, chat_type: str = "group", delivery_id: str,
     ) -> None:
         """Proactively deliver an interactive card, falling back to plain text."""
         if self.config.dry_run:
@@ -266,10 +280,11 @@ class FeishuAdapter:
             "receive_id": destination_id, "msg_type": "interactive",
             "content": json.dumps(card, ensure_ascii=False),
         }).encode()
-        idempotency_key = delivery_id or str(uuid.uuid4())
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive cards")
         req = urllib.request.Request(
             f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
-            f"&uuid={idempotency_key}",
+            f"&uuid={delivery_id}",
             data=payload, method="POST",
             headers={"Authorization": f"Bearer {token}",
                      "Content-Type": "application/json; charset=utf-8"},
@@ -279,7 +294,9 @@ class FeishuAdapter:
             if response.get("code", 0) != 0:
                 raise RuntimeError("Feishu rejected interactive card")
         except (RuntimeError, TimeoutError):
-            await self.send_message(destination_id, fallback_text, chat_type=chat_type)
+            await self.send_message(
+                destination_id, fallback_text, chat_type=chat_type, delivery_id=delivery_id
+            )
 
     async def _tenant_access_token(self) -> str:
         body = json.dumps(

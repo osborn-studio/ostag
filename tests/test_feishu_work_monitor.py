@@ -164,9 +164,10 @@ async def test_proactive_private_uses_open_id_group_uses_chat_id_and_card_falls_
         return {"ok": True}
 
     monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
-    await adapter.send_message("ou_user", "private", chat_type="private")
-    await adapter.send_message("oc_group", "group", chat_type="group")
-    await adapter.send_card("ou_user", {"elements": []}, "fallback", chat_type="private")
+    await adapter.send_message("ou_user", "private", chat_type="private", delivery_id="private-1")
+    await adapter.send_message("oc_group", "group", chat_type="group", delivery_id="group-1")
+    await adapter.send_card("ou_user", {"elements": []}, "fallback", chat_type="private",
+                            delivery_id="card-1")
     urls = [request.full_url for request in requests]
     assert "receive_id_type=open_id" in urls[0]
     assert "receive_id_type=chat_id" in urls[1]
@@ -192,7 +193,13 @@ async def test_card_business_error_falls_back_once_with_stable_idempotency_key(
                             delivery_id="delivery-1")
     assert sum(json.loads(req.data)["msg_type"] == "interactive" for req in requests) == 1
     assert "uuid=delivery-1" in requests[0].full_url
+    assert "uuid=delivery-1" in requests[-1].full_url
     assert json.loads(requests[-1].data)["msg_type"] == "text"
+
+    with pytest.raises((TypeError, ValueError)):
+        await adapter.send_card("oc_group", {"elements": []}, "fallback")
+    with pytest.raises((TypeError, ValueError)):
+        await adapter.send_message("oc_group", "message")
 
 
 @pytest.mark.asyncio
@@ -258,3 +265,29 @@ async def test_ws_sdk_bridge_disconnects_on_graceful_stop(tmp_path: Path) -> Non
     stop.set()
     await asyncio.wait_for(serving, timeout=2)
     assert states == ["started", "handled", "disconnected"]
+
+
+@pytest.mark.asyncio
+async def test_ws_bridge_immediate_stop_repeatedly_leaves_no_thread(tmp_path: Path) -> None:
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=True,
+                           feishu_app_id="app", feishu_app_secret="secret")
+    before = {thread.ident for thread in threading.enumerate()}
+    for _ in range(5):
+        adapter = FeishuAdapter(config, runner=object())
+
+        def public_start(runner):
+            adapter._client = object()
+            adapter._sdk_loop = asyncio.new_event_loop()
+            adapter._bridge_ready.set()
+            if adapter._stop_requested.is_set():
+                adapter._sdk_loop.close()
+                return
+            raise AssertionError("early stop entered client.start")
+
+        adapter._start_blocking = public_start
+        stop = asyncio.Event()
+        stop.set()
+        await asyncio.wait_for(adapter.run(stop), timeout=1)
+    leaked = [thread for thread in threading.enumerate()
+              if thread.ident not in before and thread.name == "ostag-feishu-ws-bridge"]
+    assert leaked == []

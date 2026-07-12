@@ -158,7 +158,7 @@ class CapturingAdapter:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.sent.append((chat_id, text))
 
 

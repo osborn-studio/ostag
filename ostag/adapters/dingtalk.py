@@ -118,9 +118,9 @@ class DingTalkAdapter:
         if session_webhook:
             await self._post_json(session_webhook, _text_payload(text))
             return
-        await self.send_message(event.chat_id, text)
+        await self.send_message(event.chat_id, text, delivery_id=event.message_id)
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         if not text:
             return
         text = dingtalk_text(text)

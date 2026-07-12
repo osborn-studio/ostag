@@ -47,6 +47,35 @@ def test_signature_and_decryption_fixed_vectors() -> None:
     }
 
 
+def test_official_legacy_url_verification_exact_shape_succeeds(tmp_path) -> None:
+    plaintext = b'{"challenge":"official","token":"verify","type":"url_verification"}'
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: plaintext,
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app, create_feishu_card_router(object()),
+        security=SecurityContract("verified_platform", security),
+    )
+    body = b'{"encrypt":"ciphertext"}'
+    with TestClient(app) as client:
+        response = client.post("/webhooks/feishu/card-action", content=body,
+                               headers=_headers(body))
+    assert response.json() == {"challenge": "official"}
+
+    extra = b'{"challenge":"x","token":"verify","type":"url_verification","extra":1}'
+    other = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=MonitorStore(tmp_path / "extra.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: extra,
+    )
+    with TestClient(_app(other)) as client:
+        assert client.post("/callback", content=body,
+                           headers=_headers(body, nonce="extra")).status_code == 422
+
+
 def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
     calls: list[str] = []
     security = FeishuCardSecurity(

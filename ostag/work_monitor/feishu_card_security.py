@@ -139,6 +139,13 @@ class FeishuCardSecurity:
         if not isinstance(payload, dict):
             raise HTTPException(422, "callback payload must be an object")
         # URL verification is the sole non-action callback accepted here.
+        if set(payload) == {"challenge", "token", "type"}:
+            if payload.get("type") != "url_verification" or not self._token(payload.get("token")):
+                raise HTTPException(401, "invalid verification token")
+            challenge = payload.get("challenge")
+            if not isinstance(challenge, str) or not challenge:
+                raise HTTPException(422, "invalid challenge")
+            return VerifiedFeishuCallback(dict(payload), None, None, "challenge")
         required = {"schema", "header", "event"}
         if set(payload) != required or payload.get("schema") != "2.0":
             raise HTTPException(422, "unsupported Feishu callback schema")

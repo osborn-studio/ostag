@@ -84,7 +84,7 @@ class SlackAdapter:
             text=text,
         )
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         if not text:
             return
         if self.config.dry_run:

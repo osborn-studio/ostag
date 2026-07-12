@@ -355,7 +355,7 @@ async def test_dingtalk_proactive_send_falls_back_to_dws_bot(monkeypatch, tmp_pa
         fake_create_subprocess_exec,
     )
 
-    await adapter.send_message("cid_demo", "OS Tag 18 点需求复盘")
+    await adapter.send_message("cid_demo", "OS Tag 18 点需求复盘", delivery_id="digest-1")
 
     assert captured["args"] == (
         "dws",
@@ -404,7 +404,9 @@ async def test_dingtalk_proactive_send_normalizes_at_tags(monkeypatch, tmp_path:
         fake_create_subprocess_exec,
     )
 
-    await adapter.send_message("cid_demo", '<at user_id="ou_manager">管理者</at> 早上好')
+    await adapter.send_message(
+        "cid_demo", '<at user_id="ou_manager">管理者</at> 早上好', delivery_id="digest-2"
+    )
 
     assert captured["args"][11] == "@管理者 早上好"
 

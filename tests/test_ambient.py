@@ -55,7 +55,7 @@ class CapturingAmbientAdapter:
     def __init__(self):
         self.sent = []
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.sent.append((chat_id, text))
 
 

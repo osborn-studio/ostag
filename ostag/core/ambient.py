@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Callable
@@ -59,6 +60,10 @@ class AmbientDecision:
     proposal_only: bool = True
     record_id: str = ""
     rule: str = ""
+
+
+def _delivery_id(chat_id: str, message: str) -> str:
+    return "ambient-" + hashlib.sha256(f"{chat_id}\0{message}".encode()).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -235,7 +240,12 @@ class AmbientScheduler:
     async def run_once(self) -> AmbientRunResult:
         if self.config.followup_enabled:
             try:
-                await self.followups.run_once(self.adapter.send_message)
+                async def send_followup(chat_id: str, message: str) -> None:
+                    await self.adapter.send_message(
+                        chat_id, message, delivery_id=_delivery_id(chat_id, message)
+                    )
+
+                await self.followups.run_once(send_followup)
             except Exception:  # noqa: BLE001 - follow-up sweep must never kill the scheduler
                 pass
         if not self.config.ambient_enabled:
@@ -267,7 +277,9 @@ class AmbientScheduler:
                 snapshots = snapshots_from_records(data)
                 digest = self._due_daily_digest(chat_id, snapshots)
                 if digest:
-                    await self.adapter.send_message(chat_id, digest)
+                    await self.adapter.send_message(
+                        chat_id, digest, delivery_id=_delivery_id(chat_id, digest)
+                    )
                     sent += 1
                     self._record_digest(chat_id)
                     self._audit(chat_id, digest, status="ok")
@@ -291,7 +303,9 @@ class AmbientScheduler:
                     message = "主动巡检建议：\n" + "\n".join(
                         f"- {decision.message}" for decision in decisions
                     )
-                await self.adapter.send_message(chat_id, message)
+                await self.adapter.send_message(
+                    chat_id, message, delivery_id=_delivery_id(chat_id, message)
+                )
                 sent += 1
                 self._record_decisions(chat_id, decisions)
                 self._audit(chat_id, message, status="ok")
