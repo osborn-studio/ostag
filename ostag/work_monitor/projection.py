@@ -116,8 +116,7 @@ class Projector:
                 duration_seconds=excluded.duration_seconds, summary=excluded.summary,
                 error_class=excluded.error_class, evidence_ref=excluded.evidence_ref,
                 version=excluded.version, occurred_at=excluded.occurred_at
-            WHERE excluded.occurred_at > tasks.occurred_at
-               OR (excluded.occurred_at = tasks.occurred_at AND excluded.version > tasks.version)
+            WHERE excluded.version > tasks.version
             """,
             (
                 event.instance_id,
@@ -131,7 +130,7 @@ class Projector:
                 task.summary,
                 task.error_class,
                 task.evidence_ref,
-                event.sequence,
+                task.version,
                 event.occurred_at,
             ),
         )

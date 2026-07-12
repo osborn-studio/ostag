@@ -17,6 +17,7 @@ def _task_payload(**overrides: object) -> dict[str, object]:
         "summary": "Waiting for cloud credentials",
         "error_class": "external_dependency",
         "evidence_ref": "run:42",
+        "version": 7,
     }
     payload.update(overrides)
     return payload
@@ -130,6 +131,12 @@ def test_event_sequence_must_be_a_positive_integer(sequence: object) -> None:
 def test_task_summary_is_limited_to_500_characters() -> None:
     with pytest.raises(ValueError, match="summary"):
         TaskSnapshot.from_dict(_task_payload(summary="x" * 501))
+
+
+@pytest.mark.parametrize("version", [0, -1, True])
+def test_task_version_must_be_a_positive_integer(version: object) -> None:
+    with pytest.raises(ValueError, match="version"):
+        TaskSnapshot.from_dict(_task_payload(version=version))
 
 
 @pytest.mark.parametrize("status", ["triage", "todo", "ready", "running", "blocked", "done"])
@@ -263,6 +270,7 @@ def test_model_serialization_field_order_is_deterministic() -> None:
         "summary",
         "error_class",
         "evidence_ref",
+        "version",
     ]
     assert list(command.to_dict()) == [
         "command_id",

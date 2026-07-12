@@ -17,6 +17,7 @@ def test_sanitize_projects_only_public_task_fields_and_redacts_secrets() -> None
             "summary": "Authorization: Bearer very-secret-value password=hunter2",
             "error_class": "authorization: Basic base64-secret",
             "evidence_ref": "run:42",
+            "version": 7,
             "source": "private source code",
             "prompt": "system prompt contents",
             "raw_log": "complete log TOKEN=never-leak",
@@ -37,6 +38,7 @@ def test_sanitize_projects_only_public_task_fields_and_redacts_secrets() -> None
         "summary",
         "error_class",
         "evidence_ref",
+        "version",
     }
     assert "abc123" not in serialized
     assert "very-secret-value" not in serialized
@@ -63,6 +65,7 @@ def test_sanitize_truncates_projected_text() -> None:
             "summary": "y" * 700,
             "error_class": None,
             "evidence_ref": "run:42",
+            "version": 7,
         }
     )
 
@@ -82,6 +85,7 @@ def test_sanitize_result_still_enforces_strict_snapshot_validation() -> None:
         "summary": "working",
         "error_class": None,
         "evidence_ref": "run:42",
+        "version": 7,
     }
 
     try:
@@ -112,6 +116,7 @@ def test_sanitize_redacts_quoted_and_existing_secret_formats() -> None:
             "summary": f'Authorization: Bearer "{secrets["quoted_bearer"]}"',
             "error_class": f'{secrets["openai"]} {secrets["slack"]}',
             "evidence_ref": secrets["aws"],
+            "version": 7,
         }
     )
 

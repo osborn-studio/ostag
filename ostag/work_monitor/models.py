@@ -61,6 +61,7 @@ class TaskSnapshot:
     summary: str
     error_class: str | None
     evidence_ref: str | None
+    version: int
 
     _KEYS: ClassVar[tuple[str, ...]] = (
         "task_id",
@@ -73,6 +74,7 @@ class TaskSnapshot:
         "summary",
         "error_class",
         "evidence_ref",
+        "version",
     )
 
     def __post_init__(self) -> None:
@@ -95,6 +97,10 @@ class TaskSnapshot:
             value = getattr(self, field)
             if value is not None:
                 _require_string(value, field)
+        if isinstance(self.version, bool) or not isinstance(self.version, int):
+            raise ValueError("version must be an integer")
+        if self.version <= 0:
+            raise ValueError("version must be a positive integer")
 
     @classmethod
     def from_dict(cls, payload: object) -> TaskSnapshot:

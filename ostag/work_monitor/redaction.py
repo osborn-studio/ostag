@@ -21,6 +21,7 @@ PUBLIC_TASK_FIELDS = (
     "summary",
     "error_class",
     "evidence_ref",
+    "version",
 )
 MAX_TEXT_LENGTH = 500
 _SECRET_PATTERNS = (

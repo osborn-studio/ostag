@@ -7,13 +7,21 @@ from ostag.work_monitor.projection import Projector
 from ostag.work_monitor.store import MonitorStore
 
 
-def event(instance: str, sequence: int, task_id: str, status: str) -> MonitorEvent:
+def event(
+    instance: str,
+    sequence: int,
+    task_id: str,
+    status: str,
+    *,
+    task_version: int | None = None,
+    occurred_at: str | None = None,
+) -> MonitorEvent:
     return MonitorEvent(
         event_id=f"{instance}-{sequence}",
         instance_id=instance,
         sequence=sequence,
         kind="task.completed" if status == "done" else "task.progress",
-        occurred_at=f"2026-07-12T00:00:0{sequence}Z",
+        occurred_at=occurred_at or f"2026-07-12T00:00:0{sequence}Z",
         task=TaskSnapshot(
             task_id=task_id,
             title=f"Task {task_id}",
@@ -25,6 +33,7 @@ def event(instance: str, sequence: int, task_id: str, status: str) -> MonitorEve
             summary="safe summary",
             error_class=None,
             evidence_ref=None,
+            version=sequence if task_version is None else task_version,
         ),
     )
 
@@ -75,15 +84,50 @@ def test_six_stage_counts_and_older_task_version_cannot_overwrite(tmp_path):
     projector = Projector(store)
     statuses = ("triage", "todo", "ready", "running", "blocked", "done")
     for sequence, status in enumerate(statuses, start=1):
-        projector.apply(event("mac", sequence, f"task-{sequence}", status))
+        projector.apply(
+            event(
+                "mac",
+                sequence,
+                f"task-{sequence}",
+                status,
+                task_version=7 if sequence == 6 else sequence,
+            )
+        )
 
-    # A later instance event carrying an older task version must not regress task-6.
-    stale = event("mac", 7, "task-6", "running")
-    object.__setattr__(stale, "occurred_at", "2026-07-12T00:00:05Z")
-    projector.apply(stale)
+    # A later instance event with a later timestamp may still carry an older task version.
+    projector.apply(
+        event(
+            "mac",
+            7,
+            "task-6",
+            "running",
+            task_version=6,
+            occurred_at="2026-07-12T00:00:09Z",
+        )
+    )
 
     assert store.stage_counts() == {status: 1 for status in statuses}
     assert store.get_task("mac", "task-6").status == "done"
+
+
+def test_equal_task_version_is_idempotent_even_with_later_timestamp(tmp_path):
+    store = MonitorStore(tmp_path / "monitor.db")
+    projector = Projector(store)
+    projector.apply(event("mac", 1, "task-1", "running", task_version=7))
+
+    projector.apply(
+        event(
+            "mac",
+            2,
+            "task-1",
+            "done",
+            task_version=7,
+            occurred_at="2026-07-12T00:00:09Z",
+        )
+    )
+
+    assert store.get_task("mac", "task-1").status == "running"
+    assert store.get_task("mac", "task-1").version == 7
 
 
 def test_schema_contains_all_monitor_tables_and_unique_instance_sequence(tmp_path):
