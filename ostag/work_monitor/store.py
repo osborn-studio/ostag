@@ -128,6 +128,20 @@ MIGRATIONS = (
             "ALTER TABLE telegram_callbacks ADD COLUMN control_action TEXT NOT NULL DEFAULT ''",
         )
     ),
+    Migration(
+        statements=(
+            *_V1_STATEMENTS,
+            "ALTER TABLE notification_outbox ADD COLUMN delivery_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE notification_outbox ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'",
+            "ALTER TABLE notification_outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE notification_outbox ADD COLUMN next_attempt_at TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE notification_outbox ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE notification_outbox ADD COLUMN lease_until TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE notification_outbox ADD COLUMN delayed INTEGER NOT NULL DEFAULT 0",
+            "CREATE UNIQUE INDEX IF NOT EXISTS notification_delivery_unique ON notification_outbox(delivery_id) WHERE delivery_id <> ''",
+            "CREATE TABLE IF NOT EXISTS monitor_schedule_windows (window_key TEXT PRIMARY KEY, created_at TEXT NOT NULL)",
+        )
+    ),
 )
 
 

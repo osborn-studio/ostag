@@ -164,6 +164,12 @@ class Settings:
     monitor_instance_secrets: tuple[tuple[str, str], ...] = ()
     monitor_human_credentials: tuple[tuple[str, str, str, str, str], ...] = ()
     monitor_server_max_body_bytes: int = 1_048_576
+    monitor_scheduler_enabled: bool = True
+    monitor_morning_digest_hour: int = 9
+    monitor_evening_digest_hour: int = 19
+    monitor_degraded_seconds: int = 120
+    monitor_offline_seconds: int = 600
+    monitor_notification_retry_cap: int = 5
 
     def validate(self) -> Settings:
         telegram_configured = any((
@@ -309,6 +315,12 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_instance_secrets=_instance_secrets(),
         monitor_human_credentials=_human_credentials(),
         monitor_server_max_body_bytes=_int("OSTAG_MONITOR_SERVER_MAX_BODY_BYTES", 1_048_576),
+        monitor_scheduler_enabled=_bool("OSTAG_MONITOR_SCHEDULER_ENABLED", True),
+        monitor_morning_digest_hour=_int("OSTAG_MONITOR_MORNING_DIGEST_HOUR", 9),
+        monitor_evening_digest_hour=_int("OSTAG_MONITOR_EVENING_DIGEST_HOUR", 19),
+        monitor_degraded_seconds=_int("OSTAG_MONITOR_DEGRADED_SECONDS", 120),
+        monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
+        monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
     )
     if overrides:
         data = settings.__dict__ | overrides

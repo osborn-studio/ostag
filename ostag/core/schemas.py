@@ -79,6 +79,10 @@ LEDGER_EVENT_TYPES = (
     "ambient_decision",
     "cost_recorded",
     "security_event",
+    "notification_enqueue",
+    "notification_deliver",
+    "notification_fail",
+    "notification_deadletter",
 )
 
 

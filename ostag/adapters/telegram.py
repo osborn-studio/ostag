@@ -132,6 +132,8 @@ class TelegramAdapter:
     async def send_message(
         self, chat_id: str, text: str, *, delivery_id: str, chat_type: str = "group"
     ) -> None:
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive messages")
         if not text:
             return
         if self.config.dry_run:

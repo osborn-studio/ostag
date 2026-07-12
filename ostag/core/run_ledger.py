@@ -54,6 +54,19 @@ class RunLedger:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
         return event
 
+    def record_notification(
+        self, delivery_id: str, action: str, payload: dict[str, Any]
+    ) -> LedgerEvent:
+        """Audit scheduler enqueue/delivery outcomes with normal deep redaction."""
+        return self.append(
+            LedgerEvent(
+                event_id=new_id("evt"),
+                run_id=f"notification:{delivery_id}",
+                event_type=f"notification_{action}",
+                payload=payload,
+            )
+        )
+
     def open_run(self, event: NormalizedEvent, *, executor_id: str = "") -> Run:
         """Create a Run for an inbound event and record it in the ledger."""
         run = Run(

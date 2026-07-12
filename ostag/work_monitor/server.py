@@ -63,12 +63,23 @@ class ServerAuth:
             signed_at = 0
             now = int(self.clock())
             fresh = False
-        canonical = "\n".join(("v1", request.method.upper(), request.url.path, instance_id,
-                                timestamp, nonce, hashlib.sha256(body).hexdigest())).encode()
+        canonical = "\n".join(
+            (
+                "v1",
+                request.method.upper(),
+                request.url.path,
+                instance_id,
+                timestamp,
+                nonce,
+                hashlib.sha256(body).hexdigest(),
+            )
+        ).encode()
         expected = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
         valid = bool(secret and nonce and fresh) and hmac.compare_digest(supplied, expected)
         if not valid or not store.consume_instance_nonce(
-            instance_id, nonce, now=now,
+            instance_id,
+            nonce,
+            now=now,
             expires_at=signed_at + self.max_clock_skew_seconds,
         ):
             raise HTTPException(status_code=401, detail="invalid instance credentials")
@@ -98,9 +109,7 @@ class _Runtime:
         self.projector = projector
 
 
-async def _supervise(
-    owner: LifespanOwner, stop: asyncio.Event, backoff: tuple[float, ...]
-) -> None:
+async def _supervise(owner: LifespanOwner, stop: asyncio.Event, backoff: tuple[float, ...]) -> None:
     failures = 0
     while not stop.is_set():
         try:
@@ -135,13 +144,16 @@ def create_app(
     configured = settings.validate() if settings is not None else load_settings()
     runtime = _Runtime(service, projector)
     auto_feishu_ws: LifespanOwner | None = None
+    auto_scheduler: LifespanOwner | None = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        nonlocal auth, auto_feishu_ws
+        nonlocal auth, auto_feishu_ws, auto_scheduler
         if runtime.service is None or runtime.projector is None:
             store = MonitorStore(configured.monitor_server_db)
-            identities = IdentityStore(store.path, enrollment_secret=configured.monitor_enrollment_secret)
+            identities = IdentityStore(
+                store.path, enrollment_secret=configured.monitor_enrollment_secret
+            )
             runtime.service = WorkMonitorService(store, identities)
             runtime.projector = Projector(store)
         if auth is None:
@@ -163,12 +175,38 @@ def create_app(
             assert runtime.service is not None
             runner = OSTagRunner(configured, work_monitor=runtime.service)
             auto_feishu_ws = FeishuAdapter(configured, runner=runner)
+        if scheduler is None and auto_scheduler is None and configured.monitor_scheduler_enabled:
+            from ostag.adapters.feishu import FeishuAdapter
+            from ostag.adapters.telegram import TelegramAdapter, TelegramBotClient
+            from .scheduler import WorkMonitorScheduler
+
+            assert runtime.service is not None
+            transports = {}
+            if configured.feishu_app_id and configured.feishu_app_secret:
+                transports["feishu"] = FeishuAdapter(configured)
+            if configured.telegram_bot_token:
+                transports["telegram"] = TelegramAdapter(
+                    configured, client=TelegramBotClient(configured.telegram_bot_token)
+                )
+            auto_scheduler = WorkMonitorScheduler(
+                runtime.service.store,
+                runtime.service.identities,
+                transports,
+                morning_hour=configured.monitor_morning_digest_hour,
+                evening_hour=configured.monitor_evening_digest_hour,
+                degraded_seconds=configured.monitor_degraded_seconds,
+                offline_seconds=configured.monitor_offline_seconds,
+                retry_cap=configured.monitor_notification_retry_cap,
+            )
         stop = asyncio.Event()
         owners = tuple(
-            owner for owner in (feishu_ws or auto_feishu_ws, scheduler, outbox)
+            owner
+            for owner in (feishu_ws or auto_feishu_ws, scheduler or auto_scheduler)
             if owner is not None
         )
-        tasks = [asyncio.create_task(_supervise(owner, stop, supervisor_backoff)) for owner in owners]
+        tasks = [
+            asyncio.create_task(_supervise(owner, stop, supervisor_backoff)) for owner in owners
+        ]
         try:
             yield
         finally:
@@ -188,12 +226,14 @@ def create_app(
             raise HTTPException(status_code=503, detail="service not started")
         return runtime.service
 
-    if all((
-        configured.feishu_app_id,
-        configured.feishu_app_secret,
-        configured.feishu_encrypt_key,
-        configured.feishu_verification_token,
-    )):
+    if all(
+        (
+            configured.feishu_app_id,
+            configured.feishu_app_secret,
+            configured.feishu_encrypt_key,
+            configured.feishu_verification_token,
+        )
+    ):
         from .feishu_card_security import FeishuCardSecurity
         from .feishu_routes import create_feishu_card_router
 
@@ -210,16 +250,20 @@ def create_app(
             security=SecurityContract("verified_platform", card_security),
         )
 
-    if all((
-        configured.telegram_bot_token,
-        configured.telegram_webhook_secret,
-        configured.telegram_webhook_url,
-    )):
+    if all(
+        (
+            configured.telegram_bot_token,
+            configured.telegram_webhook_secret,
+            configured.telegram_webhook_url,
+        )
+    ):
         from ostag.adapters.telegram import TelegramAdapter, TelegramBotClient
         from .telegram_routes import TelegramWebhookSecurity, create_telegram_router
 
-        if configured.env.casefold() in {"prod", "production"} \
-                and not configured.telegram_webhook_url.startswith("https://"):
+        if configured.env.casefold() in {
+            "prod",
+            "production",
+        } and not configured.telegram_webhook_url.startswith("https://"):
             raise ValueError("Telegram production webhook URL must use HTTPS")
         bot_client = telegram_client or TelegramBotClient(configured.telegram_bot_token)
         if not isinstance(bot_client, TelegramBotClient):
@@ -323,8 +367,12 @@ def create_app(
         svc, principal, destination = human(request)
         try:
             payload = await request.json()
-            message = svc.watch(principal, destination, instance_id=payload.get("instance_id", ""),
-                                task_id=payload.get("task_id", ""))
+            message = svc.watch(
+                principal,
+                destination,
+                instance_id=payload.get("instance_id", ""),
+                task_id=payload.get("task_id", ""),
+            )
             return {"message": message}
         except Exception as exc:
             raise translate(exc) from exc
@@ -363,17 +411,25 @@ def create_app(
 
 
 def register_router(
-    app: FastAPI, router: APIRouter, *, security: SecurityContract,
+    app: FastAPI,
+    router: APIRouter,
+    *,
+    security: SecurityContract,
 ) -> None:
-    if not isinstance(security, SecurityContract) or security.kind not in {
-        "verified_platform", "authenticated_dependency"
-    } or not callable(security.dependency):
+    if (
+        not isinstance(security, SecurityContract)
+        or security.kind not in {"verified_platform", "authenticated_dependency"}
+        or not callable(security.dependency)
+    ):
         raise ValueError("unsupported router security contract")
     app.include_router(router, dependencies=[Depends(security.dependency)])
 
 
 def register_feishu_card_router(
-    app: FastAPI, router: APIRouter, *, security: SecurityContract,
+    app: FastAPI,
+    router: APIRouter,
+    *,
+    security: SecurityContract,
 ) -> None:
     """Register only the card-action callback behind verified-platform security."""
     if security.kind != "verified_platform":
@@ -385,7 +441,10 @@ def register_feishu_card_router(
 
 
 def register_telegram_router(
-    app: FastAPI, router: APIRouter, *, security: SecurityContract,
+    app: FastAPI,
+    router: APIRouter,
+    *,
+    security: SecurityContract,
 ) -> None:
     """Register only the production Telegram webhook behind platform verification."""
     if security.kind != "verified_platform":
@@ -406,4 +465,6 @@ def _route_paths(routes: Iterable[object]) -> set[str]:
         if nested is not None:
             paths.update(_route_paths(nested))
     return paths
+
+
 app = create_app()
