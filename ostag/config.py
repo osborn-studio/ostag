@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -125,6 +126,10 @@ class Settings:
     monitor_command_poll_seconds: int = 10
     monitor_osstack_bin: str = "osstack"
     monitor_osstack_references: Path = Path("./logs/osstack_task_references.json")
+    monitor_server_db: Path = Path("/var/lib/ostag/work_monitor.sqlite3")
+    monitor_human_token: str = ""
+    monitor_admin_token: str = ""
+    monitor_instance_secrets: tuple[tuple[str, str], ...] = ()
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -234,6 +239,17 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_osstack_bin=os.getenv("OSTAG_MONITOR_OSSTACK_BIN", "osstack"),
         monitor_osstack_references=Path(
             os.getenv("OSTAG_MONITOR_OSSTACK_REFERENCES", "./logs/osstack_task_references.json")
+        ),
+        monitor_server_db=Path(
+            os.getenv("OSTAG_MONITOR_SERVER_DB", "/var/lib/ostag/work_monitor.sqlite3")
+        ),
+        monitor_human_token=os.getenv("OSTAG_MONITOR_HUMAN_TOKEN", ""),
+        monitor_admin_token=os.getenv("OSTAG_MONITOR_ADMIN_TOKEN", ""),
+        monitor_instance_secrets=tuple(
+            (str(key), str(value))
+            for key, value in json.loads(
+                os.getenv("OSTAG_MONITOR_INSTANCE_SECRETS", "{}")
+            ).items()
         ),
     )
     if overrides:

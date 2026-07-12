@@ -489,8 +489,8 @@ class Reporter:
         empty = b"{}"
         try:
             response = self.transport.request(
-                "GET",
-                f"{self.central_url}/v1/commands/{self.instance_id}",
+                "POST",
+                f"{self.central_url}/v1/commands/poll",
                 empty,
                 self._headers(empty),
             )
@@ -607,12 +607,11 @@ class Reporter:
                                 command.command_id,
                             ),
                         )
-            body = json.dumps(
-                {"command_id": command.command_id, "result": result}, sort_keys=True
-            ).encode()
+            body = json.dumps({"result": result}, sort_keys=True).encode()
             try:
                 ack_response = self.transport.request(
-                    "POST", f"{self.central_url}/v1/commands/ack", body, self._headers(body)
+                    "POST", f"{self.central_url}/v1/commands/{command.command_id}/ack", body,
+                    self._headers(body)
                 )
             except (OSError, TimeoutError, urllib.error.URLError) as exc:
                 self._record_error(f"command ack transport: {exc}")
