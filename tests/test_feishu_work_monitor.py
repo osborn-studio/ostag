@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.config import load_settings
+from ostag.work_monitor.feishu_card_security import feishu_signature
 from ostag.work_monitor.feishu_cards import render_feishu_card
 from ostag.work_monitor.identity import IdentityStore
 from ostag.work_monitor.projection import Projector
@@ -71,11 +72,30 @@ def test_production_composition_registers_cards_only_when_fully_configured(tmp_p
         feishu_verification_token="verify", feishu_use_websocket=False,
     )
     present = create_app(settings=configured, **base)
-    def paths(app):
-        return {getattr(route, "path", None) for route in app.routes}
-    assert "/webhooks/feishu/card-action" not in paths(absent)
-    assert "/webhooks/feishu/card-action" in paths(present)
-    assert "/webhooks/feishu" not in paths(present)
+    challenge = json.dumps(
+        {"challenge": "verified", "token": "verify", "type": "url_verification"},
+        separators=(",", ":"),
+    ).encode()
+    timestamp = str(int(time.time()))
+    headers = {
+        "X-Lark-Request-Timestamp": timestamp,
+        "X-Lark-Request-Nonce": "composition-challenge",
+        "X-Lark-Signature": feishu_signature(
+            timestamp, "composition-challenge", "encrypt", challenge
+        ),
+        "Content-Type": "application/json",
+    }
+    with TestClient(absent) as client:
+        assert client.post("/webhooks/feishu/card-action", content=challenge).status_code == 404
+    with TestClient(present) as client:
+        assert client.post(
+            "/webhooks/feishu/card-action", content=challenge,
+            headers=headers | {"X-Lark-Signature": "bad"},
+        ).status_code == 401
+        assert client.post(
+            "/webhooks/feishu/card-action", content=challenge, headers=headers
+        ).json() == {"challenge": "verified"}
+        assert client.post("/webhooks/feishu", content=challenge, headers=headers).status_code == 404
 
 
 def test_production_composition_supervises_auto_ws_restart_and_shutdown(

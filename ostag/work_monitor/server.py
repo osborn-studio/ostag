@@ -345,8 +345,21 @@ def register_feishu_card_router(
     """Register only the card-action callback behind verified-platform security."""
     if security.kind != "verified_platform":
         raise ValueError("Feishu card callbacks require verified_platform security")
-    paths = {getattr(route, "path", None) for route in router.routes}
+    paths = _route_paths(router.routes)
     if paths != {"/webhooks/feishu/card-action"}:
         raise ValueError("Feishu router may expose only /webhooks/feishu/card-action")
     register_router(app, router, security=security)
+
+
+def _route_paths(routes: Iterable[object]) -> set[str]:
+    """Flatten public paths without depending on FastAPI's router wrapper type."""
+    paths: set[str] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        if isinstance(path, str):
+            paths.add(path)
+        nested = getattr(route, "routes", None)
+        if nested is not None:
+            paths.update(_route_paths(nested))
+    return paths
 app = create_app()
