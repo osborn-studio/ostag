@@ -192,31 +192,42 @@ class FeishuAdapter:
         from ostag.work_monitor.service import parse_monitor_command
 
         command = parse_monitor_command(event.text)
-        if command is None:
+        if command is None or command.name not in {"board", "task", "instances"}:
             return False
         principal = Principal("feishu", event.sender_id)
         destination = Destination("feishu", event.destination_id, event.chat_type)
-        fallback = service.handle_event(event)
-        if command.name == "board":
-            view = service.board(principal, destination, page=int(command.argument or "1"))
-            card = render_feishu_card(view)
-        elif command.name == "task":
-            view = service.task(principal, destination, command.argument)
-            factory = None
-            if service.identities.allows(principal, destination, "write"):
-                def factory(action: str, task_id: str) -> str:
-                    return issue_feishu_callback(
-                        service, principal, destination, action=action, task_id=task_id
-                    )
-            card = render_feishu_card(view, callback_factory=factory)
-        elif command.name == "instances":
-            instances = service.instances(principal, destination)
-            card = {"config": {"wide_screen_mode": False}, "header": {
-                "template": "indigo", "title": {"tag": "plain_text", "content": "OStag 实例"}},
-                "elements": [{"tag": "div", "text": {"tag": "plain_text",
-                    "content": str(item.get("instance_id", ""))[:80]}} for item in instances[:10]]}
-        else:
-            return False
+        try:
+            if command.name == "board":
+                view = service.board(principal, destination, page=int(command.argument or "1"))
+                fallback = view.to_text()
+                card = render_feishu_card(view)
+            elif command.name == "task":
+                view = service.task(principal, destination, command.argument)
+                fallback = view.to_text()
+                factory = None
+                if service.identities.allows(principal, destination, "write"):
+                    def factory(action: str, task_id: str) -> str:
+                        return issue_feishu_callback(
+                            service, principal, destination, action=action, task_id=task_id
+                        )
+                card = render_feishu_card(view, callback_factory=factory)
+            else:
+                instances = service.instances(principal, destination)
+                fallback = "实例\n" + "\n".join(
+                    str(item.get("instance_id", "")) for item in instances
+                )
+                card = {"config": {"wide_screen_mode": False}, "header": {
+                    "template": "indigo", "title": {"tag": "plain_text", "content": "OStag 实例"}},
+                    "elements": [{"tag": "div", "text": {"tag": "plain_text",
+                        "content": str(item.get("instance_id", ""))[:80]}} for item in instances[:10]]}
+        except Exception:  # service owns stable, localized error rendering
+            try:
+                fallback = service.handle_event(event)
+            except (PermissionError, ValueError):
+                fallback = "没有权限或请求无效。"
+            if fallback:
+                await self.reply(event, fallback)
+            return True
         await self.send_card(
             event.destination_id, card, fallback, chat_type=event.chat_type,
             delivery_id=f"monitor-{event.event_id or event.message_id}",

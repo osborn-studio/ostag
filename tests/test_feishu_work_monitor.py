@@ -91,6 +91,7 @@ async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_b
 ) -> None:
     mappings = []
     sent = []
+    handled = []
 
     class Store:
         def create_control_callback(self, callback_id, **mapping):
@@ -105,6 +106,7 @@ async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_b
         identities = Identities()
 
         def handle_event(self, event):
+            handled.append(event.text)
             return "fallback task"
 
         def task(self, principal, destination, reference):
@@ -134,6 +136,51 @@ async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_b
     assert set(value) == {"callback_id"} and value["callback_id"].startswith("f_")
     assert mappings[0][1]["task_id"] == "task-1"
     assert sent[0][1]["delivery_id"] == "monitor-evt-1"
+    assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_ws_rich_dispatch_leaves_watch_to_runner_once_and_replies_for_missing_task(
+    monkeypatch, tmp_path: Path
+) -> None:
+    calls = []
+
+    class Service:
+        def handle_event(self, event):
+            calls.append(event.text)
+            return "未找到该任务。"
+
+        def task(self, principal, destination, reference):
+            raise LookupError(reference)
+
+    class Runner:
+        work_monitor = Service()
+
+        async def handle_event(self, event):
+            return self.work_monitor.handle_event(event)
+
+    adapter = FeishuAdapter(load_settings(None, audit_log=tmp_path / "audit.log"))
+    replies = []
+
+    async def reply(event, text):
+        replies.append(text)
+
+    monkeypatch.setattr(adapter, "reply", reply)
+    watch = NormalizedEvent(
+        platform="feishu", event_id="watch", chat_id="oc", message_id="m1",
+        sender_id="ou", text="/watch task-1", mention_bot=True, chat_type="group",
+        destination_id="oc",
+    )
+    assert await adapter._handle_monitor_card(watch, Runner()) is False
+    await Runner().handle_event(watch)
+    assert calls == ["/watch task-1"]
+    missing = NormalizedEvent(
+        platform="feishu", event_id="missing", chat_id="oc", message_id="m2",
+        sender_id="ou", text="/task missing", mention_bot=True, chat_type="group",
+        destination_id="oc",
+    )
+    assert await adapter._handle_monitor_card(missing, Runner()) is True
+    assert calls[-1] == "/task missing" and replies == ["未找到该任务。"]
 
 
 def test_feishu_route_is_absent_until_strict_registration() -> None:
