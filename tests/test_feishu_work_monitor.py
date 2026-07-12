@@ -44,13 +44,15 @@ def test_feishu_cards_are_vertical_mobile_high_contrast() -> None:
 
 def test_feishu_route_is_absent_until_strict_registration() -> None:
     app = FastAPI()
-    assert "/webhooks/feishu/card-action" not in {route.path for route in app.routes}
+    with TestClient(app) as client:
+        assert client.post("/webhooks/feishu/card-action").status_code == 404
     router = APIRouter()
     router.add_api_route("/webhooks/feishu/card-action", lambda: {"ok": True}, methods=["POST"])
     register_feishu_card_router(
         app, router, security=SecurityContract("verified_platform", lambda: None)
     )
-    assert "/webhooks/feishu/card-action" in {route.path for route in app.routes}
+    with TestClient(app) as client:
+        assert client.post("/webhooks/feishu/card-action").json() == {"ok": True}
     extra = APIRouter()
     extra.add_api_route("/webhooks/feishu", lambda: {}, methods=["POST"])
     with pytest.raises(ValueError):
