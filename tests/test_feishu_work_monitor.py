@@ -57,9 +57,10 @@ def test_feishu_cards_are_vertical_mobile_high_contrast() -> None:
         TaskDetailView.from_task(
             {"task_id": "task-1", "title": "Ship", "status": "running", "progress": 40},
             capabilities=("pause", "cancel"),
-        )
+        ), callback_factory=lambda action, task: f"f_{action}",
     )
     assert [element["tag"] for element in detail["elements"]] == ["markdown", "action", "action"]
+    assert detail["elements"][1]["actions"][0]["value"] == {"callback_id": "f_pause"}
 
 
 def test_feishu_cards_escape_untrusted_markdown_and_bound_elements() -> None:

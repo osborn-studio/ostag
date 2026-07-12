@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from .rendering import MobileBoardView, TaskDetailView
@@ -20,7 +21,10 @@ def _safe(value: object, limit: int) -> str:
     return escaped if len(escaped) <= limit else escaped[: limit - 1] + "…"
 
 
-def render_feishu_card(view: MobileBoardView | TaskDetailView) -> dict[str, Any]:
+def render_feishu_card(
+    view: MobileBoardView | TaskDetailView,
+    *, callback_factory: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
     if isinstance(view, MobileBoardView):
         elements: list[dict[str, Any]] = []
         for task in view.cards[: min(6, MAX_ELEMENTS // 2)]:
@@ -38,12 +42,17 @@ def render_feishu_card(view: MobileBoardView | TaskDetailView) -> dict[str, Any]
          f"任务 `{_safe(task.get('task_id'), 80)}`"}
     ]
     for action in view.capabilities:
+        if callback_factory is None:
+            continue
+        callback_id = callback_factory(action, str(task.get("task_id", "")))
+        if not callback_id or len(callback_id.encode()) > 64:
+            raise ValueError("Feishu callback ID must be compact and opaque")
         elements.append({
             "tag": "action",
             "actions": [{
                 "tag": "button", "text": {"tag": "plain_text", "content": action.upper()},
                 "type": "danger" if action == "cancel" else "primary",
-                "value": {"command": action, "task_id": str(task.get("task_id", ""))[:80]},
+                "value": {"callback_id": callback_id},
             }],
         })
     return _card("OStag 任务详情", elements)

@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import json
+import time
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
+from ostag.core.identity import Principal
 from ostag.work_monitor.feishu_card_security import (
     FeishuCardSecurity,
     decrypt_feishu_payload,
     feishu_signature,
 )
 from ostag.work_monitor.feishu_routes import create_feishu_card_router
+from ostag.work_monitor.feishu_routes import issue_feishu_callback
+from ostag.work_monitor.identity import Destination, IdentityStore
+from ostag.work_monitor.models import MonitorEvent
+from ostag.work_monitor.projection import Projector
 from ostag.work_monitor.server import SecurityContract, register_feishu_card_router
+from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 
 
@@ -237,3 +244,74 @@ def test_wrong_verified_app_id_never_reaches_card_service(tmp_path) -> None:
                                headers=_headers(body))
     assert response.status_code == 401
     assert calls == {"decrypt": 1, "service": 0}
+
+
+def test_encrypted_opaque_control_proposes_then_confirms_exactly_once(tmp_path) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    identities = IdentityStore(store.path)
+    principal = Principal("feishu", "ou_user")
+    destination = Destination("feishu", "oc_chat", "group")
+    identities.enroll_group(principal, destination, scope="all", local_admin=True)
+    service = WorkMonitorService(store, identities)
+    projector = Projector(store)
+    task = {"task_id": "task-1", "title": "Ship", "project": "ostag",
+            "status": "running", "agent": "codex", "progress": 20,
+            "duration_seconds": 1, "summary": "", "error_class": None,
+            "evidence_ref": None, "version": 1}
+    projector.apply(MonitorEvent.from_dict({
+        "event_id": "evt-1", "instance_id": "runner-1", "sequence": 1,
+        "kind": "task.created", "occurred_at": "2026-07-13T00:00:00+00:00",
+        "task": task, "per_task_capabilities": {},
+    }))
+    projector.apply(MonitorEvent.from_dict({
+        "event_id": "evt-2", "instance_id": "runner-1", "sequence": 2,
+        "kind": "instance.heartbeat", "occurred_at": "2026-07-13T00:00:01+00:00",
+        "task": None, "per_task_capabilities": {"task-1": ["pause"]},
+    }))
+    initial = issue_feishu_callback(
+        service, principal, destination, action="pause", task_id="task-1",
+        now=int(time.time()),
+    )
+    payloads: dict[str, bytes] = {}
+
+    def action(callback_id: str) -> bytes:
+        return json.dumps({"schema": "2.0", "header": {
+            "event_type": "card.action.trigger", "token": "verify", "app_id": "app",
+        }, "event": {"operator": {"open_id": "ou_user"},
+            "context": {"open_chat_id": "oc_chat"},
+            "action": {"tag": "button", "value": {"callback_id": callback_id}}}},
+            separators=(",", ":")).encode()
+
+    payloads["first"] = action(initial)
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=store, clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: payloads[cipher],
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app, create_feishu_card_router(service),
+        security=SecurityContract("verified_platform", security),
+    )
+
+    def envelope(cipher: str, nonce: str) -> tuple[bytes, dict[str, str]]:
+        body = json.dumps({"encrypt": cipher}, separators=(",", ":")).encode()
+        return body, _headers(body, nonce=nonce)
+
+    with TestClient(app) as client:
+        body, headers = envelope("first", "first")
+        first = client.post("/webhooks/feishu/card-action", content=body, headers=headers).json()
+        with store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0
+        confirm = first["card"]["elements"][0]["actions"][0]["value"]["callback_id"]
+        payloads["confirm"] = action(confirm)
+        body, headers = envelope("confirm", "confirm")
+        assert client.post("/webhooks/feishu/card-action", content=body,
+                           headers=headers).json()["toast"]["type"] == "success"
+        with store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 1
+        body, headers = envelope("confirm", "replay")
+        assert client.post("/webhooks/feishu/card-action", content=body,
+                           headers=headers).json()["toast"]["type"] == "error"
+        with store.connect() as db:
+            assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 1

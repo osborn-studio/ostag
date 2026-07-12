@@ -317,6 +317,17 @@ class MonitorStore:
         expires_at: int = 0,
         control_action: str = "",
     ) -> None:
+        self.create_control_callback(
+            callback_id, action=action, task_id=task_id, destination_id=destination_id,
+            chat_type=chat_type, principal_platform=principal_platform, actor_id=actor_id,
+            expires_at=expires_at, control_action=control_action,
+        )
+
+    def create_control_callback(
+        self, callback_id: str, *, action: str, task_id: str, destination_id: str,
+        chat_type: str, principal_platform: str, actor_id: str, expires_at: int,
+        control_action: str = "",
+    ) -> None:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO telegram_callbacks(callback_id,action,task_id,destination_id,chat_type,"
@@ -343,6 +354,15 @@ class MonitorStore:
         destination_id: str = "",
         chat_type: str = "",
         now: int = 0,
+    ) -> dict[str, str] | None:
+        return self.consume_control_callback(
+            callback_id, principal_platform=principal_platform, actor_id=actor_id,
+            destination_id=destination_id, chat_type=chat_type, now=now,
+        )
+
+    def consume_control_callback(
+        self, callback_id: str, *, principal_platform: str, actor_id: str,
+        destination_id: str, chat_type: str, now: int,
     ) -> dict[str, str] | None:
         with self.transaction() as connection:
             row = connection.execute(

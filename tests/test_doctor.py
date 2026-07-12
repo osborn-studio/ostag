@@ -197,7 +197,7 @@ def test_production_monitor_platform_and_stale_instance_checks(monkeypatch, tmp_
         feishu_app_secret="fake-feishu-secret",
         feishu_verification_token="verify",
         feishu_encrypt_key="encrypt",
-        feishu_use_websocket=False,
+        feishu_use_websocket=True,
         feishu_callback_url="https://monitor.example/webhooks/feishu/card-action",
         monitor_offline_seconds=600,
     )
@@ -209,6 +209,23 @@ def test_production_monitor_platform_and_stale_instance_checks(monkeypatch, tmp_
     assert "feishu_callback" in output and "verification passed" in output
     assert "stale_instances" in output and "mac" in output
     assert "fake-feishu-secret" not in output
+
+
+def test_production_feishu_doctor_rejects_callback_only_without_websocket(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    config = load_settings(
+        None, env="production", platform="feishu", audit_log=tmp_path / "audit.log",
+        feishu_app_id="app", feishu_app_secret="secret",
+        feishu_verification_token="verify", feishu_encrypt_key="encrypt",
+        feishu_use_websocket=False,
+        feishu_callback_url="https://monitor.example/webhooks/feishu/card-action",
+    )
+    check = next(item for item in run_doctor(
+        config, http_probe=lambda *args: (401, b"")
+    ) if item.name == "feishu_callback")
+    assert check.ok is False
 
 
 def test_production_telegram_doctor_requires_verified_webhook_status(
@@ -284,7 +301,7 @@ def test_feishu_callback_runtime_probe_failure_and_exception_are_redacted(
         feishu_app_secret="fake-callback-secret",
         feishu_verification_token="verify",
         feishu_encrypt_key="encrypt",
-        feishu_use_websocket=False,
+        feishu_use_websocket=True,
         feishu_callback_url="https://monitor.example/webhooks/feishu/card-action",
     )
 

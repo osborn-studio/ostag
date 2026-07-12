@@ -335,7 +335,7 @@ def _check_monitor_platform(config: Settings, http_probe: HttpProbe) -> DoctorCh
                 config.feishu_encrypt_key,
                 config.feishu_callback_url.startswith("https://"),
             )
-        ) and not config.feishu_use_websocket
+        ) and config.feishu_use_websocket
         if not configured:
             return DoctorCheck(
                 "feishu_callback",
