@@ -70,7 +70,7 @@
 
 **Files (in `/Users/gilbertchen/Documents/CODE/agentsteam/osstack`):** Modify `packages/cli/src/bin.ts` and the existing loop/task runtime owning task lifecycle; create/modify adjacent `*.test.ts` CLI/runtime tests; update the CLI reference and capability/version declaration.
 
-- [ ] Do not edit `/Users/gilbertchen/Documents/CODE/agentsteam/osstack` directly. First run `git -C .../osstack status --short`; preserve all user changes and abort direct-main work when dirty. Create an ignored isolated worktree/branch such as `git -C .../osstack worktree add .../osstack/.worktrees/ostag-remote-controls -b codex/ostag-remote-controls`. Record source HEAD, dirty-main guard result, and run the repository baseline install/build/focused tests in the isolated worktree before edits.
+- [ ] Do not edit `/Users/gilbertchen/Documents/CODE/agentsteam/osstack` directly. Run its dirty-main guard and preserve user changes. Use global worktree path `~/.config/superpowers/worktrees/osstack/ostag-task-controls`: before creation verify the path does not exist and `codex/ostag-task-controls` is not already attached/ambiguous with `git worktree list --porcelain` and `git branch --list`; then create it from recorded source HEAD. Run baseline install/build/focused tests there before edits; no repository ignore change is needed.
 - [ ] Locate authoritative task runtime and cockpit retry with `rg "retry|requeue|loop.stop|cancel|kanban.move|daemon.resume" packages`; record exact paths. First add characterization tests proving existing retry accepts only failed tasks and returns/creates the requeued attempt; do not reimplement it. Write failing tests for pause preserving resumable state, resume continuing the same task/run, and versioned remote command results.
 - [ ] Run exact focused pnpm/Vitest tests; expect cockpit retry characterization to pass and pause/resume/versioned contract tests to fail.
 - [ ] Adapt existing retry into the versioned remote command contract. Add only missing `task pause|resume` runtime/CLI capabilities with structured JSON containing task ID, prior/new status and monotonic version. Pause quiesces the active loop and resume continues that task; neither aliases `kanban.move` or `daemon.resume`.
@@ -89,42 +89,44 @@
 
 ### Task 5: Reuse receipts for safe remote controls
 
-**Files:** Modify `ostag/core/permissions.py`, `ostag/core/receipts.py`, `ostag/core/run_ledger.py`, `ostag/work_monitor/service.py`; create `tests/test_work_monitor_controls.py`.
+**Files:** Modify `ostag/core/schemas.py`, `ostag/core/permissions.py`, `ostag/core/receipts.py`, `ostag/core/run_ledger.py`, `ostag/work_monitor/service.py`; create `tests/test_work_monitor_controls.py`; modify `tests/test_schemas.py`, `tests/test_run_ledger.py`, `tests/test_receipts.py`.
 
-- [ ] Write failing tests proving pause/resume/retry/cancel create `ActionReceipt`; no command exists before approval/apply; controls need `write`; group cancel is denied; cancel confirmation expires after 300 seconds and is single-use; stale task version, cross-instance target and replay are rejected and ledgered.
+- [ ] Write failing tests proving pause/resume/retry/cancel create `ActionReceipt`; no command exists before approval/apply; controls need `write`; group cancel is denied; confirmation expires/single-use; stale/cross-instance/replay reject. Add fixture tests reading old ledger receipts without serialized Principal, unambiguously migrating from legacy platform/channel context, rejecting ambiguous legacy actor identity, and round-tripping new platform-scoped Principal.
 - [ ] Run `uv run pytest tests/test_work_monitor_controls.py -q`; expect unsupported work-control behavior.
-- [ ] Extend receipt mutation types/verb mapping without changing existing transitions. `apply` of an approved work-control receipt writes exactly one `RemoteCommand` containing expected version/status, opaque nonce, requester, receipt ID and expiry. Use current permission resolution and `RunLedger.record_receipt*`; add monitor audit event payloads only.
+- [ ] Extend `MUTATION_TYPES` and `ActionReceipt` serialization for work controls and optional canonical Principal without changing existing transitions. Implement backward-compatible `from_dict`: derive legacy principal only from explicit receipt platform/channel context; mark ambiguous records legacy/unbound and deny control. New receipts always serialize platform + actor ID. Approved apply writes exactly one versioned command.
 - [ ] Implement command ack mapping back to receipt terminal state and a new monitor event; failure never masquerades as applied.
 - [ ] Run focused tests plus `tests/test_receipts.py tests/test_permissions.py tests/test_cli_receipts.py`; expect pass. Commit `feat(work-monitor): govern remote task controls with receipts`.
 
-### Task 6: Compose the persistent FastAPI central service
+### Task 6: Compose core FastAPI service and lifespan
 
 **Files:** Create `ostag/work_monitor/server.py`; create `tests/test_work_monitor_server.py`; modify `pyproject.toml`, `ostag/config.py`; create `deploy/work-monitor/Dockerfile`, `deploy/work-monitor/docker-compose.yml`.
 
-- [ ] Using only completed Task 1–5 domain interfaces, add `server = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]`. Write failing `TestClient`/lifespan tests for APIs, scoped Principal bindings/subscriptions, governed command single-consumer poll/ack, webhook routes, `/healthz`, one Feishu WS consumer, crash backoff, no duplicate consumer and graceful shutdown.
+- [ ] Using only completed Task 1–5 domain interfaces, add `server = ["fastapi>=0.115", "uvicorn[standard]>=0.34"]`. Write failing tests for core APIs, scoped bindings/subscriptions, governed command single-consumer poll/ack, `/healthz`, Feishu WS lifespan supervision and graceful shutdown. Do not register either platform webhook in this task.
 - [ ] Run `uv run --extra server pytest tests/test_work_monitor_server.py -q`; expect missing composition root/routes, not missing domain placeholders.
-- [ ] Compose completed repository/projector/service/control interfaces into `/v1/events`, `/v1/board`, `/v1/tasks/{id}`, `/v1/instances`, `/v1/subscriptions`, `/v1/commands/poll`, `/v1/commands/{id}/ack`, both platform webhooks and `/healthz`. Authenticate before domain calls and construct Principal only from authenticated platform context.
+- [ ] Compose completed interfaces into `/v1/events`, `/v1/board`, `/v1/tasks/{id}`, `/v1/instances`, `/v1/subscriptions`, `/v1/commands/poll`, `/v1/commands/{id}/ack` and `/healthz` only. Authenticate before domain calls. Provide explicit router-registration hook used by later platform slices; no placeholder webhook route or fake handler.
 - [ ] Implement lifespan ownership/supervision and Docker Compose single worker, persistent volume, restart/healthcheck and no secret literals.
 - [ ] Run focused tests, Docker Compose config and compileall; expect pass. Commit `feat(work-monitor): compose persistent central service`.
 
 ### Task 7: Feishu mobile cards and callbacks
 
-**Files:** Modify `ostag/adapters/base.py`, `ostag/adapters/feishu.py`; create `ostag/work_monitor/feishu_cards.py`, `ostag/work_monitor/feishu_card_security.py`, `tests/test_feishu_work_monitor.py`, `tests/test_feishu_card_security.py`; modify `docs/ostag/feishu_setup.md`.
+**Files:** Modify `ostag/adapters/base.py`, `ostag/adapters/feishu.py`, `ostag/work_monitor/server.py`; create `ostag/work_monitor/feishu_cards.py`, `ostag/work_monitor/feishu_card_security.py`, `ostag/work_monitor/feishu_routes.py`, `tests/test_feishu_work_monitor.py`, `tests/test_feishu_card_security.py`; modify `docs/ostag/feishu_setup.md`.
 
 - [ ] Write failing renderer tests for mobile cards and proactive sends. Write platform-security spy tests for the exact pipeline: bad raw-body/ciphertext signature means decryptor and runner are both uncalled; tampered ciphertext is rejected before decrypt; valid signature then decrypt/token/schema; callback `Principal` actor comes from verified Feishu payload and ignores button actor fields; bad token/schema never reaches runner; encrypted payload without key is rejected.
 - [ ] Run `uv run pytest tests/test_feishu_work_monitor.py -q`; expect missing rich-message APIs.
 - [ ] Add rich sends/renderers. Implement `FeishuCardSecurity` in this non-reorderable sequence: capture raw body/ciphertext, timestamp and nonce; calculate platform signature with encrypt key and compare via `hmac.compare_digest`; enforce time window and persist replay key; decrypt only after those checks; validate plaintext verification token and strict schema; then answer challenge or normalize action. Reject encrypted input without key. This is separate from reporter HMAC.
+- [ ] Create the real `/webhooks/feishu/card-action` APIRouter around completed security/adapter code and register it through Task 6's router hook. Tests prove the route does not exist before registration, then handles challenge/action and all failure paths without placeholders.
 - [ ] Keep ordinary messages exclusively on the lifespan-supervised Feishu WebSocket path. The HTTPS endpoint accepts card actions/challenge only and rejects ordinary message events. Add deployment settings for WS enabled=true and card action URL; document that there is no message-webhook fallback.
 - [ ] Document lark-cli app creation/update, minimum message/card/event scopes, `open_id` binding, callback URL/signature, publication and rollback commands with secret placeholders.
 - [ ] Run `uv run pytest tests/test_feishu_work_monitor.py tests/test_feishu_card_security.py tests/test_event_normalization.py tests/test_work_monitor_server.py -q`; expect pass, including crash supervision and graceful shutdown. Commit `feat(feishu): secure cards and supervise websocket input`.
 
 ### Task 8: Telegram transport and InlineKeyboard parity
 
-**Files:** Create `ostag/adapters/telegram.py`, `ostag/work_monitor/telegram_views.py`, `tests/test_telegram_work_monitor.py`, `docs/ostag/telegram_setup.md`; modify `ostag/adapters/__init__.py`, `ostag/core/event.py`, `ostag/config.py`, `ostag/main.py`, `pyproject.toml`, `.env.example`.
+**Files:** Create `ostag/adapters/telegram.py`, `ostag/work_monitor/telegram_views.py`, `ostag/work_monitor/telegram_routes.py`, `tests/test_telegram_work_monitor.py`, `docs/ostag/telegram_setup.md`; modify `ostag/work_monitor/server.py`, `ostag/adapters/__init__.py`, `ostag/core/event.py`, `ostag/config.py`, `ostag/main.py`, `pyproject.toml`, `.env.example`.
 
 - [ ] Write failing tests for webhook secret validation, message/callback normalization, HTML escaping, board pagination, InlineKeyboard callback payload under 64 bytes, `answerCallbackQuery`, proactive private/group send, and equivalent receipt confirmation behavior.
 - [ ] Run `uv run pytest tests/test_telegram_work_monitor.py -q`; expect missing platform/adapter.
 - [ ] Add `telegram` to Platform and adapter factory; implement stdlib HTTP Bot API client with injectable transport. Render shared view models as escaped HTML plus InlineKeyboard; callback data contains only compact opaque action/page IDs.
+- [ ] Create and register the real `/webhooks/telegram` APIRouter only after Telegram secret validation, normalization and adapter are implemented. Tests prove no pre-Task-8 placeholder route and verify the registered route constructs Principal from trusted Telegram update data.
 - [ ] Add Telegram token, webhook secret/base URL and allowed chat settings. Document BotFather token creation, webhook `secret_token`, private administrator binding, group privacy/allowlist and rollback.
 - [ ] Run focused tests plus all normalization tests; expect pass. Commit `feat(telegram): add work monitor bot transport`.
 
