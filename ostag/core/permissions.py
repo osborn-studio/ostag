@@ -27,6 +27,10 @@ VERB_REQUIRED_LEVEL = {
     "reject": "propose",
     "approve": "write",
     "apply": "write",
+    "pause": "write",
+    "resume": "write",
+    "retry": "write",
+    "cancel": "write",
 }
 
 _ORDER = {level: index for index, level in enumerate(PERMISSION_LEVELS)}

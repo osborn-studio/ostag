@@ -5,10 +5,15 @@ from __future__ import annotations
 import json
 import shlex
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from ostag.core.event import NormalizedEvent
 from ostag.core.identity import Principal
+from ostag.core.receipts import ensure_fresh_confirmation, transition_receipt
+from ostag.core.run_ledger import RunLedger
+from ostag.core.safety import redact_secrets
+from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 
 from .identity import Destination, IdentityError, IdentityStore
 from .rendering import MobileBoardView, TaskDetailView
@@ -56,9 +61,19 @@ def parse_monitor_command(text: str) -> MonitorCommand | None:
 
 
 class WorkMonitorService:
-    def __init__(self, store: MonitorStore, identities: IdentityStore) -> None:
+    def __init__(
+        self,
+        store: MonitorStore,
+        identities: IdentityStore,
+        *,
+        ledger: RunLedger | None = None,
+        clock: Any | None = None,
+    ) -> None:
         self.store = store
         self.identities = identities
+        self.ledger = ledger or RunLedger(store.path.with_name("run_ledger.jsonl"))
+        self.clock = clock or (lambda: datetime.now(UTC))
+        self.ledger.clock = self.clock
 
     def _require(self, principal: Principal, destination: Destination, capability: str) -> None:
         if not self.identities.allows(principal, destination, capability):
@@ -204,6 +219,206 @@ class WorkMonitorService:
         self.identities.subscribe(principal, destination, instance_id=instance_id, task_id=task_id)
         target = task_id or instance_id or "全部任务"
         return f"已订阅 {target}"
+
+    def _control_task(
+        self, principal: Principal, destination: Destination, task_id: str
+    ) -> dict[str, Any]:
+        self._require(principal, destination, "write")
+        matches = [task for task in self._scoped_tasks(destination) if task["task_id"] == task_id]
+        if len(matches) != 1:
+            raise TaskNotFound(task_id)
+        return matches[0]
+
+    def propose_control(
+        self,
+        principal: Principal,
+        destination: Destination,
+        *,
+        task_id: str,
+        action: str,
+    ) -> ActionReceipt:
+        if action not in {"pause", "resume", "retry", "cancel"}:
+            raise SchemaError(
+                "unsupported_control",
+                f"Unsupported control {action!r}",
+                "Use pause, resume, retry, or cancel.",
+            )
+        if destination.chat_type != "private" and action == "cancel":
+            raise IdentityError("cancel controls require a private destination")
+        task = self._control_task(principal, destination, task_id)
+        if action not in self._capabilities(task):
+            raise SchemaError(
+                "unsupported_control",
+                f"Task does not advertise {action}",
+                "Refresh task capabilities before retrying.",
+            )
+        now = self.clock().isoformat()
+        receipt = ActionReceipt(
+            action_id=new_id("action"),
+            run_id=f"run_monitor_{new_id('ctl').removeprefix('ctl_')}",
+            title=f"{action.title()} {task['title']}",
+            target_system="work_monitor",
+            target_object=f"{task['instance_id']}/{task_id}",
+            mutation_type=action,
+            principal=principal,
+            summary=f"{action} task {task_id} on instance {task['instance_id']}",
+            risk="high" if action == "cancel" else "medium",
+            required_permissions=("write",),
+            state="needs_approval",
+            apply_payload={
+                "instance_id": task["instance_id"],
+                "task_id": task_id,
+                "expected_version": task["version"],
+                "expected_lifecycle": task["status"],
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        self.ledger.record_receipt(
+            receipt,
+            chat_id=destination.destination_id,
+            platform=principal.platform,
+            proposer_id=principal.actor_id,
+        )
+        return receipt
+
+    def _bound_receipt(
+        self, principal: Principal, destination: Destination, action_id: str
+    ) -> ActionReceipt:
+        self._require(principal, destination, "write")
+        receipt = self.ledger.get_receipt(action_id)
+        if receipt.principal is None:
+            raise IdentityError("legacy receipt principal is unbound")
+        if receipt.principal != principal:
+            raise IdentityError("receipt principal does not match requester principal")
+        ensure_fresh_confirmation(receipt, now=self.clock())
+        return receipt
+
+    def approve_control(
+        self, principal: Principal, destination: Destination, action_id: str
+    ) -> ActionReceipt:
+        receipt = self._bound_receipt(principal, destination, action_id)
+        approved = transition_receipt(receipt, "approve")
+        self.ledger.record_receipt_state(
+            approved,
+            previous_state=receipt.state,
+            actor_id=f"{principal.platform}:{principal.actor_id}",
+        )
+        return approved
+
+    def apply_control(
+        self, principal: Principal, destination: Destination, action_id: str
+    ) -> ActionReceipt:
+        receipt = self._bound_receipt(principal, destination, action_id)
+        payload = receipt.apply_payload
+        task = self.store.get_task(
+            str(payload.get("instance_id", "")), str(payload.get("task_id", ""))
+        )
+        if (
+            task is None
+            or task.version != payload.get("expected_version")
+            or task.status != payload.get("expected_lifecycle")
+        ):
+            raise SchemaError(
+                "stale_control",
+                "Task state changed after proposal",
+                "Propose the control again from the current task state.",
+            )
+        applying = transition_receipt(receipt, "apply")
+        issued = self.clock()
+        command_id = new_id("cmd")
+        command = {
+            "command_id": command_id,
+            "task_id": task.task_id,
+            "instance_id": task.instance_id,
+            "action": receipt.mutation_type,
+            "expected_version": task.version,
+            "expected_lifecycle": task.status,
+            "requested_by": f"{principal.platform}:{principal.actor_id}",
+            "issued_at": issued.isoformat(),
+            "expires_at": (issued + timedelta(minutes=5)).isoformat(),
+        }
+        with self.store.transaction() as db:
+            db.execute(
+                "INSERT INTO commands(command_id,instance_id,task_id,status,payload) VALUES (?,?,?,?,?)",
+                (
+                    command_id,
+                    task.instance_id,
+                    task.task_id,
+                    "pending",
+                    json.dumps(command, sort_keys=True),
+                ),
+            )
+        self.ledger.record_receipt_state(
+            applying,
+            previous_state=receipt.state,
+            actor_id=command["requested_by"],
+            detail=json.dumps({"command_id": command_id}, sort_keys=True),
+        )
+        return applying
+
+    def acknowledge_control(
+        self, instance_id: str, command_id: str, result: dict[str, Any]
+    ) -> ActionReceipt:
+        with self.store.transaction() as db:
+            row = db.execute(
+                "SELECT status,payload FROM commands WHERE command_id=? AND instance_id=?",
+                (command_id, instance_id),
+            ).fetchone()
+            if row is None:
+                raise SchemaError(
+                    "command_not_found",
+                    "Unknown or cross-instance command",
+                    "Poll commands for the authenticated instance.",
+                )
+            if row["status"] != "pending":
+                raise SchemaError(
+                    "command_replay",
+                    "Command acknowledgement was already consumed",
+                    "Do not replay acknowledgements.",
+                )
+            command = json.loads(row["payload"])
+            receipt = self.ledger.receipt_for_command(command_id)
+            verified_statuses = {
+                "pause": {"paused"},
+                "resume": {"running", "resumed"},
+                "retry": {"queued", "running", "retried"},
+                "cancel": {"cancelled"},
+            }
+            success = result.get("ok") is True and str(
+                result.get("status", "")
+            ).lower() in verified_statuses.get(str(command["action"]), set())
+            terminal = receipt.with_state("applied" if success else "failed")
+            db.execute(
+                "UPDATE commands SET status='acked',consumed_at=? WHERE command_id=?",
+                (self.clock().isoformat(), command_id),
+            )
+            sanitized = {
+                key: redact_secrets(value) if isinstance(value, str) else value
+                for key in ("ok", "status", "code", "version")
+                if (value := result.get(key)) is not None
+            }
+            db.execute(
+                "INSERT OR IGNORE INTO notification_outbox(notification_id,event_id,destination_key,payload) VALUES (?,?,?,?)",
+                (
+                    new_id("notification"),
+                    command_id,
+                    "control",
+                    json.dumps(
+                        {
+                            "kind": "task.control_ack",
+                            "task_id": command["task_id"],
+                            "action": command["action"],
+                            "result": sanitized,
+                        },
+                        sort_keys=True,
+                    ),
+                ),
+            )
+        self.ledger.record_receipt_state(
+            terminal, previous_state=receipt.state, detail=json.dumps(sanitized, sort_keys=True)
+        )
+        return terminal
 
     def handle_event(self, event: NormalizedEvent) -> str:
         command = parse_monitor_command(event.text)

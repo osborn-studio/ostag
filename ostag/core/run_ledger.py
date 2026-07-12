@@ -10,10 +10,12 @@ secret redaction before they touch disk.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from ostag.core.event import NormalizedEvent
+from ostag.core.identity import Principal
 from ostag.core.safety import redact_secrets
 from ostag.core.schemas import (
     ActionReceipt,
@@ -40,8 +42,9 @@ def _redact_deep(value: Any) -> Any:
 
 
 class RunLedger:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, clock: Any | None = None) -> None:
         self.path = Path(path)
+        self.clock = clock or (lambda: datetime.now(UTC))
 
     def append(self, event: LedgerEvent) -> LedgerEvent:
         record = event.to_dict()
@@ -80,7 +83,11 @@ class RunLedger:
         payload: dict[str, Any] = {"status": status}
         if detail:
             payload["detail"] = detail
-        event_type = "run_finished" if status in ("succeeded", "failed", "cancelled") else "run_status_changed"
+        event_type = (
+            "run_finished"
+            if status in ("succeeded", "failed", "cancelled")
+            else "run_status_changed"
+        )
         return self.append(
             LedgerEvent(
                 event_id=new_id("evt"),
@@ -272,6 +279,7 @@ class RunLedger:
                 run_id=receipt.run_id,
                 event_type="action_proposed",
                 payload=payload,
+                created_at=self.clock().isoformat(),
             )
         )
 
@@ -293,6 +301,7 @@ class RunLedger:
                 run_id=receipt.run_id,
                 event_type="action_state_changed",
                 payload=payload,
+                created_at=self.clock().isoformat(),
             )
         )
 
@@ -310,6 +319,27 @@ class RunLedger:
         """Actor who proposed the action; empty for pre-tracking receipts."""
         entry = self._fold_receipts().get(action_id)
         return entry.get("proposer_id", "") if entry else ""
+
+    def receipt_for_command(self, command_id: str) -> ActionReceipt:
+        """Resolve the receipt bound to an emitted command audit event."""
+        action_id = ""
+        for record in self._read_all():
+            if record.get("event_type") != "action_state_changed":
+                continue
+            detail = record.get("payload", {}).get("detail", "")
+            try:
+                parsed = json.loads(detail)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(parsed, dict) and parsed.get("command_id") == command_id:
+                action_id = str(record.get("payload", {}).get("action_id", ""))
+        if not action_id:
+            raise SchemaError(
+                "command_not_found",
+                f"No receipt is bound to command {command_id!r}",
+                "Reject the acknowledgement and poll for an issued command.",
+            )
+        return self.get_receipt(action_id)
 
     def list_approvers(self, action_id: str) -> tuple[str, ...]:
         """Distinct actor ids that recorded an 'approve' decision for an action."""
@@ -383,8 +413,31 @@ class RunLedger:
             if event_type == "action_proposed" and isinstance(payload.get("receipt"), dict):
                 action_id = payload["receipt"].get("action_id")
                 if action_id:
+                    receipt_payload = dict(payload["receipt"])
+                    # Legacy migration is allowed only when the enclosing event
+                    # supplies one unambiguous platform + proposer pair. Never
+                    # infer a platform from a bare actor id.
+                    if "principal" not in receipt_payload:
+                        platform = payload.get("platform", "")
+                        proposer_id = payload.get("proposer_id", "")
+                        if platform and proposer_id:
+                            try:
+                                receipt_payload["principal"] = Principal(
+                                    str(platform), str(proposer_id)
+                                ).to_dict()
+                            except ValueError:
+                                receipt_payload["legacy_identity"] = "unbound"
+                        else:
+                            receipt_payload["legacy_identity"] = "unbound"
+                    previous = entries.get(action_id)
+                    if previous is not None:
+                        old_principal = previous["receipt"].get("principal")
+                        new_principal = receipt_payload.get("principal")
+                        if old_principal != new_principal:
+                            receipt_payload.pop("principal", None)
+                            receipt_payload["legacy_identity"] = "unbound"
                     entries[action_id] = {
-                        "receipt": dict(payload["receipt"]),
+                        "receipt": receipt_payload,
                         "chat_id": payload.get("chat_id", ""),
                         "platform": payload.get("platform", ""),
                         "proposer_id": payload.get("proposer_id", ""),

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from ostag.core.identity import Principal
+
 PLATFORMS = ("slack", "feishu", "lark", "dingtalk", "github", "gitlab")
 
 RUN_STATUSES = (
@@ -43,7 +45,19 @@ RECEIPT_STATES = (
 )
 TERMINAL_RECEIPT_STATES = ("applied", "approved_only", "rejected", "stale", "failed")
 
-MUTATION_TYPES = ("create", "update", "delete", "send", "schedule", "merge", "assign")
+MUTATION_TYPES = (
+    "create",
+    "update",
+    "delete",
+    "send",
+    "schedule",
+    "merge",
+    "assign",
+    "pause",
+    "resume",
+    "retry",
+    "cancel",
+)
 RISK_LEVELS = ("low", "medium", "high")
 PERMISSION_LEVELS = ("read", "propose", "write", "admin")
 
@@ -353,6 +367,7 @@ class ActionReceipt:
     target_system: str
     target_object: str
     mutation_type: str
+    principal: Principal | None = None
     summary: str = ""
     diff: str = ""
     risk: str = "medium"
@@ -373,9 +388,7 @@ class ActionReceipt:
         _require_choice(self.risk, RISK_LEVELS, "risk", "ActionReceipt")
         _require_choice(self.state, RECEIPT_STATES, "state", "ActionReceipt")
         for permission in self.required_permissions:
-            _require_choice(
-                permission, PERMISSION_LEVELS, "required_permissions", "ActionReceipt"
-            )
+            _require_choice(permission, PERMISSION_LEVELS, "required_permissions", "ActionReceipt")
 
     @property
     def commands(self) -> dict[str, str]:
@@ -396,6 +409,7 @@ class ActionReceipt:
             target_system=self.target_system,
             target_object=self.target_object,
             mutation_type=self.mutation_type,
+            principal=self.principal,
             summary=self.summary,
             diff=self.diff,
             risk=self.risk,
@@ -416,6 +430,7 @@ class ActionReceipt:
                 "target_system": self.target_system,
                 "target_object": self.target_object,
                 "mutation_type": self.mutation_type,
+                "principal": None if self.principal is None else self.principal.to_dict(),
                 "summary": self.summary,
                 "diff": self.diff,
                 "risk": self.risk,
@@ -438,6 +453,11 @@ class ActionReceipt:
             target_system=data.get("target_system", ""),
             target_object=data.get("target_object", ""),
             mutation_type=data.get("mutation_type", "update"),
+            principal=(
+                Principal.from_dict(data["principal"])
+                if data.get("principal") is not None
+                else None
+            ),
             summary=data.get("summary", ""),
             diff=data.get("diff", ""),
             risk=data.get("risk", "medium"),
@@ -699,9 +719,7 @@ class ConnectorCapability:
         _require_choice(
             self.default_mode, ("read", "propose", "write"), "default_mode", "ConnectorCapability"
         )
-        _require_choice(
-            self.status, ("available", "planned"), "status", "ConnectorCapability"
-        )
+        _require_choice(self.status, ("available", "planned"), "status", "ConnectorCapability")
 
     def can(self, capability: str) -> bool:
         return self.capabilities.get(capability) is True
@@ -730,8 +748,6 @@ class ConnectorCapability:
             capabilities=dict(data.get("capabilities", {})),
             limits=dict(data.get("limits", {})),
             default_mode=policy.get("default_mode", "propose"),
-            destructive_requires_approval=bool(
-                policy.get("destructive_requires_approval", True)
-            ),
+            destructive_requires_approval=bool(policy.get("destructive_requires_approval", True)),
             status=data.get("status", "available"),
         )

@@ -89,9 +89,7 @@ def transition_receipt(receipt: ActionReceipt, verb: str) -> ActionReceipt:
     if receipt.state not in allowed:
         raise SchemaError(
             code="invalid_transition",
-            message=(
-                f"Cannot {verb} action {receipt.action_id} in state {receipt.state!r}"
-            ),
+            message=(f"Cannot {verb} action {receipt.action_id} in state {receipt.state!r}"),
             recovery_hint=(
                 f"'{verb}' requires state in {list(allowed)}; "
                 f"check current state with: status {receipt.run_id}"
@@ -123,6 +121,18 @@ def is_stale(receipt: ActionReceipt, *, ttl_seconds: int, now: datetime | None =
     moment = now or datetime.now(UTC)
     updated = datetime.fromisoformat(receipt.updated_at)
     return (moment - updated).total_seconds() > ttl_seconds
+
+
+def ensure_fresh_confirmation(
+    receipt: ActionReceipt, *, now: datetime | None = None, ttl_seconds: int = 300
+) -> None:
+    """Fail closed when a confirmation window has expired."""
+    if is_stale(receipt, ttl_seconds=ttl_seconds, now=now):
+        raise SchemaError(
+            code="stale_receipt",
+            message=f"Action {receipt.action_id} confirmation has expired",
+            recovery_hint="Propose the control again to obtain a fresh five-minute confirmation.",
+        )
 
 
 def render_receipt_text(receipt: ActionReceipt, *, index: int | None = None) -> str:

@@ -9,7 +9,8 @@ from ostag.config import load_settings
 from ostag.core.event import NormalizedEvent
 from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
-from ostag.core.schemas import Artifact, LedgerEvent, SchemaError, new_id
+from ostag.core.identity import Principal
+from ostag.core.schemas import ActionReceipt, Artifact, LedgerEvent, SchemaError, new_id
 
 
 def _event(text: str = "帮我总结一下") -> NormalizedEvent:
@@ -127,6 +128,35 @@ def test_ledger_lines_are_stable_json(tmp_path: Path) -> None:
     assert record["event_type"] == "security_event"
     # keys are sorted so agents can rely on stable serialization
     assert list(record) == sorted(record)
+
+
+def test_legacy_receipt_migrates_only_from_explicit_unique_outer_context(tmp_path: Path) -> None:
+    ledger = RunLedger(tmp_path / "ledger.jsonl")
+    receipt = ActionReceipt(
+        action_id="action_legacy",
+        run_id="run_legacy",
+        title="Pause",
+        target_system="work_monitor",
+        target_object="mac/task",
+        mutation_type="pause",
+    )
+    ledger.record_receipt(receipt, platform="feishu", proposer_id="owner")
+    assert ledger.get_receipt(receipt.action_id).principal == Principal("feishu", "owner")
+
+
+def test_ambiguous_legacy_receipt_is_unbound_instead_of_guessing_platform(tmp_path: Path) -> None:
+    ledger = RunLedger(tmp_path / "ledger.jsonl")
+    receipt = ActionReceipt(
+        action_id="action_legacy",
+        run_id="run_legacy",
+        title="Cancel",
+        target_system="work_monitor",
+        target_object="mac/task",
+        mutation_type="cancel",
+    )
+    ledger.record_receipt(receipt, platform="feishu", proposer_id="same")
+    ledger.record_receipt(receipt, platform="lark", proposer_id="same")
+    assert ledger.get_receipt(receipt.action_id).principal is None
 
 
 @pytest.mark.asyncio
