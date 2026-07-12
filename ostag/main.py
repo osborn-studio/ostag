@@ -372,7 +372,7 @@ def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
         interval_seconds=config.monitor_report_interval_seconds,
         command_poll_seconds=config.monitor_command_poll_seconds,
     )
-    references = reporter.osstack_references()
+    seeds: dict[str, OsstackTaskReference] = {}
     if config.monitor_osstack_references.exists():
         try:
             raw_references = json.loads(
@@ -384,7 +384,7 @@ def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
             for task_id, raw in raw_references.items():
                 if isinstance(raw, dict):
                     try:
-                        references[str(task_id)] = OsstackTaskReference(
+                        seeds[str(task_id)] = OsstackTaskReference(
                             run_id=str(raw.get("run_id", "")),
                             workspace=str(raw.get("workspace", "")),
                             state_path=str(raw.get("state_path", "")),
@@ -395,13 +395,17 @@ def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
                         )
                     except (TypeError, ValueError):
                         continue
+    reporter.seed_osstack_references(seeds)
     port = OsstackCliControlPort(
         instance_id=config.monitor_instance_id,
         binary=config.monitor_osstack_bin,
-        references=references,
+        reference_provider=reporter.osstack_references,
     )
     executor = CommandExecutor(config.monitor_instance_id, osstack=port)
-    reporter.capabilities = executor.capabilities
+    reporter.capabilities = port.binary_capabilities
+    reporter.task_capabilities = lambda: {
+        task_id: port.capabilities_for(task_id) for task_id in reporter.osstack_references()
+    }
     return reporter, executor
 
 
@@ -424,13 +428,15 @@ def run_monitor_command(args: argparse.Namespace) -> int:
                 if not isinstance(task, dict):
                     raise ValueError("osstack reference requires a task event")
                 lifecycle = {
-                    "todo": "queued",
-                    "ready": "queued",
-                    "running": "running",
-                    "blocked": "blocked",
-                    "done": "completed",
-                    "triage": "queued",
-                }[str(task.get("status", ""))]
+                    "task.failed": "failed",
+                    "task.completed": "completed",
+                    "task.cancelled": "cancelled",
+                    "task.started": "running",
+                    "task.progress": "running",
+                    "task.blocked": "blocked",
+                    "task.awaiting_approval": "blocked",
+                    "task.created": "queued",
+                }[str(payload.get("kind", ""))]
                 reference = OsstackTaskReference(
                     run_id=args.osstack_run_id,
                     workspace=args.workspace,

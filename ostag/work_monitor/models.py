@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from typing import Any, ClassVar
 
 
@@ -121,6 +121,7 @@ class MonitorEvent:
     kind: str
     occurred_at: str
     task: TaskSnapshot | None
+    per_task_capabilities: dict[str, tuple[str, ...]] = dataclass_field(default_factory=dict)
 
     _KEYS: ClassVar[tuple[str, ...]] = (
         "event_id",
@@ -129,6 +130,7 @@ class MonitorEvent:
         "kind",
         "occurred_at",
         "task",
+        "per_task_capabilities",
     )
 
     def __post_init__(self) -> None:
@@ -145,14 +147,27 @@ class MonitorEvent:
         if self.kind == "instance.heartbeat":
             if self.task is not None:
                 raise ValueError("instance.heartbeat must not contain a task")
+            for task_id, actions in self.per_task_capabilities.items():
+                _require_string(task_id, "per_task_capabilities task_id")
+                if not isinstance(actions, tuple) or any(
+                    action not in COMMAND_ACTIONS for action in actions
+                ):
+                    raise ValueError("per_task_capabilities contains invalid actions")
         elif not isinstance(self.task, TaskSnapshot):
             raise ValueError("task events require a TaskSnapshot")
+        elif self.per_task_capabilities:
+            raise ValueError("task events must not contain per_task_capabilities")
 
     @classmethod
     def from_dict(cls, payload: object) -> MonitorEvent:
+        if isinstance(payload, Mapping) and "per_task_capabilities" not in payload:
+            payload = dict(payload) | {"per_task_capabilities": {}}
         _validate_keys(payload, required=cls._KEYS, model_name=cls.__name__)
         assert isinstance(payload, Mapping)
         raw_task = payload["task"]
+        raw_capabilities = payload["per_task_capabilities"]
+        if not isinstance(raw_capabilities, Mapping):
+            raise ValueError("per_task_capabilities must be a mapping")
         task = None if raw_task is None else TaskSnapshot.from_dict(raw_task)
         return cls(
             event_id=payload["event_id"],
@@ -161,6 +176,9 @@ class MonitorEvent:
             kind=payload["kind"],
             occurred_at=payload["occurred_at"],
             task=task,
+            per_task_capabilities={
+                str(task_id): tuple(actions) for task_id, actions in raw_capabilities.items()
+            },
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,6 +189,9 @@ class MonitorEvent:
             "kind": self.kind,
             "occurred_at": self.occurred_at,
             "task": None if self.task is None else self.task.to_dict(),
+            "per_task_capabilities": {
+                task_id: list(actions) for task_id, actions in self.per_task_capabilities.items()
+            },
         }
 
 

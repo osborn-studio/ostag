@@ -95,11 +95,13 @@ class OsstackCliControlPort:
         binary: str = "osstack",
         runner: Runner | None = None,
         references: dict[str, OsstackTaskReference] | None = None,
+        reference_provider: Callable[[], dict[str, OsstackTaskReference]] | None = None,
     ) -> None:
         self.instance_id = instance_id
         self.binary = binary
         self.runner = runner or self._run
         self.references = references or {}
+        self.reference_provider = reference_provider or (lambda: dict(self.references))
         self._verified_attempts: dict[str, tuple[str, int]] = {}
 
     @staticmethod
@@ -117,9 +119,10 @@ class OsstackCliControlPort:
             return {}
 
     def capabilities(self) -> frozenset[str]:
-        if not self.references:
+        references = self.reference_provider()
+        if not references:
             return frozenset()
-        capabilities = [self.capabilities_for(task_id) for task_id in self.references]
+        capabilities = [self.capabilities_for(task_id) for task_id in references]
         return frozenset.intersection(*capabilities) if capabilities else frozenset()
 
     def _known_version(self) -> bool:
@@ -133,6 +136,9 @@ class OsstackCliControlPort:
             r"(?:osstack\s+)?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\s*", result.stdout
         )
         return bool(match and match.group(1) == "0.8.1")
+
+    def binary_capabilities(self) -> frozenset[str]:
+        return frozenset({"cancel", "retry"}) if self._known_version() else frozenset()
 
     def capabilities_for(self, task_id: str) -> frozenset[str]:
         if not self._known_version():
@@ -149,7 +155,7 @@ class OsstackCliControlPort:
 
     def _reference(self, task_id: str) -> OsstackTaskReference:
         try:
-            return self.references[task_id]
+            return self.reference_provider()[task_id]
         except KeyError as exc:
             raise RuntimeError(f"missing osstack task reference: {task_id}") from exc
 

@@ -59,6 +59,7 @@ class Reporter:
         interval_seconds: int = 30,
         command_poll_seconds: int = 10,
         capabilities: Callable[[], frozenset[str]] | None = None,
+        task_capabilities: Callable[[], dict[str, frozenset[str]]] | None = None,
     ) -> None:
         if not instance_id:
             raise ValueError("instance_id is required")
@@ -73,6 +74,7 @@ class Reporter:
         self.interval_seconds = interval_seconds
         self.command_poll_seconds = command_poll_seconds
         self.capabilities = capabilities or (lambda: frozenset())
+        self.task_capabilities = task_capabilities or (lambda: {})
         self._before_spool_commit: Callable[[], None] = lambda: None
         self._after_command_execute: Callable[[], None] = lambda: None
         self.spool_path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,13 +150,15 @@ class Reporter:
                 if int(raw_task.get("version", 0)) != osstack_reference.version:
                     raise ValueError("osstack reference version must match task version")
                 expected_lifecycle = {
-                    "triage": "queued",
-                    "todo": "queued",
-                    "ready": "queued",
-                    "running": "running",
-                    "blocked": "blocked",
-                    "done": "completed",
-                }.get(str(raw_task.get("status", "")))
+                    "task.failed": "failed",
+                    "task.completed": "completed",
+                    "task.cancelled": "cancelled",
+                    "task.started": "running",
+                    "task.progress": "running",
+                    "task.blocked": "blocked",
+                    "task.awaiting_approval": "blocked",
+                    "task.created": "queued",
+                }.get(str(payload.get("kind", "")))
                 if expected_lifecycle != osstack_reference.lifecycle:
                     raise ValueError("osstack reference lifecycle must match task status")
                 db.execute(
@@ -193,6 +197,33 @@ class Reporter:
             for row in rows
         }
 
+    def seed_osstack_references(self, references: dict[str, OsstackTaskReference]) -> None:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for task_id, reference in references.items():
+                row = db.execute(
+                    "SELECT version FROM osstack_references WHERE task_id=?", (task_id,)
+                ).fetchone()
+                if row is not None and int(row["version"]) >= reference.version:
+                    continue
+                db.execute(
+                    "INSERT INTO osstack_references VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(task_id) DO UPDATE SET run_id=excluded.run_id,workspace=excluded.workspace,"
+                    "state_path=excluded.state_path,version=excluded.version,lifecycle=excluded.lifecycle,"
+                    "attempt_id=excluded.attempt_id,attempt_order=excluded.attempt_order",
+                    (
+                        task_id,
+                        reference.run_id,
+                        reference.workspace,
+                        reference.state_path,
+                        reference.version,
+                        reference.lifecycle,
+                        reference.attempt_id,
+                        reference.attempt_order,
+                    ),
+                )
+            db.commit()
+
     def _enqueue_in_transaction(
         self, db: sqlite3.Connection, payload: dict[str, object]
     ) -> MonitorEvent:
@@ -212,6 +243,10 @@ class Reporter:
             kind=str(payload["kind"]),
             occurred_at=str(payload["occurred_at"]),
             task=task,
+            per_task_capabilities={
+                str(task_id): tuple(sorted(actions))
+                for task_id, actions in dict(payload.get("per_task_capabilities", {})).items()
+            },
         )
         db.execute(
             "INSERT OR IGNORE INTO spool(sequence,event_id,payload) VALUES(?,?,?)",
@@ -357,6 +392,7 @@ class Reporter:
                 "kind": "instance.heartbeat",
                 "occurred_at": now,
                 "task": None,
+                "per_task_capabilities": self.task_capabilities(),
             }
         )
 
@@ -481,6 +517,12 @@ class Reporter:
                     if callable(reconcile)
                     else {"ok": False, "code": "STATUS_UNAVAILABLE"}
                 )
+                if not result.get("ok"):
+                    result = {
+                        "ok": False,
+                        "code": "INDETERMINATE_REQUIRES_IDEMPOTENT_UPSTREAM",
+                        "reconcile_code": result.get("code", "STATUS_UNAVAILABLE"),
+                    }
                 with self._connect() as db:
                     db.execute(
                         "UPDATE command_state SET state='executed_unverified',result_payload=? WHERE command_id=?",
@@ -569,6 +611,7 @@ class Reporter:
             self.sleep(min(self.interval_seconds, self.command_poll_seconds))
 
     def status(self) -> dict[str, object]:
+        command_states = self.command_states()
         return {
             "enabled": bool(self.central_url and self._secret),
             "instance_id": self.instance_id,
@@ -579,5 +622,12 @@ class Reporter:
             "failure_count": int(self._state("failure_count", "0")),
             "next_attempt_at": self._state("next_attempt_at"),
             "next_sequence": int(self._state("next_sequence", "1")),
-            "command_states": self.command_states(),
+            "command_states": command_states,
+            "indeterminate_commands": [
+                command_id
+                for command_id, state in command_states.items()
+                if state in {"executing", "executed_unverified"}
+            ],
+            "control_replay_guarantee": "at_most_once_with_indeterminate_crash_window",
+            "release_gate": "Task3A_idempotent_versioned_upstream_controls_required",
         }

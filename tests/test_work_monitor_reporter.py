@@ -15,6 +15,7 @@ from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import LedgerEvent
 from ostag.work_monitor.reporter import Reporter, TransportResponse
 from ostag.work_monitor.models import RemoteCommand
+from ostag.work_monitor.executor import OsstackTaskReference
 
 
 NOW = datetime(2026, 7, 12, 1, 0, tzinfo=UTC)
@@ -473,6 +474,41 @@ def test_run_once_schedules_heartbeat_and_poll_at_independent_intervals(tmp_path
     assert reporter.run_once(lambda _: {})["polled"] is False
 
 
+def test_heartbeat_publishes_strict_per_task_capabilities(tmp_path: Path) -> None:
+    reporter = Reporter(
+        instance_id="macbook",
+        secret="",
+        central_url="",
+        ledger_path=tmp_path / "ledger",
+        spool_path=tmp_path / "spool",
+        clock=lambda: NOW,
+        task_capabilities=lambda: {
+            "running-task": frozenset({"cancel"}),
+            "failed-task": frozenset({"retry"}),
+        },
+    )
+    heartbeat = reporter.heartbeat()
+    assert heartbeat.per_task_capabilities == {
+        "running-task": ("cancel",),
+        "failed-task": ("retry",),
+    }
+
+
+def test_legacy_reference_seed_only_inserts_missing_or_newer_versions(tmp_path: Path) -> None:
+    reporter = _reporter(tmp_path)
+    reporter.seed_osstack_references(
+        {"t": OsstackTaskReference("new", "/new", "/new/s", 3, "failed")}
+    )
+    reporter.seed_osstack_references(
+        {"t": OsstackTaskReference("old", "/old", "/old/s", 2, "running")}
+    )
+    assert reporter.osstack_references()["t"].run_id == "new"
+    reporter.seed_osstack_references(
+        {"t": OsstackTaskReference("newer", "/n", "/n/s", 4, "running")}
+    )
+    assert reporter.osstack_references()["t"].run_id == "newer"
+
+
 async def test_monitor_ingest_file_stdin_status_and_dry_run_example(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -518,6 +554,32 @@ async def test_monitor_ingest_file_stdin_status_and_dry_run_example(
     assert references["task_demo"].run_id == "run-9"
     outbound = json.dumps([item.to_dict() for item in restarted.pending_events()])
     assert "/private/project" not in outbound
+
+    failed = json.loads(event.read_text(encoding="utf-8"))
+    failed["event_id"] = "retry-event"
+    failed["kind"] = "task.failed"
+    failed["task"]["status"] = "blocked"
+    failed["task"]["version"] = 2
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(failed)))
+    assert (
+        await main_async(
+            [
+                "monitor",
+                "ingest",
+                "--stdin",
+                "--osstack-run-id",
+                "run-failed",
+                "--workspace",
+                "/private/project",
+                "--state-path",
+                "/private/project/LOOP-STATE.json",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert _reporter(tmp_path).osstack_references()["task_demo"].lifecycle == "failed"
 
 
 async def test_reporter_run_once_offline_and_start_missing_credentials_never_leak_secret(

@@ -250,3 +250,17 @@ def test_capabilities_for_is_lifecycle_and_reference_specific() -> None:
     assert port.capabilities_for("running") == frozenset({"cancel"})
     assert port.capabilities_for("failed") == frozenset({"retry"})
     assert port.capabilities() == frozenset()
+
+
+def test_reference_provider_is_reloaded_for_every_capability_check() -> None:
+    current = {"t": OsstackTaskReference("r1", "/w", "/s", lifecycle="running")}
+
+    def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 0, "osstack 0.8.1\n", "")
+
+    port = OsstackCliControlPort(
+        instance_id="mac", runner=run, reference_provider=lambda: dict(current)
+    )
+    assert port.capabilities_for("t") == frozenset({"cancel"})
+    current["t"] = OsstackTaskReference("r2", "/w", "/s", lifecycle="failed")
+    assert port.capabilities_for("t") == frozenset({"retry"})

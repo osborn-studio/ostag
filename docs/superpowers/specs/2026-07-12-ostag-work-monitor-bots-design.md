@@ -82,6 +82,8 @@ Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云�
 
 本地 `CommandExecutor` 是控制闭环的唯一执行者。它通过 OStag runner/task control port 或配置的 osstack CLI bridge 执行 pause/resume/retry/cancel；执行前重新读取本地任务的 instance、version 和 status，与命令的 expected 值逐项匹配。无对应能力、状态漂移、执行超时或非零退出都返回失败 ack，禁止用更新云端投影模拟成功。
 
+控制投递是“副作用前持久化 executing、崩溃后只读 reconcile”的 at-most-once 模型，不宣称 exactly-once。若副作用已经发生但进程在结果持久化前崩溃，且上游无法通过版本化幂等 contract 确认，状态必须显示 `INDETERMINATE_REQUIRES_IDEMPOTENT_UPSTREAM`。发布完成门禁依赖 Task 3A 提供统一版本化、幂等的 osstack remote-control contract；在该门禁通过前不得宣称完整远程控制已上线。
+
 实例注册和每次心跳都声明 `supported_actions`；卡片只启用实例当前声明的动作，服务端在 receipt/apply 时再次校验。权威基线 osstack 0.8.1 支持 `status`、`observe`、`kanban`、`cancel`、`loop.stop`，且 cockpit 已支持对 failed task 执行 retry/requeue，但缺少统一版本化 `RemoteCommand` contract；它仍不支持 task pause/resume。OStag 应适配已有 cockpit retry，只允许 failed task，读取重排/新 attempt 状态并验证结果，不得重复实现 retry。`kanban.move` 和 `daemon.resume` 严禁伪装 task pause/resume。第一阶段对缺失动作显示 `UNSUPPORTED`；上线完成前必须在 osstack upstream 实现真正 pause/resume 及统一版本化 remote control contract。cancel 发出后必须轮询本地权威状态直到 `cancelled` 终态或超时。
 
 ## 5. 命令、权限与 receipt
