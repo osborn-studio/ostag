@@ -228,14 +228,14 @@ class MonitorStore:
         return tuple(json.loads(str(row["payload"])) for row in rows)
 
     def consume_instance_nonce(
-        self, instance_id: str, nonce: str, *, now: int, ttl_seconds: int
+        self, instance_id: str, nonce: str, *, now: int, expires_at: int
     ) -> bool:
         try:
             with self.transaction() as connection:
-                connection.execute("DELETE FROM instance_nonces WHERE expires_at<=?", (now,))
+                connection.execute("DELETE FROM instance_nonces WHERE expires_at<?", (now,))
                 connection.execute(
                     "INSERT INTO instance_nonces(instance_id,nonce,expires_at) VALUES (?,?,?)",
-                    (instance_id, nonce, now + ttl_seconds),
+                    (instance_id, nonce, expires_at),
                 )
         except sqlite3.IntegrityError:
             return False

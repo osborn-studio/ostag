@@ -17,7 +17,7 @@ from ostag.core.identity import Principal
 from ostag.core.schemas import ActionReceipt
 from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.projection import Projector
-from ostag.work_monitor.server import HumanCredential, ServerAuth, create_app
+from ostag.work_monitor.server import HumanCredential, SecurityContract, ServerAuth, create_app
 from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 
@@ -35,12 +35,12 @@ def _event(sequence: int = 1, *, task_id: str = "task-1", project: str = "ostag"
 
 
 def _instance_headers(body: bytes, instance: str = "runner-1", path: str = "/v1/events",
-                      nonce: str = "nonce-1") -> dict[str, str]:
-    timestamp = str(int(datetime.now(UTC).timestamp()))
-    canonical = "\n".join(("v1", "POST", path, instance, timestamp, nonce,
+                      nonce: str = "nonce-1", timestamp: int | None = None) -> dict[str, str]:
+    timestamp_text = str(timestamp if timestamp is not None else int(datetime.now(UTC).timestamp()))
+    canonical = "\n".join(("v1", "POST", path, instance, timestamp_text, nonce,
                             hashlib.sha256(body).hexdigest())).encode()
     signature = hmac.new(b"runner-secret", canonical, hashlib.sha256).hexdigest()
-    return {"X-OStag-Instance": instance, "X-OStag-Timestamp": timestamp,
+    return {"X-OStag-Instance": instance, "X-OStag-Timestamp": timestamp_text,
             "X-OStag-Nonce": nonce, "X-OStag-Signature": signature,
             "content-type": "application/json"}
 
@@ -180,22 +180,40 @@ def test_command_lease_can_be_reclaimed_but_expired_command_is_never_delivered(t
 
 def test_health_router_hook_and_no_placeholder_webhooks(tmp_path: Path) -> None:
     router = APIRouter()
-    router.add_api_route("/extension", lambda: {"ok": True})
-    app, _ = _app(tmp_path, routers=[(router, "authenticated_dependency")])
+    calls = []
+    endpoint_calls = []
+
+    def extension() -> dict[str, bool]:
+        endpoint_calls.append(1)
+        return {"ok": True}
+
+    router.add_api_route("/extension", extension)
+
+    def authenticated(request: Request) -> None:
+        calls.append(1)
+        if request.headers.get("authorization") != "Bearer extension-secret":
+            raise HTTPException(401, "unauthorized")
+
+    contract = SecurityContract("authenticated_dependency", authenticated)
+    app, _ = _app(tmp_path, routers=[(router, contract)])
     paths = {route.path for route in app.routes}
     assert "/webhooks/feishu" not in paths and "/webhooks/telegram" not in paths
     with TestClient(app) as client:
         assert client.get("/healthz").json() == {"status": "ok"}
-        assert client.get("/extension").json() == {"ok": True}
+        assert client.get("/extension").status_code == 401
+        assert client.get("/extension", headers={"Authorization": "Bearer extension-secret"}).json() == {"ok": True}
+    assert len(calls) == 2
+    assert len(endpoint_calls) == 1
 
 
 def test_router_hook_rejects_missing_security_contract(tmp_path: Path) -> None:
-    try:
-        _app(tmp_path, routers=[APIRouter()])
-    except ValueError as exc:
-        assert "security contract" in str(exc)
-    else:
-        raise AssertionError("bare router was registered")
+    for registration in (APIRouter(), (APIRouter(), "verified_platform")):
+        try:
+            _app(tmp_path, routers=[registration])
+        except ValueError as exc:
+            assert "security contract" in str(exc)
+        else:
+            raise AssertionError("router without callable security was registered")
 
 
 def test_instance_signature_binds_path_and_nonce_replay_is_rejected(tmp_path: Path) -> None:
@@ -207,6 +225,23 @@ def test_instance_signature_binds_path_and_nonce_replay_is_rejected(tmp_path: Pa
         assert client.post("/v1/events", content=body, headers=headers).status_code == 401
         wrong_path = _instance_headers(body, path="/v1/commands/poll", nonce="wrong-path")
         assert client.post("/v1/events", content=body, headers=wrong_path).status_code == 401
+
+
+def test_future_timestamp_nonce_remains_replay_blocked_for_entire_signed_window(tmp_path: Path) -> None:
+    now = [1_000]
+    store = MonitorStore(tmp_path / "future-nonce.sqlite3")
+    identities = IdentityStore(store.path)
+    auth = ServerAuth({"runner-1": "runner-secret"}, clock=lambda: now[0])
+    app = create_app(service=WorkMonitorService(store, identities), projector=Projector(store), auth=auth)
+    body = json.dumps({"events": [_event()]}, separators=(",", ":")).encode()
+    headers = _instance_headers(body, nonce="future", timestamp=1_299)
+    with TestClient(app) as client:
+        assert client.post("/v1/events", content=body, headers=headers).status_code == 200
+        now[0] = 1_301
+        assert client.post("/v1/events", content=body, headers=headers).status_code == 401
+        now[0] = 1_600
+        fresh = _instance_headers(body, nonce="future", timestamp=1_600)
+        assert client.post("/v1/events", content=body, headers=fresh).status_code == 200
 
 
 def test_instance_body_limit_rejects_before_authentication(tmp_path: Path) -> None:

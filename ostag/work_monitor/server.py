@@ -7,12 +7,12 @@ import hashlib
 import hmac
 import json
 import time
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 
 from ostag.config import Settings, load_settings
 from ostag.core.identity import Principal
@@ -36,11 +36,18 @@ class HumanCredential:
 
 
 @dataclass(frozen=True)
+class SecurityContract:
+    kind: Literal["verified_platform", "authenticated_dependency"]
+    dependency: Callable[..., object]
+
+
+@dataclass(frozen=True)
 class ServerAuth:
     instance_secrets: dict[str, str]
     human_credentials: dict[str, HumanCredential] | None = None
     admin_token: str = ""
     max_clock_skew_seconds: int = 300
+    clock: Callable[[], float] = time.time
 
     def instance(self, request: Request, body: bytes, store: MonitorStore) -> str:
         instance_id = request.headers.get("X-OStag-Instance", "")
@@ -49,15 +56,20 @@ class ServerAuth:
         nonce = request.headers.get("X-OStag-Nonce", "")
         secret = self.instance_secrets.get(instance_id, "")
         try:
-            fresh = abs(int(time.time()) - int(timestamp)) <= self.max_clock_skew_seconds
+            signed_at = int(timestamp)
+            now = int(self.clock())
+            fresh = abs(now - signed_at) <= self.max_clock_skew_seconds
         except ValueError:
+            signed_at = 0
+            now = int(self.clock())
             fresh = False
         canonical = "\n".join(("v1", request.method.upper(), request.url.path, instance_id,
                                 timestamp, nonce, hashlib.sha256(body).hexdigest())).encode()
         expected = hmac.new(secret.encode(), canonical, hashlib.sha256).hexdigest()
         valid = bool(secret and nonce and fresh) and hmac.compare_digest(supplied, expected)
         if not valid or not store.consume_instance_nonce(
-            instance_id, nonce, now=int(time.time()), ttl_seconds=self.max_clock_skew_seconds
+            instance_id, nonce, now=now,
+            expires_at=signed_at + self.max_clock_skew_seconds,
         ):
             raise HTTPException(status_code=401, detail="invalid instance credentials")
         return instance_id
@@ -112,7 +124,7 @@ def create_app(
     service: WorkMonitorService | None = None,
     projector: Projector | None = None,
     auth: ServerAuth | None = None,
-    routers: Iterable[tuple[APIRouter, Literal["verified_platform", "authenticated_dependency"]]] = (),
+    routers: Iterable[tuple[APIRouter, SecurityContract]] = (),
     feishu_ws: LifespanOwner | None = None,
     scheduler: LifespanOwner | None = None,
     outbox: LifespanOwner | None = None,
@@ -278,10 +290,11 @@ def create_app(
 
 
 def register_router(
-    app: FastAPI, router: APIRouter, *,
-    security: Literal["verified_platform", "authenticated_dependency"],
+    app: FastAPI, router: APIRouter, *, security: SecurityContract,
 ) -> None:
-    if security not in {"verified_platform", "authenticated_dependency"}:
+    if not isinstance(security, SecurityContract) or security.kind not in {
+        "verified_platform", "authenticated_dependency"
+    } or not callable(security.dependency):
         raise ValueError("unsupported router security contract")
-    app.include_router(router)
+    app.include_router(router, dependencies=[Depends(security.dependency)])
 app = create_app()
