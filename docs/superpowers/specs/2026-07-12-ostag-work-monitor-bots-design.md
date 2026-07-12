@@ -57,17 +57,19 @@
 
 reporter 先脱敏并落入本地 SQLite outbox，再以 HMAC 签名批量上报。中央 service 校验实例、时间偏差、签名、schema、大小、幂等键和速率，持久化后返回确认 sequence。断网恢复后顺序补传；监控故障不得停止本地任务。
 
-中央 FastAPI service 提供 `/v1/events`、board/task/instance 查询、订阅、`/v1/commands/poll|ack`、`/webhooks/feishu/card-action`、`/webhooks/telegram` 和 `/healthz`。uvicorn 生产进程只启一个启用 scheduler 的 worker；如未来横向扩容，必须先加入数据库租约再允许第二 worker。EdgeOne origin 指向该 service 的私网/受限源站端口并透传 webhook/API；FastAPI 便于本地 pytest ASGI 集成测试。
+中央 FastAPI service 提供 `/v1/events`、board/task/instance 查询、订阅、`/v1/commands/poll|ack`、`/webhooks/feishu/card-action`、`/webhooks/telegram` 和 `/healthz`。FastAPI lifespan 启动并监督唯一现有 `FeishuAdapter` WebSocket consumer：普通飞书消息固定走 WebSocket → `NormalizedEvent` → `OSTagRunner`，只有 card action 走 EdgeOne HTTPS endpoint；不提供飞书消息 webhook 二选一。lifespan 在 WS 崩溃时有界退避重启，关闭时取消并等待 consumer 和 scheduler/outbox drain。uvicorn 生产进程只启一个 worker；如未来横向扩容，必须先加入数据库租约和 WS 单消费者选主。EdgeOne origin 指向该 service 的受限源站端口并仅透传 HTTP API/card action/Telegram webhook。
 
 ### 3.3 飞书与 Telegram adapters
 
 扩展 adapter 能力，但保持文本回退：
 
-- 飞书：中央 webhook/现有 WebSocket 消息入口；出站使用 `interactive` card，回调动作转换为 `NormalizedEvent`；主动私聊必须调用 messages API 的 `receive_id_type=open_id`，群聊使用 `receive_id_type=chat_id`；通过 lark-cli 配置应用权限、事件订阅和管理员 `open_id`；
+- 飞书：普通消息仅由中央 service 监督的现有 WebSocket adapter 接收；出站使用 `interactive` card；card action 单独经 HTTPS 回调并转换为 `NormalizedEvent`；主动私聊必须调用 messages API 的 `receive_id_type=open_id`，群聊使用 `receive_id_type=chat_id`；
 - Telegram：Bot API long polling/webhook 均可，第一版生产使用 webhook；看板以短消息分段并用 InlineKeyboard 提供查看、订阅和控制；callback query 转换为相同控制意图；
 - 两端共享 `MobileBoardView`、命令解析、授权、receipt、订阅和审计，只各自实现 renderer/transporter。
 
 `NormalizedEvent` 增加由 adapter 从签名验证后的平台原始事件推导的 `chat_type: private|group`（以及可信 destination ID）；权限判断不得从用户文本、卡片 value 或 Telegram callback data 推断私聊/群聊。
+
+飞书 card-action endpoint 使用平台原生安全流程，不复用实例 reporter HMAC。它处理 URL verification challenge；校验 verification token、飞书请求签名、timestamp 时间窗和持久 replay key。若 `FEISHU_ENCRYPT_KEY` 非空，必须先按飞书协议解密再验证/解析；若未配置 encrypt key，则明确拒绝任何 encrypted payload。校验失败不得创建 `NormalizedEvent`、receipt 或审计成功记录。
 
 ## 4. 数据契约与状态
 
@@ -79,7 +81,7 @@ Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云�
 
 本地 `CommandExecutor` 是控制闭环的唯一执行者。它通过 OStag runner/task control port 或配置的 osstack CLI bridge 执行 pause/resume/retry/cancel；执行前重新读取本地任务的 instance、version 和 status，与命令的 expected 值逐项匹配。无对应能力、状态漂移、执行超时或非零退出都返回失败 ack，禁止用更新云端投影模拟成功。
 
-实例注册和每次心跳都声明 `supported_actions`；卡片只启用实例当前声明的动作，服务端在 receipt/apply 时再次校验。权威基线 osstack 0.8.1 支持 `status`、`observe`、`kanban`、`cancel`、`loop.stop`，不支持 task pause/resume/retry。`kanban.move` 只是投影移动，`daemon.resume` 只是 daemon 生命周期操作，严禁伪装 task pause/resume/retry。第一阶段对缺失动作明确显示 `UNSUPPORTED`；上线完成前必须在 osstack upstream 实现并验证真正的 task pause/resume/retry capability。cancel 发出后必须轮询本地权威状态直到 `cancelled` 终态或超时，不能把命令接受当作完成。
+实例注册和每次心跳都声明 `supported_actions`；卡片只启用实例当前声明的动作，服务端在 receipt/apply 时再次校验。权威基线 osstack 0.8.1 支持 `status`、`observe`、`kanban`、`cancel`、`loop.stop`，且 cockpit 已支持对 failed task 执行 retry/requeue，但缺少统一版本化 `RemoteCommand` contract；它仍不支持 task pause/resume。OStag 应适配已有 cockpit retry，只允许 failed task，读取重排/新 attempt 状态并验证结果，不得重复实现 retry。`kanban.move` 和 `daemon.resume` 严禁伪装 task pause/resume。第一阶段对缺失动作显示 `UNSUPPORTED`；上线完成前必须在 osstack upstream 实现真正 pause/resume 及统一版本化 remote control contract。cancel 发出后必须轮询本地权威状态直到 `cancelled` 终态或超时。
 
 ## 5. 命令、权限与 receipt
 
