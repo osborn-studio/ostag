@@ -1,15 +1,19 @@
 import asyncio
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from ostag.config import Settings
 from ostag.core.identity import Principal
 from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.scheduler import WorkMonitorScheduler
 from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
+from ostag.work_monitor.transport import TransportError
+from ostag.work_monitor import store as store_module
 
 
 class Sender:
@@ -134,6 +138,8 @@ async def test_competing_workers_claim_once_and_retry_deadletter_recovery(tmp_pa
         store, identities, {"feishu": sender}, clock=lambda: now[0], jitter=lambda _: 0
     )
     await a.tick(drain=False)
+    with store.transaction() as db:
+        db.execute("DELETE FROM notification_outbox WHERE payload LIKE '%digest.%'")
     await asyncio.gather(a.drain_once(), b.drain_once())
     for minutes in (1, 2, 4, 8):
         now[0] += timedelta(minutes=minutes)
@@ -142,7 +148,7 @@ async def test_competing_workers_claim_once_and_retry_deadletter_recovery(tmp_pa
         row = db.execute("SELECT state,attempts FROM notification_outbox").fetchone()
     assert tuple(row) == ("dead_letter", 5)
     sender.responses = []
-    assert a.replay_dead_letters() == 1
+    assert a.replay_dead_letters(destination_key="feishu:chat1:1", limit=1) == 1
     await a.drain_once()
     assert "延迟通知" in sender.sent[0][1]
     assert sender.sent[0][2]
@@ -155,7 +161,7 @@ async def test_successful_platform_delivery_replays_earlier_dead_letters(tmp_pat
     scheduler = WorkMonitorScheduler(store, identities, {"feishu": Sender()}, clock=lambda: now)
     with store.transaction() as db:
         db.execute(
-            "INSERT INTO notification_outbox(notification_id,event_id,destination_key,payload,delivery_id,state,next_attempt_at) VALUES (?,?,?,?,?,'dead_letter',?)",
+            "INSERT INTO notification_outbox(notification_id,event_id,destination_key,payload,delivery_id,state,next_attempt_at,failure_transient,deadlettered_at) VALUES (?,?,?,?,?,'dead_letter',?,1,?)",
             (
                 "old",
                 "old-event",
@@ -163,6 +169,7 @@ async def test_successful_platform_delivery_replays_earlier_dead_letters(tmp_pat
                 '{"kind":"old"}',
                 "old-delivery",
                 now.isoformat(),
+                (now - timedelta(minutes=2)).isoformat(),
             ),
         )
     subscription = scheduler._subscriptions()[0]
@@ -238,3 +245,149 @@ async def test_legacy_outbox_is_suppressed_and_audited(tmp_path):
             == "suppressed"
         )
     assert any(r["event_type"] == "notification_suppress" for r in scheduler.ledger._read_all())
+
+
+@pytest.mark.asyncio
+async def test_lease_renewal_fences_second_owner_and_increments_cursor_once(tmp_path):
+    store, identities = setup(tmp_path)
+    now = [datetime(2026, 7, 13, 4, 0, tzinfo=UTC)]
+    seed(store, status="failed", seen=now[0])
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class BlockingSender(Sender):
+        async def send_message(self, *args, **kwargs):
+            entered.set()
+            await release.wait()
+            await super().send_message(*args, **kwargs)
+
+    sender = BlockingSender()
+    first = WorkMonitorScheduler(
+        store, identities, {"feishu": sender}, clock=lambda: now[0], lease_seconds=0.15
+    )
+    await first.tick(drain=False)
+    with store.transaction() as db:
+        db.execute("DELETE FROM notification_outbox WHERE payload LIKE '%digest.%'")
+    delivery = asyncio.create_task(first.drain_once())
+    await entered.wait()
+    now[0] += timedelta(minutes=1)
+    await asyncio.sleep(0.06)
+    second = WorkMonitorScheduler(
+        store, identities, {"feishu": sender}, clock=lambda: now[0], lease_seconds=0.15
+    )
+    assert await second.drain_once() is False
+    release.set()
+    assert await delivery is True
+    assert len(sender.sent) == 1
+    with identities._connect() as db:
+        assert db.execute("SELECT delivery_cursor FROM monitor_subscriptions").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_deliver_audit_reconciles_without_resending(tmp_path, monkeypatch):
+    store, identities = setup(tmp_path)
+    seed(store, status="failed", seen=datetime.now(UTC))
+    sender = Sender()
+    scheduler = WorkMonitorScheduler(store, identities, {"feishu": sender})
+    await scheduler.tick(drain=False)
+    with store.transaction() as db:
+        db.execute("DELETE FROM notification_outbox WHERE payload LIKE '%digest.%'")
+    original = scheduler.ledger.record_notification
+    monkeypatch.setattr(
+        scheduler.ledger,
+        "record_notification",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("down")),
+    )
+    assert await scheduler.drain_once() is True
+    assert len(sender.sent) == 1
+    monkeypatch.setattr(scheduler.ledger, "record_notification", original)
+    assert await scheduler.drain_once() is False
+    assert len(sender.sent) == 1
+    with store.connect() as db:
+        assert tuple(
+            db.execute("SELECT state,ledger_synced FROM notification_outbox").fetchone()
+        ) == ("delivered", 1)
+
+
+@pytest.mark.asyncio
+async def test_retry_after_and_permanent_errors_are_classified(tmp_path):
+    store, identities = setup(tmp_path)
+    now = [datetime(2026, 7, 13, 4, 0, tzinfo=UTC)]
+    seed(store, status="failed", seen=now[0])
+
+    class ErrorSender(Sender):
+        async def send_message(self, *args, **kwargs):
+            raise TransportError(
+                "limited", status_code=429, retry_after_seconds=600, transient=True
+            )
+
+    scheduler = WorkMonitorScheduler(
+        store, identities, {"feishu": ErrorSender()}, clock=lambda: now[0], jitter=lambda _: 0
+    )
+    await scheduler.tick(drain=False)
+    with store.transaction() as db:
+        db.execute("DELETE FROM notification_outbox WHERE payload LIKE '%digest.%'")
+    await scheduler.drain_once()
+    with store.connect() as db:
+        row = db.execute("SELECT state,next_attempt_at FROM notification_outbox").fetchone()
+    assert row[0] == "pending"
+    assert datetime.fromisoformat(row[1]) == now[0] + timedelta(minutes=10)
+
+
+@pytest.mark.asyncio
+async def test_digest_catches_up_at_ten_and_twenty_with_bounded_windows(tmp_path):
+    store, identities = setup(tmp_path)
+    seed(store)
+    now = [datetime(2026, 7, 13, 2, 0, tzinfo=UTC)]  # 10:00 Beijing
+    scheduler = WorkMonitorScheduler(store, identities, {"feishu": Sender()}, clock=lambda: now[0])
+    await scheduler.tick(drain=False)
+    now[0] = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)  # 20:00 Beijing
+    await scheduler.tick(drain=False)
+    await WorkMonitorScheduler(store, identities, {"feishu": Sender()}, clock=lambda: now[0]).tick(
+        drain=False
+    )
+    with store.connect() as db:
+        digests = [
+            json.loads(row[0])["kind"]
+            for row in db.execute(
+                "SELECT payload FROM notification_outbox WHERE payload LIKE '%digest.%'"
+            )
+        ]
+    assert digests.count("digest.morning") == 1
+    assert digests.count("digest.evening") == 1
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"monitor_morning_digest_hour": 24},
+        {"monitor_morning_digest_hour": 9, "monitor_evening_digest_hour": 9},
+        {"monitor_degraded_seconds": 600, "monitor_offline_seconds": 120},
+        {"monitor_notification_retry_cap": 0},
+    ],
+)
+def test_scheduler_settings_validation(overrides):
+    with pytest.raises(ValueError):
+        Settings(**overrides).validate()
+
+
+def test_notification_migration_partial_failure_rolls_back(tmp_path, monkeypatch):
+    path = tmp_path / "rollback.db"
+    MonitorStore(path)
+    original_version = len(store_module.MIGRATIONS)
+    broken = store_module.Migration(
+        statements=(
+            "CREATE TABLE migration_must_rollback(value INTEGER)",
+            "THIS IS INVALID SQL",
+        )
+    )
+    monkeypatch.setattr(store_module, "MIGRATIONS", (*store_module.MIGRATIONS, broken))
+    with pytest.raises(sqlite3.OperationalError):
+        MonitorStore(path)
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == original_version
+        assert (
+            db.execute(
+                "SELECT count(*) FROM sqlite_master WHERE name='migration_must_rollback'"
+            ).fetchone()[0]
+            == 0
+        )

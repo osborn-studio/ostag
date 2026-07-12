@@ -11,6 +11,7 @@ from typing import Any
 
 from ostag.config import Settings
 from ostag.core.event import NormalizedEvent
+from ostag.work_monitor.transport import TransportError
 
 AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>")
 
@@ -108,7 +109,9 @@ class FeishuAdapter:
         )
         log_level = getattr(lark.LogLevel, "ERROR", None)
         if log_level is None:
-            raise RuntimeError("Feishu SDK must provide ERROR log level; refusing ticket-bearing logs")
+            raise RuntimeError(
+                "Feishu SDK must provide ERROR log level; refusing ticket-bearing logs"
+            )
         cli = lark.ws.Client(
             self.app_id,
             self.app_secret,
@@ -160,8 +163,10 @@ class FeishuAdapter:
                     lambda: self._sdk_loop.create_task(shutdown_sdk())
                 )
         if self._inflight:
-            await asyncio.gather(*(asyncio.wrap_future(item) for item in tuple(self._inflight)),
-                                 return_exceptions=True)
+            await asyncio.gather(
+                *(asyncio.wrap_future(item) for item in tuple(self._inflight)),
+                return_exceptions=True,
+            )
 
     async def _handle_live_event(self, data: Any, runner: Any) -> None:
         raw = data.raw if hasattr(data, "raw") else data
@@ -232,7 +237,14 @@ class FeishuAdapter:
                 "Content-Type": "application/json; charset=utf-8",
             },
         )
-        await asyncio.to_thread(_urlopen_json, req)
+        response = await asyncio.to_thread(_urlopen_json, req)
+        if response.get("code", 0) != 0:
+            code = int(response.get("code", -1))
+            raise TransportError(
+                f"Feishu rejected message: code={code}",
+                status_code=400,
+                transient=code in {99991663, 99991664},
+            )
 
     async def send_message(
         self, chat_id: str, text: str, *, delivery_id: str, chat_type: str = "group"
@@ -253,8 +265,10 @@ class FeishuAdapter:
                 "content": json.dumps({"text": text}, ensure_ascii=False),
             }
         ).encode()
-        url = (f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
-               f"&uuid={delivery_id}")
+        url = (
+            f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+            f"&uuid={delivery_id}"
+        )
         req = urllib.request.Request(
             url,
             data=payload,
@@ -264,11 +278,23 @@ class FeishuAdapter:
                 "Content-Type": "application/json; charset=utf-8",
             },
         )
-        await asyncio.to_thread(_urlopen_json, req)
+        response = await asyncio.to_thread(_urlopen_json, req)
+        if response.get("code", 0) != 0:
+            code = int(response.get("code", -1))
+            raise TransportError(
+                f"Feishu rejected message: code={code}",
+                status_code=400,
+                transient=code in {99991663, 99991664},
+            )
 
     async def send_card(
-        self, destination_id: str, card: dict[str, Any], fallback_text: str,
-        *, chat_type: str = "group", delivery_id: str,
+        self,
+        destination_id: str,
+        card: dict[str, Any],
+        fallback_text: str,
+        *,
+        chat_type: str = "group",
+        delivery_id: str,
     ) -> None:
         """Proactively deliver an interactive card, falling back to plain text."""
         if self.config.dry_run:
@@ -276,18 +302,24 @@ class FeishuAdapter:
             return
         receive_id_type = "open_id" if chat_type == "private" else "chat_id"
         token = await self._tenant_access_token()
-        payload = json.dumps({
-            "receive_id": destination_id, "msg_type": "interactive",
-            "content": json.dumps(card, ensure_ascii=False),
-        }).encode()
+        payload = json.dumps(
+            {
+                "receive_id": destination_id,
+                "msg_type": "interactive",
+                "content": json.dumps(card, ensure_ascii=False),
+            }
+        ).encode()
         if not delivery_id:
             raise ValueError("stable delivery_id is required for proactive cards")
         req = urllib.request.Request(
             f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
             f"&uuid={delivery_id}",
-            data=payload, method="POST",
-            headers={"Authorization": f"Bearer {token}",
-                     "Content-Type": "application/json; charset=utf-8"},
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
         )
         try:
             response = await asyncio.to_thread(_urlopen_json, req)
@@ -390,5 +422,10 @@ def _urlopen_json(req: urllib.request.Request) -> dict[str, Any]:
         with urllib.request.urlopen(req, timeout=20) as response:  # noqa: S310
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Feishu API HTTP {exc.code}: {body}") from exc
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        raise TransportError(
+            f"Feishu API HTTP {exc.code}",
+            status_code=exc.code,
+            retry_after_seconds=float(retry_after) if retry_after else None,
+            transient=exc.code == 429 or exc.code >= 500,
+        ) from None

@@ -54,9 +54,16 @@ def _human_credentials() -> tuple[tuple[str, str, str, str, str], ...]:
     records = []
     for token, credential in value.items():
         if not isinstance(credential, dict) or set(credential) != required:
-            raise ValueError("human credentials require exactly platform, actor_id, destination_id, chat_type")
-        fields = tuple(credential[key] for key in ("platform", "actor_id", "destination_id", "chat_type"))
-        if not all(isinstance(field, str) and field for field in fields) or fields[-1] not in {"private", "group"}:
+            raise ValueError(
+                "human credentials require exactly platform, actor_id, destination_id, chat_type"
+            )
+        fields = tuple(
+            credential[key] for key in ("platform", "actor_id", "destination_id", "chat_type")
+        )
+        if not all(isinstance(field, str) and field for field in fields) or fields[-1] not in {
+            "private",
+            "group",
+        }:
             raise ValueError("human credential fields are invalid")
         records.append((token, *fields))
     return tuple(records)  # type: ignore[return-value]
@@ -172,14 +179,26 @@ class Settings:
     monitor_notification_retry_cap: int = 5
 
     def validate(self) -> Settings:
-        telegram_configured = any((
-            self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url
-        ))
+        if (
+            not 0 <= self.monitor_morning_digest_hour <= 23
+            or not 0 <= self.monitor_evening_digest_hour <= 23
+        ):
+            raise ValueError("monitor digest hours must be in 0..23")
+        if self.monitor_morning_digest_hour == self.monitor_evening_digest_hour:
+            raise ValueError("monitor digest hours must be different")
+        if not 0 < self.monitor_degraded_seconds < self.monitor_offline_seconds:
+            raise ValueError("monitor thresholds require 0 < degraded < offline")
+        if self.monitor_notification_retry_cap <= 0:
+            raise ValueError("monitor notification retry cap must be positive")
+        telegram_configured = any(
+            (self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url)
+        )
         if self.env.casefold() in {"prod", "production"} and (
             self.platform == "telegram" or telegram_configured
         ):
-            if not all((self.telegram_bot_token, self.telegram_webhook_secret,
-                        self.telegram_webhook_url)):
+            if not all(
+                (self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url)
+            ):
                 raise ValueError("Telegram production requires token, secret, and webhook URL")
             if not self.telegram_webhook_url.startswith("https://"):
                 raise ValueError("Telegram production webhook URL must use HTTPS")
@@ -189,8 +208,11 @@ class Settings:
         from ostag.core.identity import Principal
         from ostag.work_monitor.identity import Destination
         from ostag.work_monitor.server import HumanCredential
+
         return {
-            token: HumanCredential(Principal(platform, actor), Destination(platform, destination, chat_type))
+            token: HumanCredential(
+                Principal(platform, actor), Destination(platform, destination, chat_type)
+            )
             for token, platform, actor, destination, chat_type in self.monitor_human_credentials
         }
 

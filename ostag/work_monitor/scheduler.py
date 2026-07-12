@@ -1,4 +1,10 @@
-"""Clock-driven critical alerts, Beijing digests, and durable delivery."""
+"""Clock-driven critical alerts, Beijing digests, and durable delivery.
+
+Digest catch-up is deliberately bounded to today's due 09:00/19:00 Beijing
+windows (at most two). A 10:00 start catches 09:00; a 20:00 start catches both,
+with persistent per-target window keys preventing duplicates across restarts.
+Older days are never replayed, avoiding restart notification storms.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +22,7 @@ from ostag.core.identity import Principal
 
 from .identity import Destination, IdentityStore
 from .store import MonitorStore
+from .transport import TransportError
 
 BEIJING = ZoneInfo("Asia/Shanghai")
 CRITICAL = {"blocked", "failed", "approval_required"}
@@ -38,6 +45,9 @@ class WorkMonitorScheduler:
         evening_hour: int = 19,
         retry_cap: int = 5,
         poll_seconds: float = 5,
+        lease_seconds: float = 30,
+        recovery_limit: int = 10,
+        recovery_cooldown_seconds: int = 60,
     ) -> None:
         self.store, self.identities, self.transports = store, identities, transports
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -45,6 +55,9 @@ class WorkMonitorScheduler:
         self.degraded_seconds, self.offline_seconds = degraded_seconds, offline_seconds
         self.morning_hour, self.evening_hour, self.retry_cap = morning_hour, evening_hour, retry_cap
         self.poll_seconds = poll_seconds
+        self.lease_seconds = lease_seconds
+        self.recovery_limit = recovery_limit
+        self.recovery_cooldown_seconds = recovery_cooldown_seconds
         self.owner = uuid.uuid4().hex
         self.ledger = RunLedger(store.path.with_name("run_ledger.jsonl"), clock=self.clock)
 
@@ -149,60 +162,62 @@ class WorkMonitorScheduler:
                             {"kind": f"instance.{health}", "instance_id": instance["instance_id"]},
                         )
         local = now.astimezone(BEIJING)
-        if local.minute < 60:
-            window = (
-                "morning"
-                if local.hour == self.morning_hour
-                else "evening"
-                if local.hour == self.evening_hour
-                else ""
+        # Bounded catch-up: only today's due windows, at most morning+evening.
+        # This catches a 10:00/20:00 restart without creating a multi-day storm.
+        due: list[tuple[datetime, str]] = []
+        for hour, name in ((self.morning_hour, "morning"), (self.evening_hour, "evening")):
+            candidate = datetime.combine(local.date(), datetime.min.time(), BEIJING).replace(
+                hour=hour
             )
-            if window:
-                for sub in subscriptions:
-                    scoped = [
-                        task
-                        for task in tasks
-                        if self._target_matches(
-                            sub, task["instance_id"], task["task_id"], task["project"]
+            if candidate <= local:
+                due.append((candidate, name))
+        for window_at, window in sorted(due)[-2:]:
+            for sub in subscriptions:
+                scoped = [
+                    task
+                    for task in tasks
+                    if self._target_matches(
+                        sub, task["instance_id"], task["task_id"], task["project"]
+                    )
+                ]
+                statuses = (
+                    ["running", "blocked", "approval_required", "queued"]
+                    if window == "morning"
+                    else ["completed", "failed", "blocked", "next_attention"]
+                )
+                sections = {
+                    status: [
+                        {"task_id": task["task_id"], "title": task["title"]}
+                        for task in scoped
+                        if (
+                            task["status"] == status
+                            or (
+                                status == "next_attention"
+                                and task["status"] in {"approval_required", "queued", "running"}
+                            )
                         )
                     ]
-                    statuses = (
-                        ["running", "blocked", "approval_required", "queued"]
-                        if window == "morning"
-                        else ["completed", "failed", "blocked", "next_attention"]
+                    for status in statuses
+                }
+                key = f"{window_at.date()}:{window}:{sub['destination_platform']}:{sub['destination_id']}:{sub['subscription_id']}"
+                with self.store.transaction() as db:
+                    inserted = db.execute(
+                        "INSERT OR IGNORE INTO monitor_schedule_windows VALUES (?,?)",
+                        (key, now.isoformat()),
+                    ).rowcount
+                if inserted:
+                    self._enqueue(
+                        sub, f"digest:{key}", {"kind": f"digest.{window}", "sections": sections}
                     )
-                    sections = {
-                        status: [
-                            {"task_id": task["task_id"], "title": task["title"]}
-                            for task in scoped
-                            if (
-                                task["status"] == status
-                                or (
-                                    status == "next_attention"
-                                    and task["status"] in {"approval_required", "queued", "running"}
-                                )
-                            )
-                        ]
-                        for status in statuses
-                    }
-                    key = f"{local.date()}:{window}:{sub['destination_platform']}:{sub['destination_id']}:{sub['subscription_id']}"
-                    with self.store.transaction() as db:
-                        inserted = db.execute(
-                            "INSERT OR IGNORE INTO monitor_schedule_windows VALUES (?,?)",
-                            (key, now.isoformat()),
-                        ).rowcount
-                    if inserted:
-                        self._enqueue(
-                            sub, f"digest:{key}", {"kind": f"digest.{window}", "sections": sections}
-                        )
         if drain:
             while await self.drain_once():
                 pass
 
     async def drain_once(self) -> bool:
+        self.reconcile_audits()
         legacy = self._suppress_and_audit_legacy()
         now = self.clock()
-        lease_until = (now + timedelta(seconds=30)).isoformat()
+        lease_until = (now + timedelta(seconds=self.lease_seconds)).isoformat()
         with self.store.transaction() as db:
             row = db.execute(
                 "SELECT * FROM notification_outbox WHERE state='pending' AND delivered_at IS NULL AND delivery_id<>'' "
@@ -211,9 +226,17 @@ class WorkMonitorScheduler:
             ).fetchone()
             if row is None:
                 return bool(legacy)
+            generation = int(row["lease_generation"]) + 1
             claimed = db.execute(
-                "UPDATE notification_outbox SET lease_owner=?,lease_until=? WHERE notification_id=? AND (lease_until='' OR lease_until<=?)",
-                (self.owner, lease_until, row["notification_id"], now.isoformat()),
+                "UPDATE notification_outbox SET lease_owner=?,lease_until=?,lease_generation=? WHERE notification_id=? AND lease_generation=? AND (lease_until='' OR lease_until<=?)",
+                (
+                    self.owner,
+                    lease_until,
+                    generation,
+                    row["notification_id"],
+                    row["lease_generation"],
+                    now.isoformat(),
+                ),
             ).rowcount
             if not claimed:
                 return False
@@ -240,56 +263,149 @@ class WorkMonitorScheduler:
             )
         if active is None or platform not in self.transports:
             with self.store.transaction() as db:
-                db.execute(
-                    "UPDATE notification_outbox SET state='suppressed',lease_owner='',lease_until='' WHERE notification_id=?",
-                    (item["notification_id"],),
+                updated = db.execute(
+                    "UPDATE notification_outbox SET state='suppressed',lease_owner='',lease_until='' WHERE notification_id=? AND lease_owner=? AND lease_generation=?",
+                    (item["notification_id"], self.owner, generation),
                 )
-            return True
+            return bool(updated)
         text = ("延迟通知\n" if item["delayed"] else "") + json.dumps(payload, ensure_ascii=False)
+        renew_stop = asyncio.Event()
+        renewer = asyncio.create_task(
+            self._renew_lease(item["notification_id"], generation, renew_stop)
+        )
         try:
-            await self.transports[platform].send_message(
-                destination_id, text, delivery_id=item["delivery_id"], chat_type=active["chat_type"]
+            await asyncio.wait_for(
+                self.transports[platform].send_message(
+                    destination_id,
+                    text,
+                    delivery_id=item["delivery_id"],
+                    chat_type=active["chat_type"],
+                ),
+                timeout=self.lease_seconds * 0.8,
             )
         except Exception as exc:
+            renew_stop.set()
+            await renewer
             attempts = int(item["attempts"]) + 1
-            status = getattr(exc, "status_code", 500)
-            terminal = attempts >= self.retry_cap or not (status == 429 or status >= 500)
+            raw_status = getattr(exc, "status_code", 0)
+            error = (
+                exc
+                if isinstance(exc, TransportError)
+                else TransportError(
+                    str(exc),
+                    status_code=raw_status,
+                    transient=isinstance(exc, (TimeoutError, asyncio.TimeoutError))
+                    or raw_status == 429
+                    or raw_status >= 500,
+                )
+            )
+            status = error.status_code
+            transient = error.transient or status == 429 or status >= 500
+            terminal = attempts >= self.retry_cap or not transient
             delay = (1, 2, 4, 8, 16)[min(attempts - 1, 4)]
-            next_at = now + timedelta(minutes=delay, seconds=self.jitter(delay * 6))
+            wait_seconds = delay * 60 + self.jitter(delay * 6)
+            if status == 429 and error.retry_after_seconds is not None:
+                wait_seconds = max(wait_seconds, error.retry_after_seconds)
+            next_at = now + timedelta(seconds=wait_seconds)
             with self.store.transaction() as db:
-                db.execute(
-                    "UPDATE notification_outbox SET attempts=?,state=?,next_attempt_at=?,lease_owner='',lease_until='' WHERE notification_id=?",
+                updated = db.execute(
+                    "UPDATE notification_outbox SET attempts=?,state=?,next_attempt_at=?,lease_owner='',lease_until='',failure_transient=?,deadlettered_at=? WHERE notification_id=? AND lease_owner=? AND lease_generation=?",
                     (
                         attempts,
                         "dead_letter" if terminal else "pending",
                         next_at.isoformat(),
+                        int(transient),
+                        now.isoformat() if terminal else "",
                         item["notification_id"],
+                        self.owner,
+                        generation,
                     ),
-                )
+                ).rowcount
+            if not updated:
+                return False
             self.ledger.record_notification(
                 item["delivery_id"],
                 "deadletter" if terminal else "fail",
                 {"error": str(exc), "payload": payload},
             )
             return True
+        renew_stop.set()
+        await renewer
         with self.store.transaction() as db:
-            db.execute(
-                "UPDATE notification_outbox SET delivered_at=?,state='delivered',lease_owner='',lease_until='' WHERE notification_id=?",
-                (now.isoformat(), item["notification_id"]),
-            )
+            updated = db.execute(
+                "UPDATE notification_outbox SET delivered_at=?,state='delivered',lease_owner='',lease_until='',audit_pending=1 WHERE notification_id=? AND lease_owner=? AND lease_generation=?",
+                (self.clock().isoformat(), item["notification_id"], self.owner, generation),
+            ).rowcount
+            if not updated:
+                return False
             if subscription_id != "binding":
                 db.execute(
                     "UPDATE monitor_subscriptions SET delivery_cursor=delivery_cursor+1 WHERE rowid=?",
                     (subscription_id,),
                 )
-            db.execute(
-                "UPDATE notification_outbox SET state='pending',attempts=0,delayed=1,"
-                "next_attempt_at=?,lease_owner='',lease_until='' WHERE state='dead_letter' "
-                "AND destination_key LIKE ?",
-                (now.isoformat(), f"{platform}:%"),
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT notification_id FROM notification_outbox WHERE state='dead_letter' AND failure_transient=1 "
+                    "AND destination_key=? AND deadlettered_at<=? ORDER BY deadlettered_at LIMIT ?",
+                    (
+                        item["destination_key"],
+                        (
+                            self.clock() - timedelta(seconds=self.recovery_cooldown_seconds)
+                        ).isoformat(),
+                        self.recovery_limit,
+                    ),
+                )
+            ]
+            db.executemany(
+                "UPDATE notification_outbox SET state='pending',attempts=0,delayed=1,next_attempt_at=?,deadlettered_at='' WHERE notification_id=?",
+                [(self.clock().isoformat(), value) for value in ids],
             )
-        self.ledger.record_notification(item["delivery_id"], "deliver", {"payload": payload})
+        self.reconcile_audits()
         return True
+
+    async def _renew_lease(
+        self, notification_id: str, generation: int, stop: asyncio.Event
+    ) -> None:
+        interval = max(0.01, self.lease_seconds / 3)
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                break
+            except TimeoutError:
+                with self.store.transaction() as db:
+                    updated = db.execute(
+                        "UPDATE notification_outbox SET lease_until=? WHERE notification_id=? AND lease_owner=? AND lease_generation=? AND state='pending'",
+                        (
+                            (self.clock() + timedelta(seconds=self.lease_seconds)).isoformat(),
+                            notification_id,
+                            self.owner,
+                            generation,
+                        ),
+                    ).rowcount
+                if not updated:
+                    break
+
+    def reconcile_audits(self, *, limit: int = 100) -> int:
+        with self.store.connect() as db:
+            rows = db.execute(
+                "SELECT notification_id,delivery_id,payload FROM notification_outbox WHERE audit_pending=1 AND ledger_synced=0 ORDER BY rowid LIMIT ?",
+                (limit,),
+            ).fetchall()
+        synced = 0
+        for row in rows:
+            try:
+                self.ledger.record_notification(
+                    row["delivery_id"], "deliver", {"payload": json.loads(row["payload"])}
+                )
+            except Exception:  # noqa: BLE001 - durable row remains pending for reconciliation
+                continue
+            with self.store.transaction() as db:
+                synced += db.execute(
+                    "UPDATE notification_outbox SET audit_pending=0,ledger_synced=1 WHERE notification_id=? AND state='delivered'",
+                    (row["notification_id"],),
+                ).rowcount
+        return synced
 
     def _suppress_and_audit_legacy(self) -> int:
         with self.store.transaction() as db:
@@ -324,10 +440,19 @@ class WorkMonitorScheduler:
                 )
         return len(rows)
 
-    def replay_dead_letters(self) -> int:
+    def replay_dead_letters(self, *, destination_key: str, limit: int) -> int:
+        if not destination_key or limit <= 0:
+            raise ValueError("destination_key and positive limit are required")
         with self.store.transaction() as db:
-            result = db.execute(
-                "UPDATE notification_outbox SET state='pending',attempts=0,delayed=1,next_attempt_at=?,lease_owner='',lease_until='' WHERE state='dead_letter'",
-                (self.clock().isoformat(),),
+            ids = [
+                r[0]
+                for r in db.execute(
+                    "SELECT notification_id FROM notification_outbox WHERE state='dead_letter' AND failure_transient=1 AND destination_key=? ORDER BY deadlettered_at LIMIT ?",
+                    (destination_key, limit),
+                )
+            ]
+            db.executemany(
+                "UPDATE notification_outbox SET state='pending',attempts=0,delayed=1,next_attempt_at=?,deadlettered_at='' WHERE notification_id=?",
+                [(self.clock().isoformat(), value) for value in ids],
             )
-        return result.rowcount
+        return len(ids)

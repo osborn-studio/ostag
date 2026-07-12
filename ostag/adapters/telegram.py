@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Any, Callable
 
 from ostag.config import Settings
 from ostag.core.event import NormalizedEvent
+from ostag.work_monitor.transport import TransportError
 
 
 Transport = Callable[[str, dict[str, object]], dict[str, object]]
@@ -18,7 +20,9 @@ Transport = Callable[[str, dict[str, object]], dict[str, object]]
 class TelegramBotClient:
     """Small injectable stdlib Bot API client; its token is never printable."""
 
-    def __init__(self, token: str, *, transport: Transport | None = None, timeout: float = 10) -> None:
+    def __init__(
+        self, token: str, *, transport: Transport | None = None, timeout: float = 10
+    ) -> None:
         if not token:
             raise ValueError("Telegram bot token is required")
         self._token = token
@@ -35,16 +39,36 @@ class TelegramBotClient:
             try:
                 body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
                 request = urllib.request.Request(
-                    f"https://api.telegram.org/bot{self._token}/{method}", body,
-                    {"Content-Type": "application/json"}, method="POST",
+                    f"https://api.telegram.org/bot{self._token}/{method}",
+                    body,
+                    {"Content-Type": "application/json"},
+                    method="POST",
                 )
                 with urllib.request.urlopen(request, timeout=self._timeout) as result:  # noqa: S310
                     response = json.loads(result.read())
+            except urllib.error.HTTPError as exc:
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                raise TransportError(
+                    f"Telegram Bot API {method} HTTP {exc.code}",
+                    status_code=exc.code,
+                    retry_after_seconds=float(retry_after) if retry_after else None,
+                    transient=exc.code == 429 or exc.code >= 500,
+                ) from None
             except Exception:
                 # urllib exceptions can contain the requested URL, which embeds the token.
-                raise RuntimeError(f"Telegram Bot API {method} transport failed") from None
+                raise TransportError(
+                    f"Telegram Bot API {method} transport failed", transient=True
+                ) from None
         if not isinstance(response, dict) or response.get("ok") is not True:
-            raise RuntimeError(f"Telegram Bot API {method} failed")
+            parameters = response.get("parameters", {}) if isinstance(response, dict) else {}
+            status = int(response.get("error_code", 400)) if isinstance(response, dict) else 400
+            retry_after = parameters.get("retry_after") if isinstance(parameters, dict) else None
+            raise TransportError(
+                f"Telegram Bot API {method} failed",
+                status_code=status,
+                retry_after_seconds=float(retry_after) if retry_after is not None else None,
+                transient=status == 429 or status >= 500,
+            )
         return response
 
     def send_message(
@@ -56,9 +80,9 @@ class TelegramBotClient:
         return self.call("sendMessage", payload)
 
     def answer_callback(self, callback_query_id: str, text: str) -> dict[str, object]:
-        return self.call("answerCallbackQuery", {
-            "callback_query_id": callback_query_id, "text": text[:200]
-        })
+        return self.call(
+            "answerCallbackQuery", {"callback_query_id": callback_query_id, "text": text[:200]}
+        )
 
 
 class TelegramAdapter:
@@ -110,9 +134,15 @@ class TelegramAdapter:
         if not isinstance(text, str) or not event_id:
             raise ValueError("invalid Telegram message")
         return NormalizedEvent(
-            platform="telegram", event_id=event_id, chat_id=str(chat_id),
-            message_id=str(message.get("message_id", "")), sender_id=str(sender_id), text=text,
-            mention_bot=True, chat_type=normalized_chat_type, destination_id=str(chat_id),
+            platform="telegram",
+            event_id=event_id,
+            chat_id=str(chat_id),
+            message_id=str(message.get("message_id", "")),
+            sender_id=str(sender_id),
+            text=text,
+            mention_bot=True,
+            chat_type=normalized_chat_type,
+            destination_id=str(chat_id),
             raw=raw_event,
         )
 
@@ -126,8 +156,9 @@ class TelegramAdapter:
         raise RuntimeError("Telegram live mode is served by the HTTPS webhook monitor server")
 
     async def reply(self, event: NormalizedEvent, text: str) -> None:
-        await self.send_message(event.destination_id, text, delivery_id=event.event_id,
-                                chat_type=event.chat_type)
+        await self.send_message(
+            event.destination_id, text, delivery_id=event.event_id, chat_type=event.chat_type
+        )
 
     async def send_message(
         self, chat_id: str, text: str, *, delivery_id: str, chat_type: str = "group"

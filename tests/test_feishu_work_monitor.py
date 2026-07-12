@@ -11,7 +11,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from ostag.adapters.feishu import FeishuAdapter
-from ostag.config import load_settings
+from ostag.config import Settings, load_settings
 from ostag.work_monitor.feishu_card_security import feishu_signature
 from ostag.work_monitor.feishu_cards import render_feishu_card
 from ostag.work_monitor.identity import IdentityStore
@@ -25,28 +25,57 @@ from ostag.work_monitor.server import (
 )
 from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
+from ostag.work_monitor.transport import TransportError
+
+
+@pytest.mark.asyncio
+async def test_feishu_http_200_business_error_is_typed(monkeypatch) -> None:
+    settings = Settings(dry_run=False, feishu_app_id="id", feishu_app_secret="secret")
+    adapter = FeishuAdapter(settings)
+    monkeypatch.setattr(adapter, "_tenant_access_token", lambda: None)
+
+    async def token():
+        return "token"
+
+    monkeypatch.setattr(adapter, "_tenant_access_token", token)
+    monkeypatch.setattr("ostag.adapters.feishu._urlopen_json", lambda request: {"code": 230001})
+    with pytest.raises(TransportError) as exc:
+        await adapter.send_message("chat", "hello", delivery_id="stable")
+    assert exc.value.status_code == 400
+    assert exc.value.transient is False
 
 
 def test_feishu_cards_are_vertical_mobile_high_contrast() -> None:
-    board = MobileBoardView.from_tasks([
-        {"task_id": "task-1", "title": "Ship", "status": "blocked", "progress": 40}
-    ])
+    board = MobileBoardView.from_tasks(
+        [{"task_id": "task-1", "title": "Ship", "status": "blocked", "progress": 40}]
+    )
     card = render_feishu_card(board)
     assert card["config"]["wide_screen_mode"] is False
     assert card["header"]["template"] == "indigo"
     assert [element["tag"] for element in card["elements"]] == ["markdown", "hr"]
-    detail = render_feishu_card(TaskDetailView.from_task(
-        {"task_id": "task-1", "title": "Ship", "status": "running", "progress": 40},
-        capabilities=("pause", "cancel"),
-    ))
+    detail = render_feishu_card(
+        TaskDetailView.from_task(
+            {"task_id": "task-1", "title": "Ship", "status": "running", "progress": 40},
+            capabilities=("pause", "cancel"),
+        )
+    )
     assert [element["tag"] for element in detail["elements"]] == ["markdown", "action", "action"]
 
 
 def test_feishu_cards_escape_untrusted_markdown_and_bound_elements() -> None:
     view = MobileBoardView(
-        cards=tuple({"task_id": f"task-{index}", "title": "<script>*boom*</script>",
-                     "status": "blocked", "progress": 1} for index in range(30)),
-        page=1, page_size=30, total=30,
+        cards=tuple(
+            {
+                "task_id": f"task-{index}",
+                "title": "<script>*boom*</script>",
+                "status": "blocked",
+                "progress": 1,
+            }
+            for index in range(30)
+        ),
+        page=1,
+        page_size=30,
+        total=30,
     )
     card = render_feishu_card(view)
     assert len(card["elements"]) <= 20
@@ -77,19 +106,27 @@ def test_production_composition_registers_cards_only_when_fully_configured(tmp_p
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     service = WorkMonitorService(store, IdentityStore(store.path))
     base = dict(service=service, projector=Projector(store), auth=ServerAuth({}))
-    absent = create_app(
-        settings=load_settings(None, audit_log=tmp_path / "audit.log"), **base
-    )
+    absent = create_app(settings=load_settings(None, audit_log=tmp_path / "audit.log"), **base)
     configured = load_settings(
-        None, audit_log=tmp_path / "audit.log", feishu_app_id="app",
-        feishu_app_secret="secret", feishu_encrypt_key="encrypt",
-        feishu_verification_token="verify", feishu_use_websocket=False,
+        None,
+        audit_log=tmp_path / "audit.log",
+        feishu_app_id="app",
+        feishu_app_secret="secret",
+        feishu_encrypt_key="encrypt",
+        feishu_verification_token="verify",
+        feishu_use_websocket=False,
     )
     present = create_app(settings=configured, **base)
     challenge = json.dumps(
-        {"schema": "2.0", "header": {
-            "event_type": "url_verification", "token": "verify", "app_id": "app",
-        }, "event": {"challenge": "verified"}},
+        {
+            "schema": "2.0",
+            "header": {
+                "event_type": "url_verification",
+                "token": "verify",
+                "app_id": "app",
+            },
+            "event": {"challenge": "verified"},
+        },
         separators=(",", ":"),
     ).encode()
     timestamp = str(int(time.time()))
@@ -104,14 +141,20 @@ def test_production_composition_registers_cards_only_when_fully_configured(tmp_p
     with TestClient(absent) as client:
         assert client.post("/webhooks/feishu/card-action", content=challenge).status_code == 404
     with TestClient(present) as client:
-        assert client.post(
-            "/webhooks/feishu/card-action", content=challenge,
-            headers=headers | {"X-Lark-Signature": "bad"},
-        ).status_code == 401
+        assert (
+            client.post(
+                "/webhooks/feishu/card-action",
+                content=challenge,
+                headers=headers | {"X-Lark-Signature": "bad"},
+            ).status_code
+            == 401
+        )
         assert client.post(
             "/webhooks/feishu/card-action", content=challenge, headers=headers
         ).json() == {"challenge": "verified"}
-        assert client.post("/webhooks/feishu", content=challenge, headers=headers).status_code == 404
+        assert (
+            client.post("/webhooks/feishu", content=challenge, headers=headers).status_code == 404
+        )
 
 
 def test_production_composition_supervises_auto_ws_restart_and_shutdown(
@@ -132,12 +175,18 @@ def test_production_composition_supervises_auto_ws_restart_and_shutdown(
     monkeypatch.setattr("ostag.adapters.feishu.FeishuAdapter._start_blocking", fake_start)
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     settings = load_settings(
-        None, audit_log=tmp_path / "audit.log", feishu_app_id="app",
-        feishu_app_secret="secret", monitor_server_db=store.path,
+        None,
+        audit_log=tmp_path / "audit.log",
+        feishu_app_id="app",
+        feishu_app_secret="secret",
+        monitor_server_db=store.path,
     )
     app = create_app(
-        settings=settings, service=WorkMonitorService(store, IdentityStore(store.path)),
-        projector=Projector(store), auth=ServerAuth({}), supervisor_backoff=(0.001, 0.002),
+        settings=settings,
+        service=WorkMonitorService(store, IdentityStore(store.path)),
+        projector=Projector(store),
+        auth=ServerAuth({}),
+        supervisor_backoff=(0.001, 0.002),
     )
     with TestClient(app):
         deadline = time.monotonic() + 1
@@ -152,8 +201,13 @@ async def test_proactive_private_uses_open_id_group_uses_chat_id_and_card_falls_
     monkeypatch, tmp_path: Path
 ) -> None:
     requests = []
-    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False,
-                           feishu_app_id="app", feishu_app_secret="secret")
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=False,
+        feishu_app_id="app",
+        feishu_app_secret="secret",
+    )
     adapter = FeishuAdapter(config)
     monkeypatch.setattr(adapter, "_tenant_access_token", lambda: asyncio.sleep(0, result="token"))
 
@@ -166,8 +220,9 @@ async def test_proactive_private_uses_open_id_group_uses_chat_id_and_card_falls_
     monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
     await adapter.send_message("ou_user", "private", chat_type="private", delivery_id="private-1")
     await adapter.send_message("oc_group", "group", chat_type="group", delivery_id="group-1")
-    await adapter.send_card("ou_user", {"elements": []}, "fallback", chat_type="private",
-                            delivery_id="card-1")
+    await adapter.send_card(
+        "ou_user", {"elements": []}, "fallback", chat_type="private", delivery_id="card-1"
+    )
     urls = [request.full_url for request in requests]
     assert "receive_id_type=open_id" in urls[0]
     assert "receive_id_type=chat_id" in urls[1]
@@ -179,8 +234,13 @@ async def test_card_business_error_falls_back_once_with_stable_idempotency_key(
     monkeypatch, tmp_path: Path
 ) -> None:
     requests = []
-    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False,
-                           feishu_app_id="app", feishu_app_secret="secret")
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=False,
+        feishu_app_id="app",
+        feishu_app_secret="secret",
+    )
     adapter = FeishuAdapter(config)
     monkeypatch.setattr(adapter, "_tenant_access_token", lambda: asyncio.sleep(0, result="token"))
 
@@ -189,8 +249,7 @@ async def test_card_business_error_falls_back_once_with_stable_idempotency_key(
         return {"code": 999} if json.loads(req.data)["msg_type"] == "interactive" else {"code": 0}
 
     monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
-    await adapter.send_card("oc_group", {"elements": []}, "fallback",
-                            delivery_id="delivery-1")
+    await adapter.send_card("oc_group", {"elements": []}, "fallback", delivery_id="delivery-1")
     assert sum(json.loads(req.data)["msg_type"] == "interactive" for req in requests) == 1
     assert "uuid=delivery-1" in requests[0].full_url
     assert "uuid=delivery-1" in requests[-1].full_url
@@ -214,11 +273,16 @@ async def test_ws_callback_uses_supervised_loop_without_per_message_thread(tmp_p
     config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=True)
     adapter = FeishuAdapter(config, runner=Runner())
     adapter._loop = asyncio.get_running_loop()
-    adapter._run_live_event_handler({
-        "header": {"event_id": "evt"},
-        "event": {"message": {"message_id": "msg", "chat_id": "oc", "content": "{\"text\":\"hi\"}"},
-                  "sender": {"sender_id": {"open_id": "ou"}}},
-    }, adapter.runner)
+    adapter._run_live_event_handler(
+        {
+            "header": {"event_id": "evt"},
+            "event": {
+                "message": {"message_id": "msg", "chat_id": "oc", "content": '{"text":"hi"}'},
+                "sender": {"sender_id": {"open_id": "ou"}},
+            },
+        },
+        adapter.runner,
+    )
     await asyncio.wait_for(handled.wait(), timeout=1)
     await adapter.stop()
 
@@ -245,18 +309,25 @@ async def test_ws_sdk_bridge_disconnects_on_graceful_stop(tmp_path: Path) -> Non
         states.append("started")
         sdk_loop.call_soon_threadsafe(
             adapter._run_live_event_handler,
-            {"header": {"event_id": "evt"}, "event": {
-                "message": {"message_id": "msg", "chat_id": "oc",
-                            "content": "{\"text\":\"hi\"}"},
-                "sender": {"sender_id": {"open_id": "ou"}},
-            }},
+            {
+                "header": {"event_id": "evt"},
+                "event": {
+                    "message": {"message_id": "msg", "chat_id": "oc", "content": '{"text":"hi"}'},
+                    "sender": {"sender_id": {"open_id": "ou"}},
+                },
+            },
             adapter.runner,
         )
         sdk_loop.run_forever()
         sdk_loop.close()
 
-    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=True,
-                           feishu_app_id="app", feishu_app_secret="secret")
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=True,
+        feishu_app_id="app",
+        feishu_app_secret="secret",
+    )
     adapter = FeishuAdapter(config, runner=Runner())
     adapter._start_blocking = lambda runner: public_start_bridge()
     stop = asyncio.Event()
@@ -269,8 +340,13 @@ async def test_ws_sdk_bridge_disconnects_on_graceful_stop(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_ws_bridge_immediate_stop_repeatedly_leaves_no_thread(tmp_path: Path) -> None:
-    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=True,
-                           feishu_app_id="app", feishu_app_secret="secret")
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=True,
+        feishu_app_id="app",
+        feishu_app_secret="secret",
+    )
     before = {thread.ident for thread in threading.enumerate()}
     for _ in range(5):
         adapter = FeishuAdapter(config, runner=object())
@@ -288,6 +364,9 @@ async def test_ws_bridge_immediate_stop_repeatedly_leaves_no_thread(tmp_path: Pa
         stop = asyncio.Event()
         stop.set()
         await asyncio.wait_for(adapter.run(stop), timeout=1)
-    leaked = [thread for thread in threading.enumerate()
-              if thread.ident not in before and thread.name == "ostag-feishu-ws-bridge"]
+    leaked = [
+        thread
+        for thread in threading.enumerate()
+        if thread.ident not in before and thread.name == "ostag-feishu-ws-bridge"
+    ]
     assert leaked == []

@@ -149,6 +149,15 @@ MIGRATIONS = (
             "UPDATE notification_outbox SET state='suppressed' WHERE delivery_id='' AND state='pending'",
         )
     ),
+    Migration(
+        statements=(
+            "ALTER TABLE notification_outbox ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE notification_outbox ADD COLUMN failure_transient INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE notification_outbox ADD COLUMN deadlettered_at TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE notification_outbox ADD COLUMN audit_pending INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE notification_outbox ADD COLUMN ledger_synced INTEGER NOT NULL DEFAULT 0",
+        )
+    ),
 )
 
 
