@@ -1,0 +1,18 @@
+{
+  "event_id": "osstack-task-demo-v1",
+  "kind": "task.progress",
+  "occurred_at": "2026-07-12T01:00:00Z",
+  "task": {
+    "task_id": "task_demo",
+    "title": "Verify osstack bridge",
+    "project": "osstack",
+    "status": "running",
+    "agent": "codex",
+    "progress": 50,
+    "duration_seconds": 60,
+    "summary": "Reporter bridge dry-run fixture",
+    "error_class": null,
+    "evidence_ref": "osstack:task_demo",
+    "version": 1
+  }
+}

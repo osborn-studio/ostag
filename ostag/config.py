@@ -115,6 +115,13 @@ class Settings:
     ambient_stale_days: int = 7
     ambient_suppress_days: int = 3
     ambient_max_decisions: int = 3
+    monitor_enabled: bool = False
+    monitor_instance_id: str = "local"
+    monitor_instance_secret: str = ""
+    monitor_central_url: str = ""
+    monitor_spool_db: Path = Path("./logs/work_monitor_spool.sqlite3")
+    monitor_report_interval_seconds: int = 30
+    monitor_command_poll_seconds: int = 10
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -191,9 +198,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         auto_base_default_table_name=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_NAME", "需求池"),
         auto_base_default_base_token=os.getenv("OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN", ""),
         auto_base_default_table_id=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_ID", ""),
-        auto_base_download_dir=os.getenv(
-            "OSTAG_AUTO_BASE_DOWNLOAD_DIR", "tmp/ostag-auto-base"
-        ),
+        auto_base_download_dir=os.getenv("OSTAG_AUTO_BASE_DOWNLOAD_DIR", "tmp/ostag-auto-base"),
         auto_base_workdir=os.getenv("OSTAG_AUTO_BASE_WORKDIR", "."),
         lark_cli_bin=os.getenv("LARK_CLI_BIN", "lark-cli"),
         dws_cli_bin=os.getenv("DWS_CLI_BIN", "npx -y dingtalk-workspace-cli"),
@@ -213,6 +218,15 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         ambient_stale_days=_int("OSTAG_AMBIENT_STALE_DAYS", 7),
         ambient_suppress_days=_int("OSTAG_AMBIENT_SUPPRESS_DAYS", 3),
         ambient_max_decisions=_int("OSTAG_AMBIENT_MAX_DECISIONS", 3),
+        monitor_enabled=_bool("OSTAG_MONITOR_ENABLED", False),
+        monitor_instance_id=os.getenv("OSTAG_MONITOR_INSTANCE_ID", "local"),
+        monitor_instance_secret=os.getenv("OSTAG_MONITOR_INSTANCE_SECRET", ""),
+        monitor_central_url=os.getenv("OSTAG_MONITOR_CENTRAL_URL", ""),
+        monitor_spool_db=Path(
+            os.getenv("OSTAG_MONITOR_SPOOL_DB", "./logs/work_monitor_spool.sqlite3")
+        ),
+        monitor_report_interval_seconds=_int("OSTAG_MONITOR_REPORT_INTERVAL_SECONDS", 30),
+        monitor_command_poll_seconds=_int("OSTAG_MONITOR_COMMAND_POLL_SECONDS", 10),
     )
     if overrides:
         data = settings.__dict__ | overrides

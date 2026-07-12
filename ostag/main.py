@@ -25,6 +25,7 @@ from ostag.core.runner import OSTagRunner
 from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 from ostag.workflows.auto_base import AutoBaseWorkflow
+from ostag.work_monitor.reporter import Reporter
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,13 +35,19 @@ def build_parser() -> argparse.ArgumentParser:
     memory = subparsers.add_parser("memory", help="Manage optional OS Tag channel memory.")
     memory_sub = memory.add_subparsers(dest="memory_command", required=True)
     memory_show = memory_sub.add_parser("show")
-    memory_show.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True)
+    memory_show.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
     memory_show.add_argument("--chat-id", required=True)
     memory_path = memory_sub.add_parser("path")
-    memory_path.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True)
+    memory_path.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
     memory_path.add_argument("--chat-id", required=True)
     memory_remember = memory_sub.add_parser("remember")
-    memory_remember.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True)
+    memory_remember.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
     memory_remember.add_argument("--chat-id", required=True)
     memory_remember.add_argument("--text", required=True)
     memory_remember.add_argument("--sync", action="store_true")
@@ -60,9 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Actor id the run is attributed to (default: local-admin).",
     )
     run_submit.add_argument("--thread", help="Optional thread id.")
-    run_submit.add_argument(
-        "--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"]
-    )
+    run_submit.add_argument("--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"])
     run_submit.add_argument("--json", action="store_true")
     run_submit.add_argument("--config")
 
@@ -186,6 +191,25 @@ def build_parser() -> argparse.ArgumentParser:
     budget_status.add_argument("--json", action="store_true")
     budget_status.add_argument("--config")
 
+    monitor = subparsers.add_parser("monitor", help="Report local OStag/osstack work safely.")
+    monitor_sub = monitor.add_subparsers(dest="monitor_command", required=True)
+    ingest = monitor_sub.add_parser(
+        "ingest", help="Queue one strict monitor event (osstack bridge)."
+    )
+    source = ingest.add_mutually_exclusive_group(required=True)
+    source.add_argument("--file", type=Path)
+    source.add_argument("--stdin", action="store_true")
+    ingest.add_argument("--json", action="store_true")
+    ingest.add_argument("--config")
+    reporter_parser = monitor_sub.add_parser(
+        "reporter", help="Run or inspect the durable reporter."
+    )
+    reporter_sub = reporter_parser.add_subparsers(dest="reporter_command", required=True)
+    for name in ("run-once", "start", "status"):
+        command = reporter_sub.add_parser(name)
+        command.add_argument("--json", action="store_true")
+        command.add_argument("--config")
+
     channel = subparsers.add_parser("channel", help="Per-channel policy management.")
     channel_sub = channel.add_subparsers(dest="channel_command", required=True)
     channel_policy = channel_sub.add_parser("policy", help="Show or set channel policy.")
@@ -239,11 +263,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--platform", choices=["slack", "feishu", "lark", "dingtalk"])
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--live", action="store_true", help="Disable dry-run and require live credentials.")
+    parser.add_argument(
+        "--live", action="store_true", help="Disable dry-run and require live credentials."
+    )
     parser.add_argument("--event", type=Path)
     parser.add_argument("--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"])
     parser.add_argument("--config")
-    parser.add_argument("--doctor", action="store_true", help="Run deployment preflight checks and exit.")
+    parser.add_argument(
+        "--doctor", action="store_true", help="Run deployment preflight checks and exit."
+    )
     return parser
 
 
@@ -277,6 +305,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return await run_ambient_command(args)
     if args.command == "budget":
         return run_budget_command(args)
+    if args.command == "monitor":
+        return run_monitor_command(args)
 
     overrides = {}
     if args.platform:
@@ -322,6 +352,71 @@ def _emit(payload: object, *, as_json: bool) -> None:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     else:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
+
+
+def _reporter_from_config(config) -> Reporter:
+    return Reporter(
+        instance_id=config.monitor_instance_id,
+        secret=config.monitor_instance_secret,
+        central_url=config.monitor_central_url,
+        ledger_path=config.run_ledger_path,
+        spool_path=config.monitor_spool_db,
+        interval_seconds=config.monitor_report_interval_seconds,
+    )
+
+
+def run_monitor_command(args: argparse.Namespace) -> int:
+    import sys
+
+    config = load_settings(getattr(args, "config", None))
+    reporter = _reporter_from_config(config)
+    as_json = getattr(args, "json", False)
+    if args.monitor_command == "ingest":
+        raw = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
+        try:
+            event = reporter.enqueue(json.loads(raw))
+        except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
+            _emit(
+                {"error": {"code": "invalid_monitor_event", "message": str(exc)}}, as_json=as_json
+            )
+            return 1
+        _emit(
+            {"queued": True, "event_id": event.event_id, "sequence": event.sequence},
+            as_json=as_json,
+        )
+        return 0
+    if args.reporter_command == "status":
+        _emit(reporter.status(), as_json=as_json)
+        return 0
+    if args.reporter_command == "run-once":
+        _emit(reporter.run_once(), as_json=as_json)
+        return 0
+    if args.reporter_command == "start":
+        if not config.monitor_enabled:
+            _emit(
+                {
+                    "error": {
+                        "code": "monitor_disabled",
+                        "message": "Set OSTAG_MONITOR_ENABLED=true",
+                    }
+                },
+                as_json=as_json,
+            )
+            return 1
+        if not config.monitor_central_url or not config.monitor_instance_secret:
+            _emit(
+                {
+                    "error": {
+                        "code": "monitor_not_configured",
+                        "message": "Set central URL and instance secret",
+                    }
+                },
+                as_json=as_json,
+            )
+            return 1
+        reporter.start()
+        return 0
+    raise AssertionError(args.reporter_command)
 
 
 def run_inspection_command(args: argparse.Namespace) -> int:
@@ -543,9 +638,7 @@ def run_channel_command(args: argparse.Namespace) -> int:
         if args.grant or args.revoke:
             policy = store.load(args.platform, args.chat).policy
             grants = {
-                pair.split(":", 1)[0]: pair
-                for pair in policy.actor_permissions
-                if ":" in pair
+                pair.split(":", 1)[0]: pair for pair in policy.actor_permissions if ":" in pair
             }
             for pair in args.grant:
                 actor, _, level = pair.partition(":")
@@ -604,9 +697,7 @@ async def run_receipt_command(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
     config = load_settings(getattr(args, "config", None))
     ledger = RunLedger(config.run_ledger_path)
-    service = ApprovalService(
-        config, ledger, build_apply_executors(AutoBaseWorkflow(config))
-    )
+    service = ApprovalService(config, ledger, build_apply_executors(AutoBaseWorkflow(config)))
     try:
         if args.command == "receipts":
             if args.receipts_command == "list":
