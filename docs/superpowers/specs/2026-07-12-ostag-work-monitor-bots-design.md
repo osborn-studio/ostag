@@ -1,0 +1,124 @@
+# OStag Work Monitor Bots Design
+
+日期：2026-07-12
+状态：已批准需求的 OStag 原生重构版
+
+## 1. 目标与归属
+
+工作监控是 OStag 的原生能力，不是 osstack 内的第二个控制面。它让用户通过飞书或 Telegram 手机端，随时查看和安全控制分布在任意电脑、服务器或云环境中的 OStag/osstack 工作实例。
+
+第一版必须提供：
+
+- 跨实例统一任务投影与移动端纵向 Kanban；
+- 阻塞、失败、需要批准和实例离线的 24 小时即时通知；
+- `Asia/Shanghai` 每日 09:00 早报和 19:00 晚报；
+- 私聊为主、显式白名单群聊为辅的查看与订阅；
+- 查看、订阅、暂停、继续、重试、取消；所有改变执行状态的操作受权限和 receipt 治理，取消必须五分钟内二次确认；
+- 飞书交互卡片与 Telegram InlineKeyboard 的等价交互；
+- 只上传允许的任务元数据和脱敏摘要，绝不上传源码、diff 正文、完整日志、环境变量值、密钥或提示词全文。
+
+## 2. 核心决策
+
+采用“本地 reporter + 公有云 relay/projection + 多平台 OStag bot”的事件驱动架构。实例只建立出站 HTTPS 连接，不开放公网端口；云端维护跨实例只读投影和短期命令信箱，本地 runner/ledger 始终是执行事实源。
+
+治理不另起炉灶：
+
+- `OSTagRunner` 仍是消息与控制意图入口；
+- `RunLedger` 记录监控事件、订阅、通知和控制结果；
+- `permissions` 决定查询及控制授权；
+- `ActionReceipt` 承担 pause/resume/retry/cancel 的提议、批准和执行状态；
+- `AmbientScheduler` 承担定时摘要和关键事件通知编排；
+- adapters 只负责平台事件规范化、发送与富交互渲染。
+
+不采用中心轮询或上传整板快照：前者要求开发机公网可达，后者无法可靠表达顺序、幂等、订阅游标和审计。
+
+## 3. 组件边界
+
+### 3.1 Work monitor domain
+
+新增 `ostag/work_monitor/`，只包含平台无关领域逻辑：
+
+- `models.py`：版本化实例、任务、事件、订阅、命令和投递模型；
+- `redaction.py`：严格字段白名单、长度上限和敏感值替换；
+- `store.py`：SQLite 事件、投影、outbox、订阅和命令存储；
+- `projection.py`：按 `instance_id + sequence` 幂等、有序地折叠六阶段 Kanban；
+- `service.py`：看板查询、订阅、关键事件分类和 receipt 创建；
+- `reporter.py`：本地可靠队列、签名上报、心跳、命令领取及执行回执；
+- `scheduler.py`：北京时间双日报、实例健康判断、通知 outbox；
+- `rendering.py`：平台无关的移动视图模型。
+
+该模块不调用飞书或 Telegram SDK，也不自行实现 actor 权限、审批或审计。
+
+### 3.2 Reporter 与 relay
+
+每个实例有稳定 `instance_id` 和可轮换独立密钥。reporter 从 OStag `RunLedger` 读取新的结构化事件；osstack 集成通过一个窄的 JSON event ingestion CLI/API 提交同一契约，不要求移动或复制 osstack 状态库。
+
+reporter 先脱敏并落入本地 SQLite outbox，再以 HMAC 签名批量上报。relay 校验实例、时间偏差、签名、schema、大小、幂等键和速率，持久化后返回确认 sequence。断网恢复后顺序补传；监控故障不得停止本地任务。
+
+relay 同时提供 board/task/instance 查询、订阅、命令 poll/ack 和通知 drain 接口。生产部署使用 EdgeOne Pages Functions；领域服务保持 ASGI/WSGI 无关，便于本地 pytest 和迁移。
+
+### 3.3 飞书与 Telegram adapters
+
+扩展 adapter 能力，但保持文本回退：
+
+- 飞书：现有 WebSocket 消息入口；出站使用 `interactive` card，回调动作转换为 `NormalizedEvent`；通过 lark-cli 配置应用权限、事件订阅和管理员 `open_id`；
+- Telegram：Bot API long polling/webhook 均可，第一版生产使用 webhook；看板以短消息分段并用 InlineKeyboard 提供查看、订阅和控制；callback query 转换为相同控制意图；
+- 两端共享 `MobileBoardView`、命令解析、授权、receipt、订阅和审计，只各自实现 renderer/transporter。
+
+## 4. 数据契约与状态
+
+允许上云字段为：schema version、event/instance/sequence/time、task ID、标题、项目、阶段、进度、agent 标识、耗时、脱敏摘要、错误分类以及不含内容的证据元数据引用。严格拒绝未知字段。
+
+Kanban 阶段固定为 `triage / todo / ready / running / blocked / done`。云端状态是投影，不得反向覆盖本地状态。实例内 sequence 单调递增；重复事件只应用一次，缺口暂存并触发数据不完整告警。
+
+实例超过 2 分钟无心跳为 `degraded`，超过 10 分钟为 `offline`。控制命令包含 instance、task、expected version/status、action、requester、nonce、TTL 和 receipt ID，只能领取一次；过期、版本不符或跨实例命令必须拒绝并审计。
+
+## 5. 命令、权限与 receipt
+
+两端支持相同意图：
+
+| 意图 | 文本入口 | 富交互 |
+|---|---|---|
+| 统一看板 | `看板`、`/board` | 刷新/筛选 |
+| 任务详情 | `任务 <id>`、`/task <id>` | 任务按钮 |
+| 订阅 | `订阅 <id>`、`/watch <id>` | 关注/取消关注 |
+| 实例 | `实例`、`/instances` | 实例列表 |
+| 控制 | 暂停/继续/重试/取消 | Feishu buttons / Telegram InlineKeyboard |
+
+查询至少需要 `read`，订阅至少需要 `propose`，pause/resume/retry/cancel 至少需要 `write`。群聊只能查看和订阅，除非 channel policy 显式授权控制；cancel 始终只能由绑定管理员在私聊确认。
+
+所有控制先创建 `ActionReceipt`，批准后才能进入命令 outbox。取消返回五分钟单次确认；按钮 payload 只放 opaque receipt/action ID，不携带可信权限或目标状态。服务端重新读取 receipt、actor、chat policy、任务版本和 TTL。
+
+## 6. 移动信息设计
+
+以 390px 手机宽度为基线，不把六阶段压成横向六列。首屏顺序为：总体健康、运行中、阻塞、待批准、今日完成；“需要你处理”优先于普通进度。正文至少 14px、可点击区域至少 44px；长标题自然折行，无横向滚动。
+
+飞书卡片使用高对比纵向模块和卡片动作；Telegram 使用短段落、状态 emoji 和 InlineKeyboard，一页最多呈现最重要的任务，其余分页。橙红只表示阻塞/危险，绿色只表示健康/完成。危险确认先写影响和安全退路，破坏性按钮放最后。两端都必须在 iOS/Android 真实客户端验证长中文、深色模式、刷新、确认和失败回执。
+
+## 7. 通知与可靠性
+
+- 即时：blocked、failed、approval_required、offline，全天发送；普通完成进入摘要；
+- 定时：`Asia/Shanghai` 09:00 早报和 19:00 晚报，每个平台/目标/窗口用幂等键只生成一次；
+- outbox 至少一次投递，event/delivery ID 抑制重复；429/5xx 指数退避加抖动，持续失败进入 dead letter，恢复后标记延迟补发；
+- 订阅保存平台、chat/user、资源范围和投递游标；群聊必须在白名单；
+- relay 不可用时 reporter 继续排队，本地 OStag/osstack 不受影响。
+
+## 8. 部署与秘密管理
+
+生产控制面部署至腾讯云 EdgeOne。实例密钥、飞书 App Secret、Telegram Bot Token 只存平台 secret binding 或本机权限受限配置，不进入仓库、事件、卡片或 ledger。每实例密钥可单独撤销轮换。
+
+部署包括：EdgeOne routes/storage/schedules、飞书应用发布与事件/卡片回调、Telegram webhook 与 secret token、实例注册及 reporter 常驻服务。`ostag doctor` 增加 relay、存储、调度、平台凭证、webhook 和实例心跳检查。
+
+## 9. 测试与上线验收
+
+单元测试覆盖契约、脱敏、签名、幂等/乱序、投影、通知规则、北京时间窗口、权限、receipt 和二次确认。集成测试覆盖 reporter→relay→投影→双平台 renderer，以及按钮/callback→receipt→实例 poll→ack→卡片更新。
+
+故障与安全测试覆盖断网补传、重复/缺失/乱序、平台限流、relay 短暂故障、伪造签名、重放、过期确认、群内越权、跨实例命令和敏感字段泄漏。
+
+真实上线验收必须保存：EdgeOne 部署 URL/版本、脱敏后的 lark-cli 配置证据、Telegram webhook 状态、两个真实手机端的 09/19 测试摘要与关键事件、一次 pause/resume 和一次 cancel 二次确认闭环、实例离线与恢复、完整 `uv run pytest` 和 `scripts/release_check.sh` 结果。
+
+## 10. 第一版边界
+
+包含 Feishu + Telegram 双通道、跨实例监控、移动 Kanban、订阅、双日报、关键告警和四类受治理控制。
+
+不包含源码/完整日志/产物云端浏览、从聊天创建任意开发任务、agent 调度策略编辑、发布/合并批准、多租户计费或用云端投影替代本地事实源。
