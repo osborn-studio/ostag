@@ -12,8 +12,9 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from ostag.core.run_ledger import RunLedger
+from ostag.core.identity import Principal
 
-from .identity import IdentityStore
+from .identity import Destination, IdentityStore
 from .store import MonitorStore
 
 BEIJING = ZoneInfo("Asia/Shanghai")
@@ -199,6 +200,7 @@ class WorkMonitorScheduler:
                 pass
 
     async def drain_once(self) -> bool:
+        legacy = self._suppress_and_audit_legacy()
         now = self.clock()
         lease_until = (now + timedelta(seconds=30)).isoformat()
         with self.store.transaction() as db:
@@ -208,7 +210,7 @@ class WorkMonitorScheduler:
                 (now.isoformat(), now.isoformat()),
             ).fetchone()
             if row is None:
-                return False
+                return bool(legacy)
             claimed = db.execute(
                 "UPDATE notification_outbox SET lease_owner=?,lease_until=? WHERE notification_id=? AND (lease_until='' OR lease_until<=?)",
                 (self.owner, lease_until, row["notification_id"], now.isoformat()),
@@ -217,10 +219,25 @@ class WorkMonitorScheduler:
                 return False
         item = dict(row)
         platform, destination_id, subscription_id = item["destination_key"].split(":", 2)
+        payload = json.loads(item["payload"])
         # Re-check authorization at delivery time; revocation must win over queued work.
-        active = next(
-            (s for s in self._subscriptions() if str(s["subscription_id"]) == subscription_id), None
-        )
+        if subscription_id == "binding":
+            try:
+                destination = Destination(platform, destination_id, str(payload["chat_type"]))
+                recipient = Principal.from_dict(payload["recipient"])
+                active = (
+                    {"chat_type": destination.chat_type}
+                    if self.identities.binding(destination) is not None
+                    and self.identities.allows(recipient, destination, "write")
+                    else None
+                )
+            except (KeyError, ValueError):
+                active = None
+        else:
+            active = next(
+                (s for s in self._subscriptions() if str(s["subscription_id"]) == subscription_id),
+                None,
+            )
         if active is None or platform not in self.transports:
             with self.store.transaction() as db:
                 db.execute(
@@ -228,7 +245,6 @@ class WorkMonitorScheduler:
                     (item["notification_id"],),
                 )
             return True
-        payload = json.loads(item["payload"])
         text = ("延迟通知\n" if item["delayed"] else "") + json.dumps(payload, ensure_ascii=False)
         try:
             await self.transports[platform].send_message(
@@ -261,10 +277,11 @@ class WorkMonitorScheduler:
                 "UPDATE notification_outbox SET delivered_at=?,state='delivered',lease_owner='',lease_until='' WHERE notification_id=?",
                 (now.isoformat(), item["notification_id"]),
             )
-            db.execute(
-                "UPDATE monitor_subscriptions SET delivery_cursor=delivery_cursor+1 WHERE rowid=?",
-                (subscription_id,),
-            )
+            if subscription_id != "binding":
+                db.execute(
+                    "UPDATE monitor_subscriptions SET delivery_cursor=delivery_cursor+1 WHERE rowid=?",
+                    (subscription_id,),
+                )
             db.execute(
                 "UPDATE notification_outbox SET state='pending',attempts=0,delayed=1,"
                 "next_attempt_at=?,lease_owner='',lease_until='' WHERE state='dead_letter' "
@@ -273,6 +290,39 @@ class WorkMonitorScheduler:
             )
         self.ledger.record_notification(item["delivery_id"], "deliver", {"payload": payload})
         return True
+
+    def _suppress_and_audit_legacy(self) -> int:
+        with self.store.transaction() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO legacy_outbox_audit(notification_id) "
+                "SELECT notification_id FROM notification_outbox WHERE delivery_id=''"
+            )
+            db.execute(
+                "UPDATE notification_outbox SET state='suppressed' "
+                "WHERE delivery_id='' AND state='pending'"
+            )
+            rows = db.execute(
+                "SELECT a.notification_id,o.event_id,o.destination_key,o.payload "
+                "FROM legacy_outbox_audit a JOIN notification_outbox o USING(notification_id) "
+                "WHERE a.audited=0"
+            ).fetchall()
+        for row in rows:
+            self.ledger.record_notification(
+                str(row["notification_id"]),
+                "suppress",
+                {
+                    "reason": "legacy notification lacks delivery_id",
+                    "event_id": row["event_id"],
+                    "destination_key": row["destination_key"],
+                    "payload": json.loads(str(row["payload"])),
+                },
+            )
+            with self.store.transaction() as db:
+                db.execute(
+                    "UPDATE legacy_outbox_audit SET audited=1 WHERE notification_id=?",
+                    (row["notification_id"],),
+                )
+        return len(rows)
 
     def replay_dead_letters(self) -> int:
         with self.store.transaction() as db:

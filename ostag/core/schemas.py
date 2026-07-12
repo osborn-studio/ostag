@@ -83,6 +83,7 @@ LEDGER_EVENT_TYPES = (
     "notification_deliver",
     "notification_fail",
     "notification_deadletter",
+    "notification_suppress",
 )
 
 

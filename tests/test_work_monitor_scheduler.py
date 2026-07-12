@@ -8,6 +8,7 @@ import pytest
 from ostag.core.identity import Principal
 from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.scheduler import WorkMonitorScheduler
+from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 
 
@@ -172,3 +173,68 @@ async def test_successful_platform_delivery_replays_earlier_dead_letters(tmp_pat
             "SELECT state,delayed FROM notification_outbox WHERE notification_id='old'"
         ).fetchone()
     assert tuple(old) == ("pending", 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["feishu", "telegram"])
+async def test_control_ack_delivers_once_to_bound_recipient_without_fake_subscription(
+    tmp_path, platform
+):
+    store = MonitorStore(tmp_path / "control.db")
+    identities = IdentityStore(store.path)
+    owner = Principal(platform, "owner")
+    destination = Destination(platform, "chat", "private")
+    identities.bind_private(owner=owner, destination=destination, local_admin=True)
+    now = datetime.now(UTC)
+    with store.transaction() as db:
+        db.execute("INSERT INTO instances VALUES (?,?,?)", ("i", 1, now.isoformat()))
+        db.execute(
+            "INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("i", "t", "ship", "p", "running", "a", 1, 1, "ok", None, None, now.isoformat(), 1),
+        )
+        db.execute(
+            "INSERT INTO events VALUES (?,?,?,?,?,?)",
+            (
+                "hb",
+                "i",
+                1,
+                "instance.heartbeat",
+                now.isoformat(),
+                json.dumps({"per_task_capabilities": {"t": ["pause"]}}),
+            ),
+        )
+    service = WorkMonitorService(store, identities)
+    receipt = service.propose_control(owner, destination, task_id="t", action="pause")
+    service.approve_control(owner, destination, receipt.action_id)
+    service.apply_control(owner, destination, receipt.action_id)
+    with store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    result = {"ok": True, "code": "OK", "status": "paused", "version": 1}
+    service.acknowledge_control("i", command_id, result)
+    service.acknowledge_control("i", command_id, result)
+    sender = Sender()
+    scheduler = WorkMonitorScheduler(store, identities, {platform: sender})
+    while await scheduler.drain_once():
+        pass
+    assert len(sender.sent) == 1
+    with identities._connect() as db:
+        assert db.execute("SELECT count(*) FROM monitor_subscriptions").fetchone()[0] == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_outbox_is_suppressed_and_audited(tmp_path):
+    store, identities = setup(tmp_path)
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO notification_outbox(notification_id,event_id,destination_key,payload) VALUES ('legacy','old','control','{}')"
+        )
+    scheduler = WorkMonitorScheduler(store, identities, {"feishu": Sender()})
+    await scheduler.drain_once()
+    with store.connect() as db:
+        assert (
+            db.execute(
+                "SELECT state FROM notification_outbox WHERE notification_id='legacy'"
+            ).fetchone()[0]
+            == "suppressed"
+        )
+    assert any(r["event_type"] == "notification_suppress" for r in scheduler.ledger._read_all())

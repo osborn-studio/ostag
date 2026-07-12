@@ -141,6 +141,8 @@ def create_app(
     supervisor_backoff: tuple[float, ...] = (1, 2, 5, 15, 30),
 ) -> FastAPI:
     """Build an inert app; databases and background owners start only in lifespan."""
+    if outbox is not None:
+        raise ValueError("scheduler owns outbox delivery; a separate outbox owner is forbidden")
     configured = settings.validate() if settings is not None else load_settings()
     runtime = _Runtime(service, projector)
     auto_feishu_ws: LifespanOwner | None = None

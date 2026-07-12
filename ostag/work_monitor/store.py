@@ -142,6 +142,13 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS monitor_schedule_windows (window_key TEXT PRIMARY KEY, created_at TEXT NOT NULL)",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS legacy_outbox_audit (notification_id TEXT PRIMARY KEY, audited INTEGER NOT NULL DEFAULT 0)",
+            "INSERT OR IGNORE INTO legacy_outbox_audit(notification_id) SELECT notification_id FROM notification_outbox WHERE delivery_id=''",
+            "UPDATE notification_outbox SET state='suppressed' WHERE delivery_id='' AND state='pending'",
+        )
+    ),
 )
 
 
@@ -284,43 +291,70 @@ class MonitorStore:
         return True
 
     def create_telegram_callback(
-        self, callback_id: str, *, action: str, task_id: str, destination_id: str,
-        chat_type: str, principal_platform: str = "", actor_id: str = "", expires_at: int = 0,
+        self,
+        callback_id: str,
+        *,
+        action: str,
+        task_id: str,
+        destination_id: str,
+        chat_type: str,
+        principal_platform: str = "",
+        actor_id: str = "",
+        expires_at: int = 0,
         control_action: str = "",
     ) -> None:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO telegram_callbacks(callback_id,action,task_id,destination_id,chat_type,"
                 "principal_platform,actor_id,expires_at,control_action) VALUES (?,?,?,?,?,?,?,?,?)",
-                (callback_id, action, task_id, destination_id, chat_type,
-                 principal_platform, actor_id, expires_at, control_action),
+                (
+                    callback_id,
+                    action,
+                    task_id,
+                    destination_id,
+                    chat_type,
+                    principal_platform,
+                    actor_id,
+                    expires_at,
+                    control_action,
+                ),
             )
 
     def consume_telegram_callback(
-        self, callback_id: str, *, principal_platform: str = "", actor_id: str = "",
-        destination_id: str = "", chat_type: str = "", now: int = 0,
+        self,
+        callback_id: str,
+        *,
+        principal_platform: str = "",
+        actor_id: str = "",
+        destination_id: str = "",
+        chat_type: str = "",
+        now: int = 0,
     ) -> dict[str, str] | None:
         with self.transaction() as connection:
             row = connection.execute(
                 "SELECT action,task_id,destination_id,chat_type,principal_platform,actor_id,"
                 "expires_at,control_action,consumed_at "
-                "FROM telegram_callbacks WHERE callback_id=?", (callback_id,),
+                "FROM telegram_callbacks WHERE callback_id=?",
+                (callback_id,),
             ).fetchone()
-            if row is None or row["consumed_at"] is not None or (
-                principal_platform and row["principal_platform"] != principal_platform
-            ) or (actor_id and row["actor_id"] != actor_id) or (
-                destination_id and row["destination_id"] != destination_id
-            ) or (chat_type and row["chat_type"] != chat_type) or (
-                now and int(row["expires_at"]) <= now
+            if (
+                row is None
+                or row["consumed_at"] is not None
+                or (principal_platform and row["principal_platform"] != principal_platform)
+                or (actor_id and row["actor_id"] != actor_id)
+                or (destination_id and row["destination_id"] != destination_id)
+                or (chat_type and row["chat_type"] != chat_type)
+                or (now and int(row["expires_at"]) <= now)
             ):
                 return None
             connection.execute(
                 "UPDATE telegram_callbacks SET consumed_at=CURRENT_TIMESTAMP WHERE callback_id=?",
                 (callback_id,),
             )
-        return {key: str(row[key]) for key in (
-            "action", "task_id", "destination_id", "chat_type", "control_action"
-        )}
+        return {
+            key: str(row[key])
+            for key in ("action", "task_id", "destination_id", "chat_type", "control_action")
+        }
 
     def stage_counts(self, instance_id: str | None = None) -> dict[str, int]:
         parameters: tuple[str, ...] = ()
