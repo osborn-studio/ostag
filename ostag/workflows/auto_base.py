@@ -7,9 +7,9 @@ import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree
 
@@ -161,11 +161,13 @@ class AutoBaseWorkflow:
         cli: LarkCLI | None = None,
         requirement_connector: RequirementTableConnector | None = None,
         task_connector: TaskConnector | None = None,
+        today: Callable[[], date] | None = None,
     ):
         self.config = config
         self.cli = cli or LarkCLI(config)
         self.requirements = requirement_connector or self._default_requirement_connector(config)
         self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
+        self.today = today or (lambda: datetime.now().date())
         self.channel_brain = ChannelBrainStore(config)
         self.run_ledger = RunLedger(config.run_ledger_path)
         # Set by the runner before each handle() call so proposed receipts
@@ -692,7 +694,7 @@ class AutoBaseWorkflow:
             f"需求表「{table_label}」只读周报：\n"
             + format_weekly_requirement_review(
                 snapshots,
-                today=datetime.now().date(),
+                today=self.today(),
                 stale_days=self.config.ambient_stale_days,
             )
         )

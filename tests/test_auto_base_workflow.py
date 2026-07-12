@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 from ostag.config import load_settings
@@ -563,7 +564,7 @@ async def test_auto_base_workflow_returns_weekly_requirement_review(tmp_path: Pa
         auto_base_default_table_id="tblDefault",
     )
     fake_cli = FakeCLI()
-    workflow = AutoBaseWorkflow(config, cli=fake_cli)
+    workflow = AutoBaseWorkflow(config, cli=fake_cli, today=lambda: date(2026, 7, 9))
     event = NormalizedEvent(
         platform="feishu",
         event_id="evt",
