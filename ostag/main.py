@@ -26,7 +26,11 @@ from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 from ostag.workflows.auto_base import AutoBaseWorkflow
 from ostag.work_monitor.reporter import Reporter
-from ostag.work_monitor.executor import CommandExecutor, OsstackCliControlPort
+from ostag.work_monitor.executor import (
+    CommandExecutor,
+    OsstackCliControlPort,
+    OsstackTaskReference,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -356,8 +360,30 @@ def _emit(payload: object, *, as_json: bool) -> None:
 
 
 def _reporter_from_config(config) -> tuple[Reporter, CommandExecutor]:
+    references: dict[str, OsstackTaskReference] = {}
+    if config.monitor_osstack_references.exists():
+        try:
+            raw_references = json.loads(
+                config.monitor_osstack_references.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            raw_references = {}
+        if isinstance(raw_references, dict):
+            for task_id, raw in raw_references.items():
+                if isinstance(raw, dict):
+                    references[str(task_id)] = OsstackTaskReference(
+                        run_id=str(raw.get("run_id", "")),
+                        workspace=str(raw.get("workspace", "")),
+                        state_path=str(raw.get("state_path", "")),
+                        version=int(raw.get("version", 1)),
+                        lifecycle=str(raw.get("lifecycle", "running")),
+                        attempt_id=str(raw.get("attempt_id", "")),
+                        attempt_order=int(raw.get("attempt_order", 0)),
+                    )
     port = OsstackCliControlPort(
-        instance_id=config.monitor_instance_id, binary=config.monitor_osstack_bin
+        instance_id=config.monitor_instance_id,
+        binary=config.monitor_osstack_bin,
+        references=references,
     )
     executor = CommandExecutor(config.monitor_instance_id, osstack=port)
     reporter = Reporter(

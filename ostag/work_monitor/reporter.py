@@ -189,9 +189,14 @@ class Reporter:
                 with self._connect() as db:
                     db.execute("BEGIN IMMEDIATE")
                     if mapped is not None:
-                        mapped = self._apply_task_metadata(db, mapped)
-                        self._enqueue_in_transaction(db, mapped)
-                        count += 1
+                        duplicate = db.execute(
+                            "SELECT 1 FROM event_history WHERE event_id=?",
+                            (str(mapped["event_id"]),),
+                        ).fetchone()
+                        if duplicate is None:
+                            mapped = self._apply_task_metadata(db, mapped)
+                            self._enqueue_in_transaction(db, mapped)
+                            count += 1
                     self._before_spool_commit()
                     self._set_state(db, "ledger_inode", inode)
                     self._set_state(db, "ledger_offset", end)
@@ -371,9 +376,10 @@ class Reporter:
         handled = 0
         for raw in commands:
             command = RemoteCommand.from_dict(raw)
+            canonical = json.dumps(command.to_dict(), sort_keys=True, separators=(",", ":"))
             with self._connect() as db:
                 row = db.execute(
-                    "SELECT state,result_payload FROM command_state WHERE command_id=?",
+                    "SELECT state,command_payload,result_payload FROM command_state WHERE command_id=?",
                     (command.command_id,),
                 ).fetchone()
                 if row is None:
@@ -382,22 +388,38 @@ class Reporter:
                         (
                             command.command_id,
                             "received",
-                            json.dumps(command.to_dict(), sort_keys=True),
+                            canonical,
                         ),
                     )
                     state, stored = "received", None
                 else:
+                    try:
+                        stored_canonical = json.dumps(
+                            json.loads(row["command_payload"]),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if not hmac.compare_digest(stored_canonical, canonical):
+                        continue
                     state, stored = str(row["state"]), row["result_payload"]
             if state == "acked":
                 continue
-            if state == "executed":
+            if state in {"executed", "executed_unverified"}:
                 result = json.loads(stored)
             else:
                 result = execute(command)
+                code = str(result.get("code", ""))
+                execution_state = (
+                    "executed_unverified"
+                    if code.endswith("_NOT_CONFIRMED") or code == "STATUS_UNAVAILABLE"
+                    else "executed"
+                )
                 with self._connect() as db:
                     db.execute(
-                        "UPDATE command_state SET state='executed',result_payload=? WHERE command_id=?",
-                        (json.dumps(result, sort_keys=True), command.command_id),
+                        "UPDATE command_state SET state=?,result_payload=? WHERE command_id=?",
+                        (execution_state, json.dumps(result, sort_keys=True), command.command_id),
                     )
             body = json.dumps(
                 {"command_id": command.command_id, "result": result}, sort_keys=True

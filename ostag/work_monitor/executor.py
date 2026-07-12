@@ -55,15 +55,33 @@ class UnavailableOStagControlPort:
 Runner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 
+@dataclass(frozen=True)
+class OsstackTaskReference:
+    run_id: str
+    workspace: str
+    state_path: str
+    version: int = 1
+    lifecycle: str = "running"
+    attempt_id: str = ""
+    attempt_order: int = 0
+
+
 class OsstackCliControlPort:
     """Fail-closed argv-only adapter over osstack's authoritative CLI."""
 
     def __init__(
-        self, *, instance_id: str, binary: str = "osstack", runner: Runner | None = None
+        self,
+        *,
+        instance_id: str,
+        binary: str = "osstack",
+        runner: Runner | None = None,
+        references: dict[str, OsstackTaskReference] | None = None,
     ) -> None:
         self.instance_id = instance_id
         self.binary = binary
         self.runner = runner or self._run
+        self.references = references or {}
+        self._verified_attempts: dict[str, tuple[str, int]] = {}
 
     @staticmethod
     def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
@@ -80,41 +98,89 @@ class OsstackCliControlPort:
             return {}
 
     def capabilities(self) -> frozenset[str]:
-        payload = self._json([self.binary, "capabilities", "--json"])
-        actions = payload.get("actions", [])
-        return (
-            frozenset(str(item) for item in actions) & SAFE_ACTIONS
-            if isinstance(actions, list)
-            else frozenset()
-        )
+        try:
+            result = self.runner([self.binary, "version"])
+        except (OSError, subprocess.SubprocessError):
+            return frozenset()
+        if (
+            result.returncode
+            or not result.stdout.strip().startswith("0.8.1")
+            or not self.references
+        ):
+            return frozenset()
+        actions = {"cancel"}
+        if any(ref.workspace and ref.state_path for ref in self.references.values()):
+            actions.add("retry")
+        return frozenset(actions)
+
+    def _reference(self, task_id: str) -> OsstackTaskReference:
+        try:
+            return self.references[task_id]
+        except KeyError as exc:
+            raise RuntimeError(f"missing osstack task reference: {task_id}") from exc
 
     def get_task(self, task_id: str) -> ControlTask:
-        payload = self._json([self.binary, "status", "--task", task_id, "--json"])
+        reference = self._reference(task_id)
+        payload = self._json([self.binary, "task", "status", reference.run_id])
         if not payload:
             raise RuntimeError("osstack status unavailable or invalid")
         attempt = payload.get("attempt", {})
         attempt = attempt if isinstance(attempt, dict) else {}
+        cached_attempt = self._verified_attempts.get(
+            task_id, (reference.attempt_id, reference.attempt_order)
+        )
+        task_status = str(payload.get("task_status", ""))
+        lifecycle = str(payload.get("lifecycle", payload.get("status", "")))
+        if not lifecycle:
+            lifecycle = task_status or reference.lifecycle
+        if payload.get("active") is True:
+            lifecycle = "running"
+        elif str(payload.get("outcome", "")) in {"failed", "cancelled"}:
+            lifecycle = str(payload["outcome"])
         return ControlTask(
             task_id=str(payload.get("task_id", task_id)),
             instance_id=str(payload.get("instance_id", self.instance_id)),
-            lifecycle=str(payload.get("lifecycle", payload.get("status", ""))),
-            version=int(payload.get("version", 0)),
-            attempt_id=str(attempt.get("id", payload.get("attempt_id", ""))),
-            attempt_order=int(attempt.get("order", payload.get("attempt_order", 0))),
+            lifecycle=lifecycle,
+            version=int(payload.get("version", reference.version)),
+            attempt_id=str(attempt.get("id", payload.get("attempt_id", cached_attempt[0]))),
+            attempt_order=int(
+                attempt.get("order", payload.get("attempt_order", cached_attempt[1]))
+            ),
             terminal=str(payload.get("terminal", "")),
         )
 
     def execute(self, action: str, task_id: str) -> None:
+        reference = self._reference(task_id)
         commands = {
-            "cancel": [self.binary, "cancel", task_id, "--json"],
-            "retry": [self.binary, "cockpit", "retry", task_id, "--json"],
-            "pause": [self.binary, "loop", "stop", task_id, "--json"],
+            "cancel": [self.binary, "task", "cancel", reference.run_id],
+            "retry": [
+                self.binary,
+                "cockpit",
+                "retry",
+                task_id,
+                "--workspace",
+                reference.workspace,
+                "--state",
+                reference.state_path,
+                "--json",
+            ],
         }
         if action not in self.capabilities() or action not in commands:
             raise RuntimeError(f"unsupported osstack action: {action}")
         result = self.runner(commands[action])
         if result.returncode:
             raise RuntimeError(f"osstack {action} failed")
+        if action == "retry":
+            try:
+                payload = json.loads(result.stdout)
+                retry_task = payload["retry_task"]
+                retry_id = str(retry_task["task_id"])
+            except (json.JSONDecodeError, KeyError, TypeError):
+                raise RuntimeError("osstack retry result was not verifiable") from None
+            current = self._verified_attempts.get(
+                task_id, (reference.attempt_id, reference.attempt_order)
+            )
+            self._verified_attempts[task_id] = (retry_id, current[1] + 1)
 
 
 class CommandExecutor:
@@ -140,18 +206,27 @@ class CommandExecutor:
 
     def capabilities(self) -> frozenset[str]:
         port = self._port()
-        return frozenset() if port is None else frozenset(port.capabilities()) & SAFE_ACTIONS
+        try:
+            return frozenset() if port is None else frozenset(port.capabilities()) & SAFE_ACTIONS
+        except (RuntimeError, OSError, ValueError):
+            return frozenset()
 
     def execute(self, command: RemoteCommand) -> dict[str, object]:
         port = self._port()
         # This query is intentionally repeated here; a rendered capability is stale authority.
-        if port is None or command.action not in (frozenset(port.capabilities()) & SAFE_ACTIONS):
+        try:
+            supported = (
+                frozenset() if port is None else frozenset(port.capabilities()) & SAFE_ACTIONS
+            )
+        except (RuntimeError, OSError, ValueError):
+            supported = frozenset()
+        if port is None or command.action not in supported:
             return {"ok": False, "code": "UNSUPPORTED", "action": command.action}
         if self.clock() >= datetime.fromisoformat(command.expires_at.replace("Z", "+00:00")):
             return {"ok": False, "code": "EXPIRED"}
         try:
             task = port.get_task(command.task_id)
-        except RuntimeError:
+        except (RuntimeError, OSError, ValueError):
             return {"ok": False, "code": "STATUS_UNAVAILABLE"}
         if task.instance_id != self.instance_id or command.instance_id != self.instance_id:
             return {"ok": False, "code": "INSTANCE_MISMATCH"}
@@ -167,7 +242,10 @@ class CommandExecutor:
             return {"ok": False, "code": "EXECUTION_FAILED"}
         if command.action == "retry":
             for _ in range(self.poll_attempts):
-                updated = port.get_task(command.task_id)
+                try:
+                    updated = port.get_task(command.task_id)
+                except (RuntimeError, OSError, ValueError):
+                    return {"ok": False, "code": "RETRY_NOT_CONFIRMED"}
                 if (
                     updated.attempt_id != task.attempt_id
                     or updated.attempt_order > task.attempt_order
@@ -177,10 +255,16 @@ class CommandExecutor:
             return {"ok": False, "code": "RETRY_NOT_VERIFIED"}
         if command.action == "cancel":
             for _ in range(self.poll_attempts):
-                updated = port.get_task(command.task_id)
+                try:
+                    updated = port.get_task(command.task_id)
+                except (RuntimeError, OSError, ValueError):
+                    return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
                 if updated.lifecycle == "cancelled" or updated.terminal == "cancelled":
                     return {"ok": True, "status": "cancelled", "version": updated.version}
                 self.sleep(0.2)
             return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
-        updated = port.get_task(command.task_id)
+        try:
+            updated = port.get_task(command.task_id)
+        except (RuntimeError, OSError, ValueError):
+            return {"ok": False, "code": "STATUS_UNAVAILABLE"}
         return {"ok": True, "status": updated.lifecycle, "version": updated.version}

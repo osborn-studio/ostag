@@ -123,6 +123,7 @@ class Settings:
     monitor_report_interval_seconds: int = 30
     monitor_command_poll_seconds: int = 10
     monitor_osstack_bin: str = "osstack"
+    monitor_osstack_references: Path = Path("./logs/osstack_task_references.json")
 
 
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
@@ -229,6 +230,9 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_report_interval_seconds=_int("OSTAG_MONITOR_REPORT_INTERVAL_SECONDS", 30),
         monitor_command_poll_seconds=_int("OSTAG_MONITOR_COMMAND_POLL_SECONDS", 10),
         monitor_osstack_bin=os.getenv("OSTAG_MONITOR_OSSTACK_BIN", "osstack"),
+        monitor_osstack_references=Path(
+            os.getenv("OSTAG_MONITOR_OSSTACK_REFERENCES", "./logs/osstack_task_references.json")
+        ),
     )
     if overrides:
         data = settings.__dict__ | overrides

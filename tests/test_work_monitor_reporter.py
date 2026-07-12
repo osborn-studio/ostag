@@ -12,6 +12,7 @@ from ostag.main import main_async
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import LedgerEvent
 from ostag.work_monitor.reporter import Reporter, TransportResponse
+from ostag.work_monitor.models import RemoteCommand
 
 
 NOW = datetime(2026, 7, 12, 1, 0, tzinfo=UTC)
@@ -156,6 +157,21 @@ def test_cursor_advances_only_after_spool_commit_and_handles_rotation(tmp_path: 
     )
     assert reporter.tail_ledger_once() == 1
     assert [e.kind for e in reporter.pending_events()] == ["task.started", "task.failed"]
+
+
+def test_rotated_ledger_overlap_does_not_mutate_task_version_for_duplicate_event_id(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.jsonl"
+    record = _record("run_status_changed", {"status": "running"}, event_id="same")
+    ledger.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    reporter = _reporter(tmp_path)
+    assert reporter.tail_ledger_once() == 1
+    assert reporter.pending_events()[0].task.version == 1
+    ledger.rename(tmp_path / "old")
+    ledger.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    assert reporter.tail_ledger_once() == 0
+    assert reporter.pending_events()[0].task.version == 1
 
 
 def test_flush_signs_exact_body_and_only_deletes_acknowledged_sequences(tmp_path: Path) -> None:
@@ -315,6 +331,75 @@ def test_command_ack_failure_is_persisted_and_destructive_action_not_reexecuted(
     )
     assert calls == ["c1"]
     assert restarted.command_states() == {"c1": "acked"}
+
+
+def test_replayed_command_id_with_different_signed_payload_fails_closed(tmp_path: Path) -> None:
+    original = {
+        "command_id": "c1",
+        "task_id": "t1",
+        "instance_id": "macbook",
+        "action": "cancel",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
+        "requested_by": "u1",
+        "issued_at": "2026-07-12T00:59:00Z",
+        "expires_at": "2026-07-12T01:05:00Z",
+    }
+    changed = {**original, "task_id": "t2"}
+    transport = FakeTransport(
+        [
+            TransportResponse(200, json.dumps({"commands": [original]}).encode()),
+            TransportResponse(500, b""),
+            TransportResponse(200, json.dumps({"commands": [changed]}).encode()),
+        ]
+    )
+    calls: list[str] = []
+    reporter = _reporter(tmp_path, transport)
+    assert (
+        reporter.poll_commands_once(lambda c: calls.append(c.task_id) or {"status": "cancelled"})
+        == 0
+    )
+    assert (
+        reporter.poll_commands_once(lambda c: calls.append(c.task_id) or {"status": "cancelled"})
+        == 0
+    )
+    assert calls == ["t1"]
+    assert len(transport.requests) == 3
+
+
+def test_unverified_execution_is_persisted_and_never_reexecutes_on_ack_retry(
+    tmp_path: Path,
+) -> None:
+    command = {
+        "command_id": "c1",
+        "task_id": "t1",
+        "instance_id": "macbook",
+        "action": "cancel",
+        "expected_version": 1,
+        "expected_lifecycle": "running",
+        "requested_by": "u1",
+        "issued_at": "2026-07-12T00:59:00Z",
+        "expires_at": "2026-07-12T01:05:00Z",
+    }
+    transport = FakeTransport(
+        [
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(500, b""),
+            TransportResponse(200, json.dumps({"commands": [command]}).encode()),
+            TransportResponse(200, b"{}"),
+        ]
+    )
+    calls: list[str] = []
+    reporter = _reporter(tmp_path, transport)
+
+    def execute(command: RemoteCommand) -> dict[str, object]:
+        calls.append(command.command_id)
+        return {"ok": False, "code": "CANCEL_NOT_CONFIRMED"}
+
+    assert reporter.poll_commands_once(execute) == 0
+    assert reporter.command_states() == {"c1": "executed_unverified"}
+    assert reporter.poll_commands_once(execute) == 1
+    assert calls == ["c1"]
 
 
 def test_run_once_schedules_heartbeat_and_poll_at_independent_intervals(tmp_path: Path) -> None:
