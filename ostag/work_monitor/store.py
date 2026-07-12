@@ -97,6 +97,13 @@ MIGRATIONS = (
             "ON commands(action_id) WHERE action_id <> ''",
         )
     ),
+    Migration(
+        statements=(
+            "ALTER TABLE commands ADD COLUMN ack_payload TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE commands ADD COLUMN ack_hash TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE commands ADD COLUMN ledger_synced INTEGER NOT NULL DEFAULT 0",
+        )
+    ),
 )
 
 

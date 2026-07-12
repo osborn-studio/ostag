@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,7 +10,7 @@ import pytest
 
 from ostag.core.identity import Principal
 from ostag.core.run_ledger import RunLedger
-from ostag.core.schemas import SchemaError
+from ostag.core.schemas import ActionReceipt, SchemaError
 from ostag.work_monitor.identity import Destination, IdentityError, IdentityStore
 from ostag.work_monitor.models import RemoteCommand
 from ostag.work_monitor.service import WorkMonitorService
@@ -143,6 +144,42 @@ def test_confirmation_expires_after_five_minutes_and_is_principal_instance_bound
     assert exc.value.code == "stale_receipt"
 
 
+def test_receipt_cannot_be_approved_from_another_destination(tmp_path: Path) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    other = Destination("feishu", "other-private", "private")
+    service.identities.bind_private(owner=owner, destination=other, local_admin=True)
+    service.identities.grant(owner, other, owner, "write")
+    with pytest.raises(IdentityError, match="destination"):
+        service.approve_control(owner, other, receipt.action_id)
+
+
+def test_legacy_receipt_without_unique_destination_fails_closed(tmp_path: Path) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = ActionReceipt(
+        action_id="action_legacy_destination",
+        run_id="run_legacy_destination",
+        title="Pause",
+        target_system="work_monitor",
+        target_object="mac/task-1",
+        mutation_type="pause",
+        principal=owner,
+        state="needs_approval",
+        required_permissions=("write",),
+        apply_payload={
+            "instance_id": "mac",
+            "task_id": "task-1",
+            "expected_version": 7,
+            "expected_lifecycle": "running",
+        },
+        created_at=NOW.isoformat(),
+        updated_at=NOW.isoformat(),
+    )
+    ledger.record_receipt(receipt, platform="feishu", chat_id="private", proposer_id="owner")
+    with pytest.raises(IdentityError, match="destination"):
+        service.approve_control(owner, private, receipt.action_id)
+
+
 def test_apply_rejects_stale_task_version_and_cross_instance_replay(tmp_path: Path) -> None:
     service, owner, private, _ = _service(tmp_path)
     receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
@@ -184,8 +221,7 @@ def test_ack_maps_receipt_terminal_and_never_applies_failure(
     updated = service.acknowledge_control("mac", command_id, result)
     assert updated.state == terminal
     assert ledger.get_receipt(receipt.action_id).state == terminal
-    with pytest.raises(SchemaError):
-        service.acknowledge_control("mac", command_id, result)
+    assert service.acknowledge_control("mac", command_id, result).state == terminal
 
 
 def test_concurrent_apply_reserves_one_command_by_receipt_in_sqlite(tmp_path: Path) -> None:
@@ -238,3 +274,117 @@ def test_ledger_append_failure_retry_reuses_reserved_command(tmp_path: Path, mon
         rows = db.execute("SELECT command_id,action_id FROM commands").fetchall()
     assert len(rows) == 1
     assert rows[0]["action_id"] == receipt.action_id
+
+
+def test_ack_ledger_failure_retries_same_payload_without_duplicate_outbox(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    result = {"ok": True, "code": "OK", "status": "paused", "version": 7}
+    original = ledger.record_receipt_state
+    failed_once = False
+
+    def fail_once(*args, **kwargs):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise OSError("ledger unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "record_receipt_state", fail_once)
+    with pytest.raises(OSError, match="ledger unavailable"):
+        service.acknowledge_control("mac", command_id, result)
+    assert service.acknowledge_control("mac", command_id, result).state == "applied"
+    with service.store.connect() as db:
+        assert db.execute("SELECT count(*) FROM notification_outbox").fetchone()[0] == 1
+        row = db.execute(
+            "SELECT status,ledger_synced FROM commands WHERE command_id=?", (command_id,)
+        ).fetchone()
+    assert tuple(row) == ("acked", 1)
+
+
+def test_conflicting_ack_replay_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    monkeypatch.setattr(
+        ledger, "record_receipt_state", lambda *a, **k: (_ for _ in ()).throw(OSError("down"))
+    )
+    with pytest.raises(OSError):
+        service.acknowledge_control(
+            "mac", command_id, {"ok": True, "code": "OK", "status": "paused", "version": 7}
+        )
+    with pytest.raises(SchemaError) as exc:
+        service.acknowledge_control(
+            "mac", command_id, {"ok": False, "code": "FAILED", "status": "failed"}
+        )
+    assert exc.value.code == "conflicting_ack"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"ok": 1, "code": "OK", "status": "paused", "version": 7},
+        {
+            "ok": True,
+            "code": {"secret": "sk-abcdefghijklmnopqrstuvwxyz"},
+            "status": "paused",
+            "version": 7,
+        },
+        {"ok": True, "code": "OK", "status": ["paused"], "version": 7},
+        {"ok": True, "code": "OK", "status": "paused", "version": True},
+        {"ok": True, "code": "X" * 65, "status": "paused", "version": 7},
+        {"ok": True, "code": "OK", "status": "paused", "version": 7, "nested": {"secret": "x"}},
+    ],
+)
+def test_ack_rejects_noncanonical_or_nested_payloads(tmp_path: Path, result: dict) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    with pytest.raises(SchemaError) as exc:
+        service.acknowledge_control("mac", command_id, result)
+    assert exc.value.code == "invalid_ack"
+    with service.store.connect() as db:
+        assert db.execute("SELECT count(*) FROM notification_outbox").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("version", [None, 6])
+def test_success_ack_requires_monotonic_integer_version(tmp_path: Path, version: object) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    result = {"ok": True, "code": "OK", "status": "paused"}
+    if version is not None:
+        result["version"] = version
+    updated = service.acknowledge_control("mac", command_id, result)
+    assert updated.state == "failed"
+
+
+def test_real_v2_database_migrates_command_ack_columns(tmp_path: Path) -> None:
+    path = tmp_path / "v2.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE commands(command_id TEXT PRIMARY KEY,instance_id TEXT NOT NULL,"
+            "task_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL,consumed_at TEXT)"
+        )
+        db.execute("PRAGMA user_version=2")
+    store = MonitorStore(path)
+    with store.connect() as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(commands)")}
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+    assert {"action_id", "ack_payload", "ack_hash", "ledger_synced"} <= columns
+    assert version >= 4

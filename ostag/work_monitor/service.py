@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shlex
 from dataclasses import dataclass
@@ -270,6 +271,12 @@ class WorkMonitorService:
                 "task_id": task_id,
                 "expected_version": task["version"],
                 "expected_lifecycle": task["status"],
+                "destination": {
+                    "platform": destination.platform,
+                    "destination_id": destination.destination_id,
+                    "chat_type": destination.chat_type,
+                    "scope": ":".join(part for part in self._scope(destination) if part),
+                },
             },
             created_at=now,
             updated_at=now,
@@ -291,8 +298,52 @@ class WorkMonitorService:
             raise IdentityError("legacy receipt principal is unbound")
         if receipt.principal != principal:
             raise IdentityError("receipt principal does not match requester principal")
+        expected_destination = {
+            "platform": destination.platform,
+            "destination_id": destination.destination_id,
+            "chat_type": destination.chat_type,
+            "scope": ":".join(part for part in self._scope(destination) if part),
+        }
+        if receipt.apply_payload.get("destination") != expected_destination:
+            raise IdentityError(
+                "receipt destination is unbound or does not match requester destination"
+            )
         ensure_fresh_confirmation(receipt, now=self.clock())
         return receipt
+
+    @staticmethod
+    def _canonical_ack(result: dict[str, Any]) -> dict[str, bool | str | int]:
+        allowed = {"ok", "status", "code", "version"}
+        if not isinstance(result, dict) or not set(result) <= allowed or "ok" not in result:
+            raise SchemaError(
+                "invalid_ack",
+                "ACK contains unsupported fields",
+                "Send only ok, status, code, and version scalars.",
+            )
+        if type(result["ok"]) is not bool:
+            raise SchemaError("invalid_ack", "ACK ok must be a boolean", "Send a JSON boolean.")
+        canonical: dict[str, bool | str | int] = {"ok": result["ok"]}
+        for key in ("status", "code"):
+            value = result.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str) or not value or len(value) > 64:
+                raise SchemaError(
+                    "invalid_ack",
+                    f"ACK {key} must be a 1-64 character string",
+                    "Send a bounded scalar string.",
+                )
+            canonical[key] = redact_secrets(value)
+        if "version" in result:
+            version = result["version"]
+            if type(version) is not int or version < 0:
+                raise SchemaError(
+                    "invalid_ack",
+                    "ACK version must be a non-negative integer",
+                    "Send an integer version, never a boolean or container.",
+                )
+            canonical["version"] = version
+        return canonical
 
     def approve_control(
         self, principal: Principal, destination: Destination, action_id: str
@@ -369,9 +420,14 @@ class WorkMonitorService:
     def acknowledge_control(
         self, instance_id: str, command_id: str, result: dict[str, Any]
     ) -> ActionReceipt:
+        canonical = self._canonical_ack(result)
+        canonical_json = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+        ack_hash = hashlib.sha256(canonical_json.encode()).hexdigest()
+        should_sync = False
         with self.store.transaction() as db:
             row = db.execute(
-                "SELECT status,payload FROM commands WHERE command_id=? AND instance_id=?",
+                "SELECT status,payload,action_id,ack_payload,ack_hash,ledger_synced "
+                "FROM commands WHERE command_id=? AND instance_id=?",
                 (command_id, instance_id),
             ).fetchone()
             if row is None:
@@ -380,57 +436,81 @@ class WorkMonitorService:
                     "Unknown or cross-instance command",
                     "Poll commands for the authenticated instance.",
                 )
-            if row["status"] != "pending":
+            command = json.loads(row["payload"])
+            receipt = self.ledger.get_receipt(str(row["action_id"]))
+            if row["status"] == "acked":
+                if row["ack_hash"] != ack_hash:
+                    raise SchemaError(
+                        "conflicting_ack",
+                        "ACK payload conflicts with the persisted result",
+                        "Retry only the equivalent canonical ACK.",
+                    )
+                persisted = json.loads(str(row["ack_payload"]))
+                terminal = receipt.with_state(str(persisted["terminal_state"]))
+                should_sync = not bool(row["ledger_synced"])
+            elif row["status"] != "pending":
                 raise SchemaError(
                     "command_replay",
-                    "Command acknowledgement was already consumed",
-                    "Do not replay acknowledgements.",
+                    "Command is not acknowledgeable",
+                    "Poll current command state.",
                 )
-            command = json.loads(row["payload"])
-            receipt = self.ledger.receipt_for_command(command_id)
-            verified_statuses = {
-                "pause": {"paused"},
-                "resume": {"running", "resumed"},
-                "retry": {"queued", "running", "retried"},
-                "cancel": {"cancelled"},
-            }
-            success_codes = {"OK", "APPLIED", "SUCCESS", "EXECUTED"}
-            success = (
-                result.get("ok") is True
-                and str(result.get("code", "")).upper() in success_codes
-                and str(result.get("status", "")).lower()
-                in verified_statuses.get(str(command["action"]), set())
-            )
-            terminal = receipt.with_state("applied" if success else "failed")
-            db.execute(
-                "UPDATE commands SET status='acked',consumed_at=? WHERE command_id=?",
-                (self.clock().isoformat(), command_id),
-            )
-            sanitized = {
-                key: redact_secrets(value) if isinstance(value, str) else value
-                for key in ("ok", "status", "code", "version")
-                if (value := result.get(key)) is not None
-            }
-            db.execute(
-                "INSERT OR IGNORE INTO notification_outbox(notification_id,event_id,destination_key,payload) VALUES (?,?,?,?)",
-                (
-                    new_id("notification"),
-                    command_id,
-                    "control",
-                    json.dumps(
-                        {
-                            "kind": "task.control_ack",
-                            "task_id": command["task_id"],
-                            "action": command["action"],
-                            "result": sanitized,
-                        },
-                        sort_keys=True,
+            else:
+                statuses = {
+                    "pause": {"paused"},
+                    "resume": {"running", "resumed"},
+                    "retry": {"queued", "running", "retried"},
+                    "cancel": {"cancelled"},
+                }
+                version = canonical.get("version")
+                success = (
+                    canonical["ok"] is True
+                    and str(canonical.get("code", "")).upper()
+                    in {"OK", "APPLIED", "SUCCESS", "EXECUTED"}
+                    and str(canonical.get("status", "")).lower()
+                    in statuses.get(str(command["action"]), set())
+                    and type(version) is int
+                    and version >= int(command["expected_version"])
+                )
+                terminal = receipt.with_state("applied" if success else "failed")
+                persisted = {"terminal_state": terminal.state, "result": canonical}
+                db.execute(
+                    "UPDATE commands SET status='acked',consumed_at=?,ack_payload=?,ack_hash=? "
+                    "WHERE command_id=? AND status='pending'",
+                    (
+                        self.clock().isoformat(),
+                        json.dumps(persisted, sort_keys=True),
+                        ack_hash,
+                        command_id,
                     ),
-                ),
+                )
+                db.execute(
+                    "INSERT OR IGNORE INTO notification_outbox(notification_id,event_id,destination_key,payload) "
+                    "VALUES (?,?,?,?)",
+                    (
+                        new_id("notification"),
+                        command_id,
+                        "control",
+                        json.dumps(
+                            {
+                                "kind": "task.control_ack",
+                                "task_id": command["task_id"],
+                                "action": command["action"],
+                                "result": canonical,
+                            },
+                            sort_keys=True,
+                        ),
+                    ),
+                )
+                should_sync = True
+        if should_sync:
+            self.ledger.record_receipt_state(
+                terminal, previous_state=receipt.state, detail=canonical_json
             )
-        self.ledger.record_receipt_state(
-            terminal, previous_state=receipt.state, detail=json.dumps(sanitized, sort_keys=True)
-        )
+            with self.store.transaction() as db:
+                db.execute(
+                    "UPDATE commands SET ledger_synced=1 WHERE command_id=? AND ack_hash=?",
+                    (command_id, ack_hash),
+                )
         return terminal
 
     def handle_event(self, event: NormalizedEvent) -> str:
