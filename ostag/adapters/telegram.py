@@ -81,7 +81,12 @@ class TelegramAdapter:
                 raise ValueError("callback message is required")
             sender = callback.get("from")
             text = callback.get("data")
-            event_id = str(callback.get("id", ""))
+            callback_id = callback.get("id")
+            if not isinstance(callback_id, str) or not 1 <= len(callback_id) <= 128:
+                raise ValueError("invalid Telegram callback id")
+            if not isinstance(text, str) or not 1 <= len(text.encode("utf-8")) <= 64:
+                raise ValueError("invalid Telegram callback data")
+            event_id = callback_id
         else:
             message = raw_event.get("message")
             if not isinstance(message, dict):
@@ -94,7 +99,7 @@ class TelegramAdapter:
             raise ValueError("Telegram sender and chat are required")
         sender_id, chat_id = sender.get("id"), chat.get("id")
         chat_type = chat.get("type")
-        if not isinstance(sender_id, int) or not isinstance(chat_id, int):
+        if type(sender_id) is not int or type(chat_id) is not int:
             raise ValueError("invalid Telegram identity")
         if chat_type == "private":
             normalized_chat_type = "private"

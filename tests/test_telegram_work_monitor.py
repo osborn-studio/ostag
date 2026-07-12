@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from ostag.adapters.telegram import TelegramAdapter, TelegramBotClient
@@ -116,6 +117,29 @@ def test_production_telegram_configuration_fails_closed() -> None:
         assert "Telegram" in str(exc)
     else:
         raise AssertionError("incomplete Telegram production configuration accepted")
+    with pytest.raises(ValueError, match="Telegram"):
+        create_app(settings=Settings(env="production", platform="telegram"))
+    with pytest.raises(ValueError, match="HTTPS"):
+        create_app(settings=Settings(
+            env="production", platform="telegram", telegram_bot_token="token",
+            telegram_webhook_secret="secret", telegram_webhook_url="http://unsafe.test/hook",
+        ))
+
+
+@pytest.mark.asyncio
+async def test_normalization_rejects_bool_ids_and_container_callback_data() -> None:
+    adapter = TelegramAdapter(Settings(telegram_bot_token="token"))
+    with pytest.raises(ValueError):
+        await adapter.normalize_event({
+            "update_id": True, "message": {"message_id": 1, "from": {"id": 7},
+            "chat": {"id": 7, "type": "private"}, "text": "/board"},
+        })
+    with pytest.raises(ValueError):
+        await adapter.normalize_event({
+            "update_id": 1, "callback_query": {"id": "cb", "from": {"id": 7},
+            "data": {"action": "pause"}, "message": {"message_id": 1,
+            "chat": {"id": 7, "type": "private"}}},
+        })
 
 
 def test_telegram_html_is_escaped_and_callback_is_opaque_and_compact() -> None:
@@ -274,3 +298,55 @@ def test_cancel_group_is_rejected_but_private_admin_can_confirm(tmp_path: Path) 
                            headers=headers).status_code == 200
         with service.store.connect() as db:
             assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("broken", [
+    {"id": "cb-missing-message", "from": {"id": 7}, "data": "opaque"},
+    {"id": "cb-missing-from", "data": "opaque",
+     "message": {"message_id": 1, "chat": {"id": 7, "type": "private"}}},
+    {"id": "cb-bad-data", "from": {"id": 7}, "data": {"bad": True},
+     "message": {"message_id": 1, "chat": {"id": 7, "type": "private"}}},
+])
+def test_authenticated_pre_normalization_callback_errors_are_answered_once(
+    tmp_path: Path, broken: dict[str, object],
+) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    client = TelegramBotClient("token", transport=lambda method, payload: calls.append(
+        (method, payload)) or {"ok": True, "result": {}})
+    service = _service(tmp_path)
+    app = create_app(
+        settings=Settings(
+            telegram_bot_token="token", telegram_webhook_secret="secret",
+            telegram_webhook_url="https://example.test/webhooks/telegram",
+            monitor_server_db=service.store.path,
+        ), service=service, projector=Projector(service.store), telegram_client=client,
+    )
+    with TestClient(app) as http:
+        response = http.post("/webhooks/telegram", json={
+            "update_id": 90, "callback_query": broken,
+        }, headers={"X-Telegram-Bot-Api-Secret-Token": "secret"})
+    assert response.status_code == 200
+    answers = [(method, payload) for method, payload in calls if method == "answerCallbackQuery"]
+    assert answers == [("answerCallbackQuery", {
+        "callback_query_id": broken["id"], "text": "请求无效"
+    })]
+
+
+def test_telegram_content_length_is_rejected_before_body_parse(tmp_path: Path) -> None:
+    service = _service(tmp_path)
+    app = create_app(
+        settings=Settings(
+            telegram_bot_token="token", telegram_webhook_secret="secret",
+            telegram_webhook_url="https://example.test/webhooks/telegram",
+            monitor_server_db=service.store.path, monitor_server_max_body_bytes=8,
+        ), service=service, projector=Projector(service.store),
+        telegram_client=TelegramBotClient(
+            "token", transport=lambda method, payload: {"ok": True, "result": {}}
+        ),
+    )
+    secret = {"X-Telegram-Bot-Api-Secret-Token": "secret"}
+    with TestClient(app) as client:
+        assert client.post("/webhooks/telegram", content=b"{}",
+                           headers=secret | {"Content-Length": "bad"}).status_code == 400
+        assert client.post("/webhooks/telegram", content=b"{}",
+                           headers=secret | {"Content-Length": "9"}).status_code == 413

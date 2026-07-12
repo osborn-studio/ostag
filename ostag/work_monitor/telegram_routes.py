@@ -23,8 +23,9 @@ from .telegram_views import render_telegram_view
 @dataclass(frozen=True)
 class VerifiedTelegramUpdate:
     update_id: int
-    event: NormalizedEvent
+    event: NormalizedEvent | None
     callback_query_id: str = ""
+    normalization_error: bool = False
 
 
 class TelegramWebhookSecurity:
@@ -47,6 +48,16 @@ class TelegramWebhookSecurity:
         supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if not hmac.compare_digest(supplied, self._secret):
             raise HTTPException(401, "invalid Telegram webhook secret")
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                declared = int(content_length)
+            except ValueError as exc:
+                raise HTTPException(400, "invalid Content-Length") from exc
+            if declared < 0:
+                raise HTTPException(400, "invalid Content-Length")
+            if declared > self._limit:
+                raise HTTPException(413, "Telegram update too large")
         body = bytearray()
         async for chunk in request.stream():
             body.extend(chunk)
@@ -56,16 +67,34 @@ class TelegramWebhookSecurity:
             payload = json.loads(body)
             if not isinstance(payload, dict):
                 raise ValueError("update must be an object")
-            event = await self._adapter.normalize_event(payload)
             update_id = payload["update_id"]
+            if type(update_id) is not int or update_id < 0:
+                raise ValueError("invalid Telegram update_id")
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
             raise HTTPException(422, "invalid Telegram update") from exc
+        callback = payload.get("callback_query")
+        callback_id = ""
+        if callback is not None:
+            if not isinstance(callback, dict):
+                raise HTTPException(422, "invalid Telegram callback")
+            raw_id = callback.get("id")
+            if not isinstance(raw_id, str) or not 1 <= len(raw_id) <= 128:
+                raise HTTPException(422, "invalid Telegram callback id")
+            callback_id = raw_id
+        try:
+            event = await self._adapter.normalize_event(payload)
+        except (TypeError, ValueError) as exc:
+            if not callback_id:
+                raise HTTPException(422, "invalid Telegram update") from exc
+            if not self._service().store.consume_telegram_update(update_id):
+                raise HTTPException(409, "replayed Telegram update")
+            verified = VerifiedTelegramUpdate(update_id, None, callback_id, True)
+            request.state.telegram_update = verified
+            return verified
         if event.chat_type == "group" and event.destination_id not in self._groups:
             raise HTTPException(403, "Telegram group is not allowlisted")
         if not self._service().store.consume_telegram_update(update_id):
             raise HTTPException(409, "replayed Telegram update")
-        callback = payload.get("callback_query")
-        callback_id = str(callback.get("id", "")) if isinstance(callback, dict) else ""
         verified = VerifiedTelegramUpdate(update_id, event, callback_id)
         request.state.telegram_update = verified
         return verified
@@ -113,6 +142,10 @@ def create_telegram_router(
     async def telegram_webhook(request: Request) -> dict[str, bool]:
         verified: VerifiedTelegramUpdate = request.state.telegram_update
         event = verified.event
+        if verified.callback_query_id and (verified.normalization_error or event is None):
+            client.answer_callback(verified.callback_query_id, "请求无效")
+            return {"ok": True}
+        assert event is not None
         principal = event.principal
         destination = Destination("telegram", event.destination_id, event.chat_type)
         if verified.callback_query_id:
