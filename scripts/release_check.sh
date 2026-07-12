@@ -6,7 +6,7 @@ cd "$ROOT"
 
 export OSTAG_BACKEND="${OSTAG_BACKEND:-mock}"
 
-python -m compileall ostag
+uv run --locked python -m compileall ostag
 uv run ruff check ostag tests
 collection_output="$(mktemp)"
 trap 'rm -f "$collection_output"' EXIT

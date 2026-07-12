@@ -30,10 +30,12 @@ central container set `OSTAG_ENV=production` and `OSTAG_MONITOR_ROLE=central`;
 the running scheduler publishes a short DB lease and doctor requires exactly one
 unexpired runtime owner. Doctor also performs a temporary SQLite online
 backup/restore and checks platform callback state and stale instances.
-Set `OSTAG_TELEGRAM_WEBHOOK_STATUS=verified` only after inspecting a successful,
-redacted `getWebhookInfo` result on the deployed bot.
-Set `OSTAG_FEISHU_CALLBACK_STATUS=verified` only after a production callback
-challenge/health verification; tests inject this probe and never call the network.
+Doctor calls Telegram `getWebhookInfo` with a five-second timeout and requires its
+returned URL to equal `TELEGRAM_WEBHOOK_URL`. For Feishu it sends a deliberately
+invalid callback request and requires the authenticated route's HTTP 401 response,
+proving the public TLS/WAF/origin route is reachable without a valid action. Probe
+errors, tokens, URLs, and bodies are never printed. Tests inject the transport and
+never call the network.
 
 ## Platform setup
 

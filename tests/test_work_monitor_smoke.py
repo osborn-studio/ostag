@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from ostag.config import Settings
 from ostag.core.identity import Principal
 from ostag.work_monitor.feishu_cards import render_feishu_card
 from ostag.work_monitor.identity import Destination, IdentityStore
@@ -72,16 +73,55 @@ class _FakeTransport:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("platform", ["feishu", "telegram"])
 async def test_deterministic_two_instance_control_and_notification_loop(
-    tmp_path: Path, platform: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    for name in (
+        "FEISHU_APP_ID",
+        "FEISHU_APP_SECRET",
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_WEBHOOK_SECRET",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        "socket.create_connection",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("external network used")),
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("external network used")),
+    )
+    async def reject_httpx(*args, **kwargs):
+        raise AssertionError("external network used")
+
+    monkeypatch.setattr("httpx.AsyncClient.request", reject_httpx)
+    settings = Settings(
+        dry_run=True,
+        monitor_enabled=False,
+        feishu_app_id="",
+        feishu_app_secret="",
+        telegram_bot_token="",
+        telegram_webhook_secret="",
+        telegram_webhook_url="",
+    ).validate()
+    assert settings.dry_run and not settings.monitor_enabled
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     identities = IdentityStore(store.path, enrollment_secret="fixture-enroll")
-    principal = Principal(platform, "fixture-owner")
-    destination = Destination(platform, f"fixture-{platform}-private", "private")
+    principal = Principal("feishu", "fixture-owner")
+    destination = Destination("feishu", "fixture-feishu-private", "private")
+    telegram_principal = Principal("telegram", "fixture-owner")
+    telegram_destination = Destination("telegram", "fixture-telegram-private", "private")
     identities.bind_private(owner=principal, destination=destination, local_admin=True)
+    identities.bind_private(
+        owner=telegram_principal, destination=telegram_destination, local_admin=True
+    )
     identities.subscribe(principal, destination, task_id="task-ostag-1")
+    identities.subscribe(
+        telegram_principal, telegram_destination, task_id="task-ostag-1"
+    )
     service = WorkMonitorService(store, identities)
     app = create_app(
         service=service,
@@ -150,11 +190,13 @@ async def test_deterministic_two_instance_control_and_notification_loop(
             "SELECT state,payload,delivery_id FROM notification_outbox "
             "WHERE event_id LIKE 'control_ack:%'"
         ).fetchall()
-    assert len(notifications) == 1
-    notification = notifications[0]
-    assert notification is not None and notification["state"] == "pending"
-    assert json.loads(notification["payload"])["result"]["status"] == "paused"
-    stable_delivery_id = notification["delivery_id"]
+    assert len(notifications) == 2
+    assert {notification["state"] for notification in notifications} == {"pending"}
+    assert {
+        json.loads(notification["payload"])["result"]["status"]
+        for notification in notifications
+    } == {"paused"}
+    stable_delivery_ids = {notification["delivery_id"] for notification in notifications}
 
     feishu = _FakeTransport()
     telegram = _FakeTransport()
@@ -167,13 +209,16 @@ async def test_deterministic_two_instance_control_and_notification_loop(
     while await scheduler.drain_once():
         pass
 
-    selected = feishu if platform == "feishu" else telegram
-    other = telegram if platform == "feishu" else feishu
-    assert selected.deliveries == [(destination.destination_id, stable_delivery_id)]
-    assert other.deliveries == []
+    assert len(feishu.deliveries) == 1
+    assert len(telegram.deliveries) == 1
+    assert feishu.deliveries[0][0] == destination.destination_id
+    assert telegram.deliveries[0][0] == telegram_destination.destination_id
+    assert {feishu.deliveries[0][1], telegram.deliveries[0][1]} == stable_delivery_ids
     with store.connect() as connection:
         delivered = connection.execute(
             "SELECT state,delivery_id FROM notification_outbox WHERE event_id LIKE 'control_ack:%'"
         ).fetchall()
-    assert len(delivered) == 1
-    assert tuple(delivered[0]) == ("delivered", stable_delivery_id)
+    assert len(delivered) == 2
+    assert {tuple(row) for row in delivered} == {
+        ("delivered", delivery_id) for delivery_id in stable_delivery_ids
+    }

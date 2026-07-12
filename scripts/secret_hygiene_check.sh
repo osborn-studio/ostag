@@ -10,10 +10,9 @@ json_report="$report_dir/secret-hygiene.json"
 md_report="$report_dir/secret-hygiene.md"
 
 scan_root="$(mktemp -d)"
-matches="$(mktemp)"
 json_tmp="$(mktemp "$report_dir/.secret-hygiene.json.tmp.XXXXXX")"
 md_tmp="$(mktemp "$report_dir/.secret-hygiene.md.tmp.XXXXXX")"
-trap 'rm -rf "$scan_root" "$matches" "$json_tmp" "$md_tmp"' EXIT
+trap 'rm -rf "$scan_root" "$json_tmp" "$md_tmp"' EXIT
 
 if [[ -f release/ostag-release-bundle.tar.gz ]]; then
   mkdir -p "$scan_root/bundle" "$scan_root/current"
@@ -33,25 +32,22 @@ fi
 # only aggregate evidence, so a failed run cannot poison the next scan.
 find "$scan_root" -type f \( -name 'secret-hygiene.json' -o -name 'secret-hygiene.md' \) -delete
 
-set +e
-rg -n --hidden --glob '!*.tar.gz' --glob '!*.sha256' \
-  '([A-Z0-9_]*(SECRET|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY)[A-Z0-9_]*[[:space:]]*([=][[:space:]]*|:[[:space:]]+)[A-Za-z0-9_/-]{8,})|(app_secret[[:space:]]*([=][[:space:]]*|:[[:space:]]+)[A-Za-z0-9_/-]{8,})|(sk-[A-Za-z0-9_-]{16,})|(https://alidocs\.dingtalk\.com/i/nodes/[A-Za-z0-9_-]{24,})' \
-  "$scan_root" > "$matches"
-code=$?
-set -e
-
-status="pass"
-if [[ "$code" -eq 0 ]]; then
-  status="fail"
-elif [[ "$code" -ne 1 ]]; then
-  status="error"
-fi
+scan_json="$(uv run --locked python scripts/secret_hygiene_scan.py "$scan_root")"
 
 timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-match_count="$(wc -l < "$matches" | tr -d ' ')"
-findings_digest="$(shasum -a 256 "$matches" | awk '{print $1}')"
+read -r match_count findings_digest category_counts < <(
+  uv run --locked python - "$scan_json" <<'PY'
+import json, sys
+result = json.loads(sys.argv[1])
+print(result["match_count"], result["findings_digest_sha256"], json.dumps(result["category_counts"], separators=(",", ":")))
+PY
+)
+status="pass"
+if [[ "$match_count" -ne 0 ]]; then
+  status="fail"
+fi
 
-uv run python - "$json_tmp" "$timestamp" "$status" "$match_count" "$findings_digest" <<'PY'
+uv run --locked python - "$json_tmp" "$timestamp" "$status" "$match_count" "$findings_digest" "$category_counts" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -61,6 +57,7 @@ data = {
     "status": sys.argv[3],
     "match_count": int(sys.argv[4]),
     "findings_digest_sha256": sys.argv[5],
+    "category_counts": json.loads(sys.argv[6]),
     "scanned": "release bundle plus current release/docs" if Path("release/ostag-release-bundle.tar.gz").exists() else "release/docs fallback",
 }
 Path(sys.argv[1]).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

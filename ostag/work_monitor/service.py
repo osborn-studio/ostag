@@ -435,7 +435,7 @@ class WorkMonitorService:
         canonical_json = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
         ack_hash = hashlib.sha256(canonical_json.encode()).hexdigest()
         should_sync = False
-        enqueued_notification: tuple[str, dict[str, Any]] | None = None
+        enqueued_notifications: list[tuple[str, dict[str, Any]]] = []
         with self.store.transaction() as db:
             row = db.execute(
                 "SELECT status,payload,action_id,ack_payload,ack_hash,ledger_synced "
@@ -512,10 +512,6 @@ class WorkMonitorService:
                 if notify:
                     assert recipient is not None
                     event_id = f"control_ack:{command_id}:{ack_hash}"
-                    destination_key = f"{platform}:{destination_id}:binding"
-                    delivery_id = hashlib.sha256(
-                        f"{event_id}:{destination_key}:{recipient.platform}:{recipient.actor_id}".encode()
-                    ).hexdigest()[:32]
                     notification_payload = {
                         "kind": "task.control_ack",
                         "task_id": command["task_id"],
@@ -525,22 +521,47 @@ class WorkMonitorService:
                         "recipient_scope": destination.get("scope", ""),
                         "chat_type": chat_type,
                     }
-                    inserted = db.execute(
-                        "INSERT OR IGNORE INTO notification_outbox(notification_id,event_id,destination_key,payload,delivery_id,next_attempt_at) "
-                        "VALUES (?,?,?,?,?,?)",
-                        (
-                            f"notification_{delivery_id}",
-                            event_id,
-                            destination_key,
-                            json.dumps(notification_payload, sort_keys=True),
-                            delivery_id,
-                            self.clock().isoformat(),
-                        ),
-                    ).rowcount
-                    if inserted:
-                        enqueued_notification = delivery_id, notification_payload
+                    subscriptions = db.execute(
+                        "SELECT s.rowid,s.destination_platform,s.destination_id "
+                        "FROM monitor_subscriptions s JOIN monitor_bindings b ON "
+                        "b.platform=s.destination_platform AND b.destination_id=s.destination_id "
+                        "WHERE s.revoked=0 AND b.revoked=0 "
+                        "AND (s.task_id='' OR s.task_id=?) AND (s.instance_id='' OR s.instance_id=?)",
+                        (command["task_id"], instance_id),
+                    ).fetchall()
+                    targets = [
+                        f"{row['destination_platform']}:{row['destination_id']}:{row['rowid']}"
+                        for row in subscriptions
+                    ] or [f"{platform}:{destination_id}:binding"]
+                    for destination_key in targets:
+                        payload_to_store = (
+                            notification_payload
+                            if destination_key.endswith(":binding")
+                            else {
+                                key: value
+                                for key, value in notification_payload.items()
+                                if key not in {"recipient", "chat_type"}
+                            }
+                        )
+                        delivery_id = hashlib.sha256(
+                            f"{event_id}:{destination_key}".encode()
+                        ).hexdigest()[:32]
+                        inserted = db.execute(
+                            "INSERT OR IGNORE INTO notification_outbox(notification_id,event_id,destination_key,payload,delivery_id,next_attempt_at) "
+                            "VALUES (?,?,?,?,?,?)",
+                            (
+                                f"notification_{delivery_id}",
+                                event_id,
+                                destination_key,
+                                json.dumps(payload_to_store, sort_keys=True),
+                                delivery_id,
+                                self.clock().isoformat(),
+                            ),
+                        ).rowcount
+                        if inserted:
+                            enqueued_notifications.append((delivery_id, payload_to_store))
                 should_sync = True
-        if enqueued_notification is not None:
+        for enqueued_notification in enqueued_notifications:
             self.ledger.record_notification(
                 enqueued_notification[0], "enqueue", {"payload": enqueued_notification[1]}
             )

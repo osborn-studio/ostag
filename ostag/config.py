@@ -115,6 +115,7 @@ class Settings:
     feishu_encrypt_key: str = ""
     feishu_use_websocket: bool = True
     feishu_api_base_url: str = "https://open.feishu.cn"
+    feishu_callback_url: str = ""
     lark_app_id: str = ""
     lark_app_secret: str = ""
     lark_verification_token: str = ""
@@ -271,6 +272,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         feishu_encrypt_key=os.getenv("FEISHU_ENCRYPT_KEY", ""),
         feishu_use_websocket=_bool("FEISHU_USE_WEBSOCKET", True),
         feishu_api_base_url=os.getenv("FEISHU_API_BASE_URL", "https://open.feishu.cn"),
+        feishu_callback_url=os.getenv("FEISHU_CALLBACK_URL", ""),
         lark_app_id=os.getenv("LARK_APP_ID", ""),
         lark_app_secret=os.getenv("LARK_APP_SECRET", ""),
         lark_verification_token=os.getenv("LARK_VERIFICATION_TOKEN", ""),

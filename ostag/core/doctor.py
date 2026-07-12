@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import sqlite3
@@ -13,6 +14,9 @@ from typing import Callable
 from urllib.request import Request, urlopen
 
 from ostag.config import Settings
+
+
+HttpProbe = Callable[[str, str, bytes | None, dict[str, str], float], tuple[int, bytes]]
 
 
 @dataclass(frozen=True)
@@ -28,7 +32,7 @@ def run_doctor(
     event_path: Path | None = None,
     *,
     scheduler_owner_probe: Callable[[Settings], int] | None = None,
-    feishu_callback_probe: Callable[[Settings], bool] | None = None,
+    http_probe: HttpProbe | None = None,
 ) -> list[DoctorCheck]:
     checks = [
         _check_python(),
@@ -48,7 +52,7 @@ def run_doctor(
                 _check_monitor_central_credentials(config),
                 _check_persistent_volume(config),
                 _check_scheduler_owner(config, scheduler_owner_probe),
-                _check_monitor_platform(config, feishu_callback_probe),
+                _check_monitor_platform(config, http_probe or _bounded_http_probe),
                 _check_stale_instances(config),
             )
         )
@@ -303,9 +307,25 @@ def _check_scheduler_owner(
     return DoctorCheck("scheduler_owner", True, "error", "exactly one scheduler owner verified")
 
 
-def _check_monitor_platform(
-    config: Settings, feishu_probe: Callable[[Settings], bool] | None = None
-) -> DoctorCheck:
+def _bounded_http_probe(
+    method: str,
+    url: str,
+    body: bytes | None,
+    headers: dict[str, str],
+    timeout: float,
+) -> tuple[int, bytes]:
+    request = Request(url, data=body, headers=headers, method=method)
+    try:
+        with urlopen(request, timeout=timeout) as response:  # nosec B310 - operator URL
+            return response.status, response.read(65_537)[:65_536]
+    except Exception as exc:
+        status = getattr(exc, "code", None)
+        if isinstance(status, int):
+            return status, b""
+        raise
+
+
+def _check_monitor_platform(config: Settings, http_probe: HttpProbe) -> DoctorCheck:
     if config.platform == "feishu":
         configured = all(
             (
@@ -313,6 +333,7 @@ def _check_monitor_platform(
                 config.feishu_app_secret,
                 config.feishu_verification_token,
                 config.feishu_encrypt_key,
+                config.feishu_callback_url.startswith("https://"),
             )
         ) and not config.feishu_use_websocket
         if not configured:
@@ -323,11 +344,14 @@ def _check_monitor_platform(
                 "Feishu credentials or encrypted card callback are missing",
             )
         try:
-            verified = (
-                feishu_probe(config)
-                if feishu_probe is not None
-                else os.getenv("OSTAG_FEISHU_CALLBACK_STATUS", "").casefold() == "verified"
+            status, _ = http_probe(
+                "POST",
+                config.feishu_callback_url,
+                b"{}",
+                {"content-type": "application/json", "x-ostag-doctor": "invalid-signature"},
+                5.0,
             )
+            verified = status == 401
         except Exception:
             verified = False
         message = (
@@ -344,7 +368,24 @@ def _check_monitor_platform(
                 config.telegram_webhook_url,
             )
         )
-        verified = os.getenv("OSTAG_TELEGRAM_WEBHOOK_STATUS", "").casefold() == "verified"
+        verified = False
+        if configured:
+            try:
+                status, body = http_probe(
+                    "GET",
+                    f"https://api.telegram.org/bot{config.telegram_bot_token}/getWebhookInfo",
+                    None,
+                    {},
+                    5.0,
+                )
+                payload = json.loads(body)
+                verified = (
+                    status == 200
+                    and payload.get("ok") is True
+                    and payload.get("result", {}).get("url") == config.telegram_webhook_url
+                )
+            except Exception:
+                verified = False
         ok = configured and verified
         message = "Telegram webhook is verified" if ok else "Telegram webhook is not verified"
         return DoctorCheck("telegram_webhook", ok, "error", message)

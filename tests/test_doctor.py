@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 import sqlite3
 
@@ -197,10 +198,13 @@ def test_production_monitor_platform_and_stale_instance_checks(monkeypatch, tmp_
         feishu_verification_token="verify",
         feishu_encrypt_key="encrypt",
         feishu_use_websocket=False,
+        feishu_callback_url="https://monitor.example/webhooks/feishu/card-action",
         monitor_offline_seconds=600,
     )
 
-    output = format_checks(run_doctor(config, feishu_callback_probe=lambda _: True))
+    output = format_checks(
+        run_doctor(config, http_probe=lambda *args: (401, b""))
+    )
 
     assert "feishu_callback" in output and "verification passed" in output
     assert "stale_instances" in output and "mac" in output
@@ -218,7 +222,6 @@ def test_production_telegram_doctor_requires_verified_webhook_status(
         connection.execute(
             "INSERT INTO monitor_scheduler_owners VALUES (?,?,?)", ("owner", future, future)
         )
-    monkeypatch.setenv("OSTAG_TELEGRAM_WEBHOOK_STATUS", "pending")
     config = load_settings(
         None,
         env="production",
@@ -232,7 +235,15 @@ def test_production_telegram_doctor_requires_verified_webhook_status(
         telegram_webhook_url="https://monitor.example/webhooks/telegram",
     )
 
-    output = format_checks(run_doctor(config))
+    output = format_checks(
+        run_doctor(
+            config,
+            http_probe=lambda *args: (
+                200,
+                b'{"ok":true,"result":{"url":"https://wrong.example/hook"}}',
+            ),
+        )
+    )
 
     assert "telegram_webhook" in output and "not verified" in output
     assert "fake-telegram-token" not in output
@@ -274,12 +285,43 @@ def test_feishu_callback_runtime_probe_failure_and_exception_are_redacted(
         feishu_verification_token="verify",
         feishu_encrypt_key="encrypt",
         feishu_use_websocket=False,
+        feishu_callback_url="https://monitor.example/webhooks/feishu/card-action",
     )
 
     for probe in (
-        lambda _: False,
-        lambda _: (_ for _ in ()).throw(OSError("fake-callback-secret unreachable")),
+        lambda *args: (503, b""),
+        lambda *args: (_ for _ in ()).throw(OSError("fake-callback-secret unreachable")),
     ):
-        output = format_checks(run_doctor(config, feishu_callback_probe=probe))
+        output = format_checks(run_doctor(config, http_probe=probe))
         assert "feishu_callback" in output and "failed or is unreachable" in output
         assert "fake-callback-secret" not in output
+
+
+def test_telegram_webhook_probe_uses_bounded_transport_and_expected_url(
+    monkeypatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "monitor.sqlite3"
+    MonitorStore(database)
+    monkeypatch.setenv("OSTAG_MONITOR_ROLE", "central")
+    expected = "https://monitor.example/webhooks/telegram"
+    observed = []
+
+    def probe(method, url, body, headers, timeout):
+        observed.append((method, url.startswith("https://api.telegram.org/bot"), body, timeout))
+        return 200, json.dumps({"ok": True, "result": {"url": expected}}).encode()
+
+    config = load_settings(
+        None,
+        env="production",
+        platform="telegram",
+        audit_log=tmp_path / "audit.log",
+        monitor_server_db=database,
+        telegram_bot_token="synthetic-telegram-credential",
+        telegram_webhook_secret="synthetic-webhook-credential",
+        telegram_webhook_url=expected,
+    )
+    output = format_checks(run_doctor(config, http_probe=probe))
+
+    assert "Telegram webhook is verified" in output
+    assert observed == [("GET", True, None, 5.0)]
+    assert "synthetic-telegram-credential" not in output
