@@ -26,6 +26,7 @@ class VerifiedTelegramUpdate:
     event: NormalizedEvent | None
     callback_query_id: str = ""
     normalization_error: bool = False
+    replayed: bool = False
 
 
 class TelegramWebhookSecurity:
@@ -87,14 +88,20 @@ class TelegramWebhookSecurity:
             if not callback_id:
                 raise HTTPException(422, "invalid Telegram update") from exc
             if not self._service().store.consume_telegram_update(update_id):
-                raise HTTPException(409, "replayed Telegram update")
+                verified = VerifiedTelegramUpdate(
+                    update_id, None, callback_id, normalization_error=True, replayed=True
+                )
+                request.state.telegram_update = verified
+                return verified
             verified = VerifiedTelegramUpdate(update_id, None, callback_id, True)
             request.state.telegram_update = verified
             return verified
         if event.chat_type == "group" and event.destination_id not in self._groups:
             raise HTTPException(403, "Telegram group is not allowlisted")
         if not self._service().store.consume_telegram_update(update_id):
-            raise HTTPException(409, "replayed Telegram update")
+            verified = VerifiedTelegramUpdate(update_id, None, callback_id, replayed=True)
+            request.state.telegram_update = verified
+            return verified
         verified = VerifiedTelegramUpdate(update_id, event, callback_id)
         request.state.telegram_update = verified
         return verified
@@ -141,6 +148,8 @@ def create_telegram_router(
     @router.post("/webhooks/telegram")
     async def telegram_webhook(request: Request) -> dict[str, bool]:
         verified: VerifiedTelegramUpdate = request.state.telegram_update
+        if verified.replayed:
+            return {"ok": True}
         event = verified.event
         if verified.callback_query_id and (verified.normalization_error or event is None):
             client.answer_callback(verified.callback_query_id, "请求无效")

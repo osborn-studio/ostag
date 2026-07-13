@@ -91,6 +91,33 @@ class FeishuCardSecurity:
         nonce = request.headers.get("X-Lark-Request-Nonce", "")
         supplied = request.headers.get("X-Lark-Signature", "")
 
+        # Feishu's developer-console URL probe is sent before server callback mode
+        # is activated and carries no signature headers. Permit only the exact,
+        # token-authenticated setup challenge in that bootstrap state; actions and
+        # partially signed requests remain fail-closed below.
+        if not timestamp and not nonce and not supplied:
+            try:
+                bootstrap = json.loads(body)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise HTTPException(401, "unsigned Feishu callback is not a setup challenge") from exc
+            if isinstance(bootstrap, dict) and set(bootstrap) == {"encrypt"} \
+                    and isinstance(bootstrap.get("encrypt"), str):
+                try:
+                    bootstrap = json.loads(
+                        self.decryptor(bootstrap["encrypt"], self.encrypt_key)
+                    )
+                except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    raise HTTPException(
+                        401, "unsigned Feishu callback is not a setup challenge"
+                    ) from exc
+            if not isinstance(bootstrap, dict) or set(bootstrap) != {
+                "challenge", "token", "type",
+            }:
+                raise HTTPException(401, "unsigned Feishu callback is not a setup challenge")
+            verified = self._verify_payload(bootstrap)
+            request.state.feishu_callback = verified
+            return verified
+
         # 2. Verify the original signature before any JSON parsing or decryption.
         if not self.encrypt_key:
             raise HTTPException(401, "FEISHU_ENCRYPT_KEY is required for card callbacks")

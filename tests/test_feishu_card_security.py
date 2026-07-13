@@ -83,6 +83,38 @@ def test_official_legacy_url_verification_exact_shape_succeeds(tmp_path) -> None
                            headers=_headers(body, nonce="extra")).status_code == 422
 
 
+def test_unsigned_setup_challenge_is_token_verified_but_actions_stay_fail_closed(tmp_path) -> None:
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"),
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app, create_feishu_card_router(object()),
+        security=SecurityContract("verified_platform", security),
+    )
+    with TestClient(app) as client:
+        challenge = client.post(
+            "/webhooks/feishu/card-action",
+            json={"challenge": "setup", "token": "verify", "type": "url_verification"},
+        )
+        assert challenge.status_code == 200
+        assert challenge.json() == {"challenge": "setup"}
+        encrypted = client.post(
+            "/webhooks/feishu/card-action",
+            json={
+                "encrypt": "AAECAwQFBgcICQoLDA0ODxwbggt+8Cqrzo9mVpkJ9zClJ87DUxbFIhqyvGOQQlYWwQ1JprJBVJ1RtUCLXHxVppVQBXY6obipP5hO8GpfwcI="
+            },
+        )
+        assert encrypted.status_code == 200
+        assert encrypted.json() == {"challenge": "ok"}
+        action = client.post(
+            "/webhooks/feishu/card-action",
+            json={"schema": "2.0", "header": {}, "event": {}},
+        )
+        assert action.status_code == 401
+
+
 def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
     calls: list[str] = []
     security = FeishuCardSecurity(

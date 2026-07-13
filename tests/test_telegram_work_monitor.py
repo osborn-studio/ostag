@@ -150,7 +150,9 @@ def test_webhook_auth_replay_group_allowlist_and_callback_ack(tmp_path: Path) ->
         assert client.post("/webhooks/telegram", json=update).status_code == 401
         headers = {"X-Telegram-Bot-Api-Secret-Token": "secret"}
         assert client.post("/webhooks/telegram", json=update, headers=headers).status_code == 200
-        assert client.post("/webhooks/telegram", json=update, headers=headers).status_code == 409
+        calls_after_first_delivery = list(calls)
+        assert client.post("/webhooks/telegram", json=update, headers=headers).status_code == 200
+        assert calls == calls_after_first_delivery
         denied = {
             "update_id": 23,
             "message": {
