@@ -146,7 +146,7 @@ async def test_deterministic_two_instance_control_and_notification_loop(
             "task-ostag-1",
             "task-osstack-1",
         }
-        assert render_feishu_card(board)["header"]["title"]["content"] == "OStag 工作看板"
+        assert render_feishu_card(board)["header"]["title"]["content"] == "OStag Control · 今日看板"
         telegram_text, _ = render_telegram_view(board)
         assert "ostag-1" in telegram_text and "osstack-1" in telegram_text
 

@@ -14,7 +14,7 @@ from ostag.adapters.feishu import FeishuAdapter
 from ostag.config import Settings, load_settings
 from ostag.core.event import NormalizedEvent
 from ostag.work_monitor.feishu_card_security import feishu_signature
-from ostag.work_monitor.feishu_cards import render_feishu_card
+from ostag.work_monitor.feishu_cards import MAX_CARD_BYTES, render_feishu_card
 from ostag.work_monitor.identity import IdentityStore
 from ostag.work_monitor.projection import Projector
 from ostag.work_monitor.rendering import MobileBoardView, TaskDetailView
@@ -46,14 +46,29 @@ async def test_feishu_http_200_business_error_is_typed(monkeypatch) -> None:
     assert exc.value.transient is False
 
 
-def test_feishu_cards_are_vertical_mobile_high_contrast() -> None:
+def test_feishu_cards_restore_operations_minimalist_hierarchy() -> None:
     board = MobileBoardView.from_tasks(
-        [{"task_id": "task-1", "title": "Ship", "status": "blocked", "progress": 40}]
+        [
+            {"task_id": "task-1", "title": "Ship", "status": "blocked", "progress": 40},
+            {"task_id": "task-2", "title": "Verify", "status": "running", "progress": 70},
+            {"task_id": "task-3", "title": "Done", "status": "done", "progress": 100},
+        ]
     )
     card = render_feishu_card(board)
+    encoded = json.dumps(card, ensure_ascii=False)
+
     assert card["config"]["wide_screen_mode"] is False
-    assert card["header"]["template"] == "indigo"
-    assert [element["tag"] for element in card["elements"]] == ["markdown", "hr"]
+    assert card["header"]["template"] == "blue"
+    assert card["header"]["title"]["content"] == "OStag Control · 今日看板"
+    assert any(element["tag"] == "column_set" for element in card["elements"])
+    assert "需要你处理" in encoded
+    assert "运行中的任务" in encoded
+    assert "六阶段概览" in encoded
+    assert "🔴" in encoded and "🟢" in encoded and "🔵" in encoded
+    assert len(encoded.encode()) <= MAX_CARD_BYTES
+
+
+def test_feishu_task_detail_only_exposes_governed_callbacks() -> None:
     detail = render_feishu_card(
         TaskDetailView.from_task(
             {"task_id": "task-1", "title": "Ship", "status": "running", "progress": 40},
@@ -81,8 +96,9 @@ def test_feishu_cards_escape_untrusted_markdown_and_bound_elements() -> None:
     )
     card = render_feishu_card(view)
     assert len(card["elements"]) <= 20
-    content = card["elements"][0]["content"]
-    assert "<script>" not in content and r"\*boom\*" in content
+    encoded = json.dumps(card, ensure_ascii=False)
+    assert "<script>" not in encoded and "&lt;script&gt;" in encoded and "boom" in encoded
+    assert len(encoded.encode()) <= MAX_CARD_BYTES
 
 
 @pytest.mark.asyncio
