@@ -189,6 +189,7 @@ class FeishuAdapter:
         from ostag.work_monitor.feishu_cards import render_feishu_card
         from ostag.work_monitor.feishu_routes import issue_feishu_callback
         from ostag.work_monitor.identity import Destination
+        from ostag.work_monitor.rendering import TaskDetailView
         from ostag.work_monitor.service import parse_monitor_command
 
         command = parse_monitor_command(event.text)
@@ -203,6 +204,13 @@ class FeishuAdapter:
                 card = render_feishu_card(view)
             elif command.name == "task":
                 view = service.task(principal, destination, command.argument)
+                if destination.chat_type != "private" and "cancel" in view.capabilities:
+                    view = TaskDetailView(
+                        task=view.task,
+                        capabilities=tuple(
+                            action for action in view.capabilities if action != "cancel"
+                        ),
+                    )
                 fallback = view.to_text()
                 factory = None
                 if service.identities.allows(principal, destination, "write"):

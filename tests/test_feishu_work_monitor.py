@@ -166,7 +166,7 @@ async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_b
         def task(self, principal, destination, reference):
             return TaskDetailView.from_task(
                 {"task_id": reference, "title": "Ship", "status": "running", "progress": 20},
-                capabilities=("pause",),
+                capabilities=("pause", "cancel"),
             )
 
     class Runner:
@@ -188,7 +188,9 @@ async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_b
     assert await adapter._handle_monitor_card(event, Runner()) is True
     value = sent[0][0][1]["elements"][1]["actions"][0]["value"]
     assert set(value) == {"callback_id"} and value["callback_id"].startswith("f_")
+    assert len(sent[0][0][1]["elements"]) == 2
     assert mappings[0][1]["task_id"] == "task-1"
+    assert mappings[0][1]["action"] == "pause"
     assert sent[0][1]["delivery_id"] == "monitor-evt-1"
     assert handled == []
 

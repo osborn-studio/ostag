@@ -132,6 +132,24 @@ def test_local_admin_private_binding_persists_admin_role(tmp_path: Path) -> None
     assert identities.bindings(admin) == (Binding(admin, private, role="admin"),)
 
 
+def test_owner_and_group_reader_permission_matrix(tmp_path: Path) -> None:
+    identities = IdentityStore(tmp_path / "monitor.sqlite3")
+    owner = Principal("feishu", "owner")
+    reader = Principal("feishu", "reader")
+    private = Destination("feishu", "private", "private")
+    group = Destination("feishu", "group", "group")
+    identities.bind_private(owner=owner, destination=private, local_admin=True)
+    identities.enroll_group(owner, group, scope="all", local_admin=True)
+    identities.grant(owner, group, reader, "read")
+
+    assert identities.allows(owner, private, "read")
+    assert identities.allows(owner, private, "propose")
+    assert identities.allows(owner, private, "write")
+    assert identities.allows(reader, group, "read")
+    assert not identities.allows(reader, group, "propose")
+    assert not identities.allows(reader, group, "write")
+
+
 def test_legacy_binding_schema_migrates_scope_column(tmp_path: Path) -> None:
     path = tmp_path / "monitor.sqlite3"
     with sqlite3.connect(path) as connection:
