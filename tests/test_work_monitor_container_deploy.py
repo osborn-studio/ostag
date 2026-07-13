@@ -25,6 +25,9 @@ def test_default_compose_uses_named_volume_and_nonroot_image() -> None:
     assert "USER ostag" in dockerfile
     assert "requirements.lock" in dockerfile
     assert "import lark_oapi; import Crypto" in dockerfile
+    assert "FROM node:22-slim AS node" in dockerfile
+    assert "@larksuite/cli@1.0.69" in dockerfile
+    assert "dingtalk-workspace-cli@1.0.51" in dockerfile
 
 
 def test_production_override_uses_explicit_host_path(tmp_path: Path) -> None:

@@ -527,3 +527,52 @@ def test_auto_feishu_owner_uses_central_service_and_database(
         service = owners[0].runner.work_monitor
         assert service.store.path == database
         assert service.identities.path == database
+
+
+def test_lifespan_owns_daily_boards_on_the_central_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owners = []
+
+    class DailyOwner:
+        def __init__(self, store, profiles, **kwargs):
+            self.store = store
+            self.profiles = profiles
+            self.kwargs = kwargs
+            owners.append(self)
+
+        async def run(self, stop) -> None:
+            await stop.wait()
+
+    monkeypatch.setattr(
+        "ostag.work_monitor.daily_digest_scheduler.DailyTaskBoardScheduler", DailyOwner
+    )
+    settings = Settings(
+        monitor_server_db=tmp_path / "central.sqlite3",
+        feishu_use_websocket=False,
+        monitor_scheduler_enabled=False,
+        daily_task_boards_enabled=True,
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+        dingtalk_client_id="ding_test",
+        dingtalk_client_secret="secret",
+        dingtalk_robot_webhook="https://oapi.dingtalk.com/robot/send?access_token=test",
+        daily_task_board_feishu_chat_id="oc_feishu",
+        daily_task_board_feishu_base_token="base_feishu",
+        daily_task_board_feishu_table_id="tbl_feishu",
+        daily_task_board_feishu_table_url="https://example.test/feishu",
+        daily_task_board_dingtalk_chat_id="cid_dingtalk",
+        daily_task_board_dingtalk_base_token="base_dingtalk",
+        daily_task_board_dingtalk_table_id="tbl_dingtalk",
+        daily_task_board_dingtalk_table_url="https://example.test/dingtalk",
+    )
+    app = create_app(settings=settings)
+
+    with TestClient(app):
+        assert len(owners) == 1
+        assert owners[0].store.path == settings.monitor_server_db
+        assert {profile.platform for profile in owners[0].profiles} == {
+            "feishu", "dingtalk"
+        }
+        assert owners[0].kwargs["morning_hour"] == 9
+        assert owners[0].kwargs["evening_hour"] == 18

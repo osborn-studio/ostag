@@ -178,6 +178,21 @@ class Settings:
     monitor_degraded_seconds: int = 120
     monitor_offline_seconds: int = 600
     monitor_notification_retry_cap: int = 5
+    daily_task_boards_enabled: bool = False
+    daily_task_board_poll_seconds: int = 30
+    daily_task_board_morning_hour: int = 9
+    daily_task_board_evening_hour: int = 18
+    daily_task_board_record_limit: int = 50
+    daily_task_board_feishu_chat_id: str = ""
+    daily_task_board_feishu_base_token: str = ""
+    daily_task_board_feishu_table_id: str = ""
+    daily_task_board_feishu_table_url: str = ""
+    daily_task_board_feishu_manager_ids: tuple[str, ...] = ()
+    daily_task_board_dingtalk_chat_id: str = ""
+    daily_task_board_dingtalk_base_token: str = ""
+    daily_task_board_dingtalk_table_id: str = ""
+    daily_task_board_dingtalk_table_url: str = ""
+    daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
     def validate(self) -> Settings:
         if (
@@ -191,6 +206,36 @@ class Settings:
             raise ValueError("monitor thresholds require 0 < degraded < offline")
         if self.monitor_notification_retry_cap <= 0:
             raise ValueError("monitor notification retry cap must be positive")
+        if self.daily_task_boards_enabled:
+            if (
+                not 0 <= self.daily_task_board_morning_hour <= 23
+                or not 0 <= self.daily_task_board_evening_hour <= 23
+            ):
+                raise ValueError("daily task board hours must be in 0..23")
+            if self.daily_task_board_morning_hour == self.daily_task_board_evening_hour:
+                raise ValueError("daily task board hours must be different")
+            if self.daily_task_board_poll_seconds < 5:
+                raise ValueError("daily task board poll seconds must be at least 5")
+            if not 1 <= self.daily_task_board_record_limit <= 500:
+                raise ValueError("daily task board record limit must be in 1..500")
+            required = {
+                "daily_task_board_feishu_chat_id": self.daily_task_board_feishu_chat_id,
+                "daily_task_board_feishu_base_token": self.daily_task_board_feishu_base_token,
+                "daily_task_board_feishu_table_id": self.daily_task_board_feishu_table_id,
+                "daily_task_board_feishu_table_url": self.daily_task_board_feishu_table_url,
+                "daily_task_board_dingtalk_chat_id": self.daily_task_board_dingtalk_chat_id,
+                "daily_task_board_dingtalk_base_token": self.daily_task_board_dingtalk_base_token,
+                "daily_task_board_dingtalk_table_id": self.daily_task_board_dingtalk_table_id,
+                "daily_task_board_dingtalk_table_url": self.daily_task_board_dingtalk_table_url,
+                "feishu_app_id": self.feishu_app_id,
+                "feishu_app_secret": self.feishu_app_secret,
+                "dingtalk_client_id": self.dingtalk_client_id,
+                "dingtalk_client_secret": self.dingtalk_client_secret,
+                "dingtalk_robot_webhook": self.dingtalk_robot_webhook,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"daily task boards require {missing}")
         telegram_configured = any(
             (self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url)
         )
@@ -345,6 +390,41 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_degraded_seconds=_int("OSTAG_MONITOR_DEGRADED_SECONDS", 120),
         monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
         monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
+        daily_task_boards_enabled=_bool("OSTAG_DAILY_TASK_BOARDS_ENABLED", False),
+        daily_task_board_poll_seconds=_int("OSTAG_DAILY_TASK_BOARD_POLL_SECONDS", 30),
+        daily_task_board_morning_hour=_int("OSTAG_DAILY_TASK_BOARD_MORNING_HOUR", 9),
+        daily_task_board_evening_hour=_int("OSTAG_DAILY_TASK_BOARD_EVENING_HOUR", 18),
+        daily_task_board_record_limit=_int("OSTAG_DAILY_TASK_BOARD_RECORD_LIMIT", 50),
+        daily_task_board_feishu_chat_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_CHAT_ID", ""
+        ),
+        daily_task_board_feishu_base_token=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_BASE_TOKEN", ""
+        ),
+        daily_task_board_feishu_table_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_TABLE_ID", ""
+        ),
+        daily_task_board_feishu_table_url=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_TABLE_URL", ""
+        ),
+        daily_task_board_feishu_manager_ids=_csv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_MANAGER_IDS"
+        ),
+        daily_task_board_dingtalk_chat_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_CHAT_ID", ""
+        ),
+        daily_task_board_dingtalk_base_token=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_BASE_TOKEN", ""
+        ),
+        daily_task_board_dingtalk_table_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_TABLE_ID", ""
+        ),
+        daily_task_board_dingtalk_table_url=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_TABLE_URL", ""
+        ),
+        daily_task_board_dingtalk_manager_ids=_csv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_MANAGER_IDS"
+        ),
     )
     if overrides:
         data = settings.__dict__ | overrides

@@ -136,6 +136,7 @@ def create_app(
     routers: Iterable[tuple[APIRouter, SecurityContract]] = (),
     feishu_ws: LifespanOwner | None = None,
     scheduler: LifespanOwner | None = None,
+    daily_scheduler: LifespanOwner | None = None,
     outbox: LifespanOwner | None = None,
     telegram_client: object | None = None,
     supervisor_backoff: tuple[float, ...] = (1, 2, 5, 15, 30),
@@ -147,10 +148,11 @@ def create_app(
     runtime = _Runtime(service, projector)
     auto_feishu_ws: LifespanOwner | None = None
     auto_scheduler: LifespanOwner | None = None
+    auto_daily_scheduler: LifespanOwner | None = None
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        nonlocal auth, auto_feishu_ws, auto_scheduler
+        nonlocal auth, auto_feishu_ws, auto_scheduler, auto_daily_scheduler
         if runtime.service is None or runtime.projector is None:
             store = MonitorStore(configured.monitor_server_db)
             identities = IdentityStore(
@@ -200,10 +202,61 @@ def create_app(
                 offline_seconds=configured.monitor_offline_seconds,
                 retry_cap=configured.monitor_notification_retry_cap,
             )
+        if (
+            daily_scheduler is None
+            and auto_daily_scheduler is None
+            and configured.daily_task_boards_enabled
+        ):
+            from ostag.adapters.dingtalk import DingTalkAdapter
+            from ostag.adapters.feishu import FeishuAdapter
+            from ostag.connectors.requirements import (
+                DwsCLI,
+                DwsRequirementTableConnector,
+                LarkCLIRequirementTableConnector,
+            )
+            from ostag.workflows.auto_base import LarkCLI
+            from .daily_digest_scheduler import DailyDigestProfile, DailyTaskBoardScheduler
+
+            assert runtime.service is not None
+            profiles = (
+                DailyDigestProfile(
+                    platform="feishu",
+                    destination_id=configured.daily_task_board_feishu_chat_id,
+                    base_token=configured.daily_task_board_feishu_base_token,
+                    table_id=configured.daily_task_board_feishu_table_id,
+                    table_url=configured.daily_task_board_feishu_table_url,
+                    manager_ids=configured.daily_task_board_feishu_manager_ids,
+                    connector=LarkCLIRequirementTableConnector(LarkCLI(configured), "bot"),
+                    transport=FeishuAdapter(configured),
+                    record_limit=configured.daily_task_board_record_limit,
+                ),
+                DailyDigestProfile(
+                    platform="dingtalk",
+                    destination_id=configured.daily_task_board_dingtalk_chat_id,
+                    base_token=configured.daily_task_board_dingtalk_base_token,
+                    table_id=configured.daily_task_board_dingtalk_table_id,
+                    table_url=configured.daily_task_board_dingtalk_table_url,
+                    manager_ids=configured.daily_task_board_dingtalk_manager_ids,
+                    connector=DwsRequirementTableConnector(DwsCLI(configured)),
+                    transport=DingTalkAdapter(configured),
+                    record_limit=configured.daily_task_board_record_limit,
+                ),
+            )
+            auto_daily_scheduler = DailyTaskBoardScheduler(
+                runtime.service.store,
+                profiles,
+                morning_hour=configured.daily_task_board_morning_hour,
+                evening_hour=configured.daily_task_board_evening_hour,
+                poll_seconds=configured.daily_task_board_poll_seconds,
+            )
         stop = asyncio.Event()
         owners = tuple(
             owner
-            for owner in (feishu_ws or auto_feishu_ws, scheduler or auto_scheduler)
+            for owner in (
+                feishu_ws or auto_feishu_ws,
+                scheduler or auto_scheduler,
+                daily_scheduler or auto_daily_scheduler,
+            )
             if owner is not None
         )
         tasks = [
