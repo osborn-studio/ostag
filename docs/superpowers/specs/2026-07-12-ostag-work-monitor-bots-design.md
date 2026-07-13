@@ -58,7 +58,7 @@
 
 reporter 先脱敏并落入本地 SQLite outbox，再以 HMAC 签名批量上报。中央 service 校验实例、时间偏差、签名、schema、大小、幂等键和速率，持久化后返回确认 sequence。断网恢复后顺序补传；监控故障不得停止本地任务。
 
-中央 FastAPI service 最终提供 `/v1/events`、board/task/instance 查询、订阅、`/v1/commands/poll|ack`、`/webhooks/feishu/card-action`、`/webhooks/telegram` 和 `/healthz`。组合顺序不可倒置：core server 先只注册平台无关 API/health/lifespan；Feishu 安全与 adapter 完成后才注册 card-action router；Telegram 安全与 adapter 完成后才注册 Telegram router，不创建占位 webhook。FastAPI lifespan 启动并监督唯一现有 `FeishuAdapter` WebSocket consumer：普通飞书消息固定走 WebSocket → `NormalizedEvent` → `OSTagRunner`，只有 card action 走 EdgeOne HTTPS endpoint。WS 崩溃时有界退避重启，关闭时取消并等待 WS、scheduler 和 outbox drain；生产只启一个 uvicorn worker，未来扩容前必须加入数据库租约和 WS 单消费者选主。
+中央 FastAPI service 最终提供 `/v1/events`、board/task/instance 查询、订阅、`/v1/commands/poll|ack`、`/webhooks/feishu/card-action`、`/webhooks/telegram` 和 `/healthz`。组合顺序不可倒置：core server 先只注册平台无关 API/health/lifespan；Feishu 安全与 adapter 完成后才注册 card-action router；Telegram 安全与 adapter 完成后才注册 Telegram router，不创建占位 webhook。FastAPI lifespan 启动并监督唯一现有 `FeishuAdapter` WebSocket consumer：普通飞书消息固定走 WebSocket → `NormalizedEvent` → `OSTagRunner`，只有 card action 走 EdgeOne HTTPS endpoint。该 runner 必须持有中央 FastAPI 使用的同一个 `WorkMonitorService`、SQLite projection 与 `IdentityStore`，不得从开发机 reporter spool 读取身份或权限。`release/ai.ostag.feishu.plist` 仅供显式本地开发调试，生产保持禁用。WS 崩溃时有界退避重启，关闭时取消并等待 WS、scheduler 和 outbox drain；生产只启一个 uvicorn worker，未来扩容前必须加入数据库租约和 WS 单消费者选主。
 
 ### 3.3 飞书与 Telegram adapters
 

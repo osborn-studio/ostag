@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from ostag.core.identity import Principal
+from ostag.config import Settings
 from ostag.core.schemas import ActionReceipt
 from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.projection import Projector
@@ -494,3 +495,35 @@ def test_lifespan_supervises_restart_and_graceful_shutdown(tmp_path: Path) -> No
             time.sleep(0.005)
         assert owner.starts >= 2
     assert owner.stopped.wait(1)
+
+
+def test_auto_feishu_owner_uses_central_service_and_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owners = []
+
+    class FeishuOwner:
+        def __init__(self, config: Settings, *, runner=None):
+            self.runner = runner
+            owners.append(self)
+
+        async def run(self, stop) -> None:
+            await stop.wait()
+
+    monkeypatch.setattr("ostag.adapters.feishu.FeishuAdapter", FeishuOwner)
+    database = tmp_path / "central.sqlite3"
+    app = create_app(
+        settings=Settings(
+            monitor_server_db=database,
+            feishu_use_websocket=True,
+            feishu_app_id="cli_test_id",
+            feishu_app_secret="test-secret",
+            monitor_scheduler_enabled=False,
+        )
+    )
+
+    with TestClient(app):
+        assert len(owners) == 1
+        service = owners[0].runner.work_monitor
+        assert service.store.path == database
+        assert service.identities.path == database
