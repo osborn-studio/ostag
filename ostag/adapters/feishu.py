@@ -228,8 +228,9 @@ class FeishuAdapter:
             if fallback:
                 await self.reply(event, fallback)
             return True
+        recipient_id = event.sender_id if event.chat_type == "private" else event.destination_id
         await self.send_card(
-            event.destination_id, card, fallback, chat_type=event.chat_type,
+            recipient_id, card, fallback, chat_type=event.chat_type,
             delivery_id=f"monitor-{event.event_id or event.message_id}",
         )
         return True

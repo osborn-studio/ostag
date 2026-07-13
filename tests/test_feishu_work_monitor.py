@@ -86,6 +86,44 @@ def test_feishu_cards_escape_untrusted_markdown_and_bound_elements() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ws_private_board_card_is_sent_to_sender_open_id(
+    monkeypatch, tmp_path: Path
+) -> None:
+    sent = []
+
+    class Service:
+        def board(self, principal, destination, page=1):
+            return MobileBoardView.from_tasks(
+                [{"task_id": "task-1", "title": "Ship", "status": "running"}]
+            )
+
+    class Runner:
+        work_monitor = Service()
+
+    adapter = FeishuAdapter(load_settings(None, audit_log=tmp_path / "audit.log"))
+
+    async def capture(*args, **kwargs):
+        sent.append((args, kwargs))
+
+    monkeypatch.setattr(adapter, "send_card", capture)
+    event = NormalizedEvent(
+        platform="feishu",
+        event_id="evt-private-board",
+        chat_id="oc_private",
+        message_id="msg-private",
+        sender_id="ou_user",
+        text="用看板形式汇报目前进展",
+        mention_bot=True,
+        chat_type="private",
+        destination_id="oc_private",
+    )
+
+    assert await adapter._handle_monitor_card(event, Runner()) is True
+    assert sent[0][0][0] == "ou_user"
+    assert sent[0][1]["chat_type"] == "private"
+
+
+@pytest.mark.asyncio
 async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_button(
     monkeypatch, tmp_path: Path
 ) -> None:

@@ -7,7 +7,7 @@ from ostag.core.runner import OSTagRunner
 from ostag.config import load_settings
 from ostag.main import main_async
 from ostag.work_monitor.identity import Destination, IdentityStore, Principal
-from ostag.work_monitor.service import AmbiguousTask, WorkMonitorService
+from ostag.work_monitor.service import AmbiguousTask, WorkMonitorService, parse_monitor_command
 from ostag.work_monitor.store import MonitorStore
 
 
@@ -52,6 +52,22 @@ def _seed(store: MonitorStore) -> None:
             "INSERT INTO tasks(instance_id,task_id,title,project,status,agent,progress,duration_seconds,summary,error_class,evidence_ref,version,occurred_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "用看板形式汇报目前进展",
+        "请给我一份看板形式的报告",
+        "以看板展示当前状态",
+    ),
+)
+def test_natural_language_board_requests_are_monitor_commands(text: str) -> None:
+    command = parse_monitor_command(text)
+
+    assert command is not None
+    assert command.name == "board"
+    assert command.argument == ""
 
 
 def _service(tmp_path: Path) -> tuple[WorkMonitorService, Principal, Destination]:

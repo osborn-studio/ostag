@@ -56,6 +56,10 @@ def parse_monitor_command(text: str) -> MonitorCommand | None:
     if not parts:
         return None
     name = aliases.get(parts[0].lower()) or aliases.get(parts[0])
+    if name is None and "看板" in cleaned and any(
+        intent in cleaned for intent in ("汇报", "报告", "展示", "显示", "进展", "状态")
+    ):
+        return MonitorCommand("board")
     if name is None:
         return None
     return MonitorCommand(name, " ".join(parts[1:]))
