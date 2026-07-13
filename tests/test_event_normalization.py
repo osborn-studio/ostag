@@ -74,6 +74,31 @@ async def test_feishu_post_message_normalizes_text_and_link() -> None:
     assert "https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy" in event.text
 
 
+@pytest.mark.asyncio
+async def test_feishu_private_message_does_not_require_explicit_mention() -> None:
+    config = load_settings(None, audit_log=Path("logs/test-audit.log"))
+    raw = {
+        "header": {"event_id": "evt_private"},
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_demo_sender"}},
+            "message": {
+                "chat_id": "oc_private_chat",
+                "chat_type": "p2p",
+                "message_id": "om_private_message",
+                "message_type": "text",
+                "content": json.dumps({"text": "汇报下目前 osstack 的进展"}, ensure_ascii=False),
+                "mentions": [],
+            },
+        },
+    }
+
+    event = await FeishuAdapter(config).normalize_event(raw)
+
+    assert event.chat_type == "private"
+    assert event.mention_bot is True
+    assert event.text == "汇报下目前 osstack 的进展"
+
+
 def test_platform_adapters_implement_contract(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log")
 

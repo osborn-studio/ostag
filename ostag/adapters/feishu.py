@@ -242,11 +242,13 @@ class FeishuAdapter:
         content = _parse_content(message.get("content"))
         text = _content_text(content) or message.get("text") or event.get("text") or ""
         mentions = message.get("mentions") or content.get("mentions") or []
-        mention_bot = bool(mentions) or _mentions_bot(text, self.config.bot_name)
-        cleaned_text = strip_mentions(text, self.config.bot_name)
         chat_id = message.get("chat_id") or event.get("chat_id", "")
         raw_chat_type = str(message.get("chat_type") or event.get("chat_type") or "")
         chat_type = "private" if raw_chat_type in {"p2p", "private"} else "group"
+        mention_bot = chat_type == "private" or bool(mentions) or _mentions_bot(
+            text, self.config.bot_name
+        )
+        cleaned_text = strip_mentions(text, self.config.bot_name)
 
         return NormalizedEvent(
             platform="feishu",
