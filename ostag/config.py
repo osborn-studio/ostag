@@ -231,7 +231,6 @@ class Settings:
                 "feishu_app_secret": self.feishu_app_secret,
                 "dingtalk_client_id": self.dingtalk_client_id,
                 "dingtalk_client_secret": self.dingtalk_client_secret,
-                "dingtalk_robot_webhook": self.dingtalk_robot_webhook,
             }
             missing = next((name for name, value in required.items() if not value), "")
             if missing:

@@ -45,6 +45,10 @@ def test_enabled_daily_task_boards_require_complete_profiles() -> None:
             raise AssertionError(f"missing {field} was accepted")
 
 
+def test_dingtalk_daily_board_can_use_dws_without_webhook() -> None:
+    _enabled_settings(dingtalk_robot_webhook="").validate()
+
+
 def test_daily_task_board_hours_and_poll_interval_are_validated() -> None:
     _enabled_settings().validate()
     for values in (
