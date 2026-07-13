@@ -436,6 +436,36 @@ async def test_dingtalk_proactive_send_normalizes_at_tags(monkeypatch, tmp_path:
     assert captured["args"][11] == "@管理者 早上好"
 
 
+@pytest.mark.asyncio
+async def test_dingtalk_proactive_card_posts_native_payload(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    async def capture(url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=False,
+        platform="dingtalk",
+        dingtalk_robot_webhook="https://oapi.dingtalk.com/robot/send?access_token=test",
+        dingtalk_robot_secret="secret",
+    )
+    adapter = DingTalkAdapter(config)
+    monkeypatch.setattr(adapter, "_post_json", capture)
+    payload = {
+        "msgtype": "markdown",
+        "markdown": {"title": "今日作战看板", "text": "任务"},
+        "at": {"atUserIds": ["owner"], "isAtAll": False},
+    }
+
+    await adapter.send_card("cid_demo", payload, "fallback", delivery_id="digest-card-1")
+
+    assert captured["url"].startswith("https://oapi.dingtalk.com/robot/send")
+    assert captured["payload"] == payload
+
+
 def test_dingtalk_signed_webhook_url_uses_timestamp_and_secret() -> None:
     url = signed_webhook_url(
         "https://oapi.dingtalk.com/robot/send?access_token=token",

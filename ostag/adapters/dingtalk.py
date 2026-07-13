@@ -138,6 +138,34 @@ class DingTalkAdapter:
             _text_payload(text),
         )
 
+    async def send_card(
+        self,
+        destination_id: str,
+        payload: dict[str, Any],
+        fallback_text: str,
+        *,
+        delivery_id: str,
+    ) -> None:
+        """Deliver a native robot payload, falling back once to text/Markdown."""
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive cards")
+        if self.config.dry_run:
+            print(fallback_text)
+            return
+        if not self.config.dingtalk_robot_webhook:
+            await self.send_message(destination_id, fallback_text, delivery_id=delivery_id)
+            return
+        try:
+            await self._post_json(
+                signed_webhook_url(
+                    self.config.dingtalk_robot_webhook,
+                    self.config.dingtalk_robot_secret,
+                ),
+                payload,
+            )
+        except Exception:
+            await self.send_message(destination_id, fallback_text, delivery_id=delivery_id)
+
     async def _send_by_dws_bot(self, chat_id: str, text: str) -> None:
         argv = shlex.split(self.config.dws_cli_bin)
         if not argv:
