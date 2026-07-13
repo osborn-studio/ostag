@@ -163,6 +163,12 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS monitor_scheduler_owners (owner_id TEXT PRIMARY KEY, lease_until TEXT NOT NULL, heartbeat_at TEXT NOT NULL)",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS daily_digest_windows (window_key TEXT PRIMARY KEY, created_at TEXT NOT NULL, delivered_at TEXT NOT NULL DEFAULT '')",
+            "CREATE TABLE IF NOT EXISTS daily_digest_outbox (delivery_id TEXT PRIMARY KEY, window_key TEXT NOT NULL, platform TEXT NOT NULL, destination_id TEXT NOT NULL, payload TEXT NOT NULL, fallback_text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL, delivered_at TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '')",
+        )
+    ),
 )
 
 
