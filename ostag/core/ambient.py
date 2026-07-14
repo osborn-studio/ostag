@@ -20,6 +20,7 @@ from ostag.core.followups import FollowUpService
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import LedgerEvent, new_id
 from ostag.core.logging import write_audit_log
+from ostag.core.requirement_board import RequirementSnapshot
 from ostag.workflows.auto_base import LarkCLI, cell_to_text, extract_matching_records
 
 
@@ -34,23 +35,12 @@ AMBIENT_PROJECTION_FIELDS = [
     "状态",
     "优先级",
     "预计/实际完成时间",
+    "需求提出日期",
     "停滞天数",
     "需求持续时长",
 ]
 
 DONE_STATUSES = {"已完成", "完成", "done", "completed"}
-
-
-@dataclass(frozen=True)
-class RequirementSnapshot:
-    record_id: str
-    title: str
-    owner: str = ""
-    owner_ids: tuple[str, ...] = ()
-    status: str = ""
-    priority: str = ""
-    due_date: date | None = None
-    days_stale: int = 0
 
 
 @dataclass(frozen=True)
@@ -461,6 +451,9 @@ def snapshots_from_records(data: dict[str, Any]) -> list[RequirementSnapshot]:
                 due_date=_first_date(
                     record.fields,
                     ("预计/实际完成时间", "预计完成时间", "实际完成时间", "due_date", "Due Date"),
+                ),
+                proposed_date=_first_date(
+                    record.fields, ("需求提出日期", "提出日期", "created_at")
                 ),
                 days_stale=_first_int(
                     record.fields, ("停滞天数", "需求持续时长", "days_stale", "Days Stale")
