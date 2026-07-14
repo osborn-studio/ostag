@@ -105,6 +105,48 @@ async def test_discovery_snapshot_spools_in_order_and_survives_restart(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_awaiting_decision_snapshot_spools_a_real_decision_request(tmp_path) -> None:
+    class DecisionPort(FakePort):
+        def snapshot(self, session_id):
+            result = super().snapshot(session_id)
+            result["state"] = "awaiting_decision"
+            result["decision"] = {
+                "decision_id": "decision_live",
+                "question": "请选择灰度方向",
+                "choices": [
+                    {"choice_id": "a", "label": "继续灰度"},
+                    {"choice_id": "b", "label": "只读观察"},
+                ],
+            }
+            return result
+
+    port = DecisionPort()
+    port.sessions = (
+        OsstackSession(
+            "sess_1", "task_1", "run_1", "codex-cli", "awaiting_decision",
+            True, True, 4, 1.0,
+        ),
+    )
+    reporter = _reporter(tmp_path, port=port)
+    await reporter.discover_sessions_once()
+
+    assert await reporter.capture_changed_snapshots_once() == 3
+    decision = reporter.pending_outbound()[-1]
+    assert decision.kind == "decision.request"
+    assert decision.to_dict()["payload"] == {
+        "decision_id": "decision_live",
+        "question": "请选择灰度方向",
+        "choices": [
+            {"choice_id": "a", "label": "继续灰度"},
+            {"choice_id": "b", "label": "只读观察"},
+        ],
+        "recommended_choice_id": None,
+        "blocking": True,
+        "safe_work": [],
+    }
+
+
+@pytest.mark.asyncio
 async def test_flush_has_stable_hmac_and_ack_deletes_only_sent_sequence(tmp_path) -> None:
     transport = FakeTransport([TransportResponse(200, b'{"ack_sequence":1}')])
     reporter = _reporter(tmp_path, transport=transport)

@@ -199,6 +199,23 @@ class CopilotReporter:
                     f"snapshot_{local.session_id}_v{local.version}_{snapshot_hash[:12]}",
                 )
                 created += int(self._insert_outbound(db, snap))
+                decision = snapshot["decision"]
+                if decision is not None:
+                    request = self._make_envelope(
+                        db,
+                        binding,
+                        "decision.request",
+                        {
+                            "decision_id": decision["decision_id"],
+                            "question": decision["question"],
+                            "choices": decision["choices"],
+                            "recommended_choice_id": None,
+                            "blocking": True,
+                            "safe_work": [],
+                        },
+                        f"decision_{decision['decision_id']}_v{local.version}",
+                    )
+                    created += int(self._insert_outbound(db, request))
                 db.execute(
                     "UPDATE relay_local_sessions SET exported_version=?,snapshot_hash=? WHERE session_id=?",
                     (local.version, snapshot_hash, local.session_id),

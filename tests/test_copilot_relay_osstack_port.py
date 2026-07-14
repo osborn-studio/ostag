@@ -98,6 +98,16 @@ def test_non_json_timeout_extra_result_fields_and_oversized_snapshot_fail_closed
     with pytest.raises(OsstackPortError, match="snapshot"):
         OsstackSessionPort(runner=FakeRunner([json.dumps(snapshot)])).snapshot("sess_1")
 
+    invalid_decision = dict(snapshot)
+    invalid_decision["assistant_text"] = "请选择"
+    invalid_decision["decision"] = {
+        "decision_id": "d1", "question": "请选择", "choices": [], "native": "secret"
+    }
+    with pytest.raises(OsstackPortError, match="decision"):
+        OsstackSessionPort(
+            runner=FakeRunner([json.dumps(invalid_decision)])
+        ).snapshot("sess_1")
+
 
 def test_broken_codex_availability_is_rejected() -> None:
     agents = [

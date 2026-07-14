@@ -140,6 +140,35 @@ class OsstackSessionPort:
     def snapshot(self, session_id: str) -> Mapping[str, Any]:
         value = self._run_json([self.binary, "session", "snapshot", session_id, "--json"])
         result = self._exact(value, _SNAPSHOT_KEYS, "snapshot")
+        decision = result["decision"]
+        if decision is not None:
+            decision = self._exact(
+                decision, {"decision_id", "question", "choices"}, "snapshot decision"
+            )
+            if (
+                not isinstance(decision["decision_id"], str)
+                or not decision["decision_id"]
+                or not isinstance(decision["question"], str)
+                or not decision["question"]
+                or len(decision["question"]) > 1_000
+                or not isinstance(decision["choices"], list)
+                or not 1 <= len(decision["choices"]) <= 8
+            ):
+                raise OsstackPortError("snapshot decision is invalid")
+            choice_ids: list[str] = []
+            for value in decision["choices"]:
+                choice = self._exact(value, {"choice_id", "label"}, "snapshot decision choice")
+                if (
+                    not isinstance(choice["choice_id"], str)
+                    or not choice["choice_id"]
+                    or not isinstance(choice["label"], str)
+                    or not choice["label"]
+                    or len(choice["label"]) > 160
+                ):
+                    raise OsstackPortError("snapshot decision choice is invalid")
+                choice_ids.append(choice["choice_id"])
+            if len(choice_ids) != len(set(choice_ids)):
+                raise OsstackPortError("snapshot decision choices must be unique")
         sanitized = sanitize_assistant_text(result["assistant_text"])
         if sanitized.blocked_categories or sanitized.truncated:
             raise OsstackPortError("snapshot is unsafe or oversized")
