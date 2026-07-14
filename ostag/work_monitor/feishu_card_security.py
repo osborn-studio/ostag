@@ -269,8 +269,10 @@ class FeishuCardSecurity:
             raise HTTPException(422, "verified actor and chat are required")
         if action.get("tag") != "button" or not isinstance(value, dict):
             raise HTTPException(422, "invalid card button action")
-        # Destination type is derived from the verified destination id, never button data.
-        chat_type = "private" if chat_id.startswith("ou_") else "group"
+        # Feishu open_chat_id values use the oc_ prefix for private and group
+        # chats alike. Resolve the type from the server-owned authorization
+        # binding; unknown destinations retain the stricter group posture.
+        chat_type = self._destination_chat_type(chat_id)
         principal = Principal("feishu", actor_id)
         destination = Destination("feishu", chat_id, chat_type)
         return VerifiedFeishuCallback(dict(payload), principal, destination, "action")
@@ -279,6 +281,23 @@ class FeishuCardSecurity:
         return isinstance(candidate, str) and bool(self.verification_token) and hmac.compare_digest(
             candidate, self.verification_token
         )
+
+    def _destination_chat_type(self, chat_id: str) -> str:
+        binding_store = self.store() if callable(self.store) else self.store
+        with binding_store.connect() as connection:
+            table_exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='monitor_bindings'"
+            ).fetchone()
+            if table_exists is None:
+                return "group"
+            row = connection.execute(
+                "SELECT chat_type FROM monitor_bindings "
+                "WHERE platform='feishu' AND destination_id=? AND revoked=0",
+                (chat_id,),
+            ).fetchone()
+        if row is not None and str(row["chat_type"]) in {"private", "group"}:
+            return str(row["chat_type"])
+        return "group"
 
     def _log_unsigned_callback_rejected(
         self, payload: object, *, body: bytes, encrypted_envelope: bool

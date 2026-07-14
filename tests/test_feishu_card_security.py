@@ -404,6 +404,44 @@ def test_verified_payload_derives_principal_and_ignores_button_identity(tmp_path
     assert response.json() == {"kind": "action", "actor": "ou_verified"}
 
 
+def test_verified_private_chat_type_comes_from_server_binding_not_oc_prefix(tmp_path) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    principal = Principal("feishu", "ou_verified")
+    IdentityStore(store.path).bind_private(
+        owner=principal,
+        destination=Destination("feishu", "oc_private", "private"),
+        local_admin=True,
+    )
+    payload = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "evt", "event_type": "card.action.trigger",
+            "token": "verify", "app_id": "app",
+        },
+        "event": {
+            "operator": {"open_id": principal.actor_id},
+            "context": {"open_chat_id": "oc_private"},
+            "action": {"tag": "button", "value": {"callback_id": "cr_test"}},
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=store, clock=lambda: 1_700_000_000,
+    )
+    app = FastAPI()
+
+    @app.post("/callback", dependencies=[Depends(security)])
+    async def callback(request: Request):
+        return {"chat_type": request.state.feishu_callback.destination.chat_type}
+
+    with TestClient(app) as client:
+        response = client.post("/callback", content=body, headers=_headers(body))
+
+    assert response.status_code == 200
+    assert response.json() == {"chat_type": "private"}
+
+
 def test_message_event_and_schema_extensions_are_rejected(tmp_path) -> None:
     payload = {"schema": "2.0", "header": {
         "event_type": "im.message.receive_v1", "token": "verify", "app_id": "app"}, "event": {}}
