@@ -168,3 +168,22 @@ def test_read_only_rollout_shows_sessions_but_creates_no_outbound_write(tmp_path
     assert not any(item["tag"] == "action" for item in current.card["elements"])
     assert "只读灰度" in blocked.text
     assert store.envelope_for_message("relay_write") is None
+
+
+def test_canary_rollout_only_allows_writes_for_the_explicit_session(tmp_path) -> None:
+    controller, store = _controller(tmp_path)
+    canary = CopilotFeishuController(
+        controller.service,
+        clock=lambda: NOW,
+        canary_session_ids=frozenset({"session-2"}),
+    )
+
+    blocked = canary.handle_event(_event("继续开发", event_id="canary-blocked"))
+
+    assert "灰度" in blocked.text
+    assert store.claim_messages(
+        direction="outbound",
+        owner="test",
+        now="2026-07-14T01:10:00Z",
+        lease_until="2026-07-14T01:11:00Z",
+    ) == ()

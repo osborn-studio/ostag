@@ -51,6 +51,7 @@ def create_copilot_router(
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     maximum_poll_seconds: float = 10.0,
     write_enabled: bool = True,
+    canary_session_ids: frozenset[str] = frozenset(),
 ) -> APIRouter:
     """Create mixed instance/HMAC and human/Bearer relay routes."""
     router = APIRouter(prefix="/v1/copilot")
@@ -125,6 +126,7 @@ def create_copilot_router(
                 direction="outbound",
                 owner=instance_id,
                 instance_id=instance_id,
+                session_ids=canary_session_ids or None,
                 now=_utc(now),
                 lease_until=_utc(now + timedelta(seconds=30)),
                 limit=100,

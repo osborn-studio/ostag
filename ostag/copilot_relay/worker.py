@@ -32,7 +32,10 @@ async def run_worker(stop: asyncio.Event | None = None) -> None:
         secret=settings.copilot_relay_secret,
         central_url=settings.copilot_relay_central_url,
         spool_path=settings.copilot_relay_spool_db,
-        port=OsstackSessionPort(binary=settings.copilot_relay_osstack_bin),
+        port=OsstackSessionPort(
+            binary=settings.copilot_relay_osstack_bin,
+            default_repo=settings.copilot_relay_default_repo,
+        ),
     )
     stop = stop or asyncio.Event()
     while not stop.is_set():

@@ -19,7 +19,10 @@ history, native agent IDs, or credentials into central evidence.
 5. Run the health check at `/healthz`, then verify signed event ingestion,
    owner-scoped session listing, existing Work Monitor boards, and daily boards.
 6. Enable writes for one owner/private-chat/session canary only after discovery
-   has remained stable for at least one reporter polling interval.
+   has remained stable for at least one reporter polling interval. Set
+   `OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS=<public-session-id>` before setting
+   `OSTAG_COPILOT_RELAY_WRITE_ENABLED=true`; the poll route enforces this
+   allowlist even if an older callback remains queued.
 
 ## Worker installation
 
@@ -31,6 +34,7 @@ OSTAG_COPILOT_RELAY_INSTANCE_ID=macmini
 OSTAG_COPILOT_RELAY_SECRET=<credential>
 OSTAG_COPILOT_RELAY_CENTRAL_URL=https://ostag-monitor.ihiking.me
 OSTAG_COPILOT_RELAY_OSSTACK_BIN=/absolute/path/to/osstack
+OSTAG_COPILOT_RELAY_DEFAULT_REPO=/absolute/path/to/managed/repository
 OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS=5
 ```
 

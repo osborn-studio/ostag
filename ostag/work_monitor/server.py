@@ -185,6 +185,9 @@ def create_app(
                 runtime.copilot = CopilotFeishuController(
                     CopilotRelayService(RelayStore(runtime.service.store), RelayPolicy(owner)),
                     write_enabled=configured.copilot_relay_write_enabled,
+                    canary_session_ids=frozenset(
+                        configured.copilot_relay_canary_session_ids
+                    ),
                 )
         if (
             feishu_ws is None
@@ -492,6 +495,7 @@ def create_app(
                 dependencies=lambda: (dependencies()[0], dependencies()[2]),
                 bounded_body=bounded_body,
                 write_enabled=configured.copilot_relay_write_enabled,
+                canary_session_ids=frozenset(configured.copilot_relay_canary_session_ids),
             )
         )
 

@@ -14,6 +14,7 @@ def test_central_compose_reuses_service_port_and_database_with_safe_relay_flags(
     assert environment["OSTAG_MONITOR_SERVER_DB"] == "/var/lib/ostag/work_monitor.sqlite3"
     assert environment["OSTAG_COPILOT_RELAY_SERVER_ENABLED"] == "${OSTAG_COPILOT_RELAY_SERVER_ENABLED:-true}"
     assert environment["OSTAG_COPILOT_RELAY_WRITE_ENABLED"] == "${OSTAG_COPILOT_RELAY_WRITE_ENABLED:-false}"
+    assert environment["OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS"] == "${OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS:-}"
     assert not any("SECRET" in key or "TOKEN" in key for key in environment)
     assert len(service["volumes"]) == 1
 

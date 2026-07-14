@@ -25,6 +25,7 @@ def _app(
     *,
     max_body_bytes: int = 1_048_576,
     write_enabled: bool = True,
+    canary_session_ids: tuple[str, ...] = (),
 ):
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     identities = IdentityStore(store.path)
@@ -38,6 +39,7 @@ def _app(
             settings=Settings(
                 monitor_server_max_body_bytes=max_body_bytes,
                 copilot_relay_write_enabled=write_enabled,
+                copilot_relay_canary_session_ids=canary_session_ids,
             ),
             service=service,
             projector=Projector(store),
@@ -237,6 +239,29 @@ def test_read_only_mode_does_not_deliver_previously_queued_writes(tmp_path: Path
     assert response.status_code == 200
     assert response.json() == {"messages": []}
     assert relay.envelope_for_message(envelope.message_id) == envelope
+
+
+def test_canary_mode_only_leases_the_explicit_session(tmp_path: Path) -> None:
+    app, store = _app(tmp_path, canary_session_ids=("session-canary",))
+    relay = RelayStore(store)
+    other = RelayEnvelope.from_dict(
+        _envelope(1, kind="instruction.send", message_id="msg-other")
+    )
+    allowed_dict = _envelope(2, kind="instruction.send", message_id="msg-canary")
+    allowed_dict["binding"]["session_id"] = "session-canary"
+    allowed = RelayEnvelope.from_dict(allowed_dict)
+    relay.enqueue(other, direction="outbound")
+    relay.enqueue(allowed, direction="outbound")
+    path = "/v1/copilot/messages/poll"
+
+    with TestClient(app) as client:
+        response = client.post(
+            path, content=b"{}", headers=_signed(b"{}", path, nonce="canary-poll")
+        )
+
+    assert response.status_code == 200
+    assert [item["message_id"] for item in response.json()["messages"]] == ["msg-canary"]
+    assert relay.envelope_for_message("msg-other") == other
 
 
 def test_ack_hash_mismatch_is_atomic_and_valid_ack_delivers(tmp_path: Path) -> None:

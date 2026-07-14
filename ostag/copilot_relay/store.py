@@ -154,6 +154,7 @@ class RelayStore:
         lease_until: str,
         limit: int = 100,
         instance_id: str | None = None,
+        session_ids: frozenset[str] | None = None,
     ) -> tuple[LeasedMessage, ...]:
         if direction not in {"inbound", "outbound"}:
             raise ValueError("direction must be inbound or outbound")
@@ -166,12 +167,20 @@ class RelayStore:
             parameters: tuple[object, ...] = (direction, now, now)
             if instance_id:
                 parameters += (instance_id,)
+            session_clause = ""
+            if session_ids:
+                placeholders = ",".join("?" for _ in session_ids)
+                session_clause = (
+                    f" AND json_extract(binding_json,'$.session_id') IN ({placeholders})"
+                )
+                parameters += tuple(sorted(session_ids))
             parameters += (limit,)
             rows = connection.execute(
                 "SELECT message_id FROM relay_messages WHERE direction=? "
                 "AND state IN ('pending','leased') AND next_attempt_at<=? "
                 "AND (state='pending' OR lease_until<=?)"
                 + instance_clause
+                + session_clause
                 + " ORDER BY created_at,message_id LIMIT ?",
                 parameters,
             ).fetchall()

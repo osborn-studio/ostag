@@ -116,24 +116,59 @@ def test_broken_codex_availability_is_rejected() -> None:
         )
 
 
-def test_confirmed_task_maps_to_structured_task_submit_argv() -> None:
+def test_confirmed_task_maps_to_idempotent_resumable_session_start() -> None:
     proposal = _instruction().to_dict()
     proposal["kind"] = "task.create.proposal"
     proposal["payload"] = {
         "proposal_id": "proposal_1", "objective": "修复登录；rm -rf /",
-        "repository": "ostag", "workspace": "managed", "suggested_agent": "codex-cli",
+        "repository": "current", "workspace": "managed", "suggested_agent": "codex-cli",
         "acceptance_criteria": ["tests pass"], "sensitive_operations": [],
     }
     confirm = _instruction().to_dict()
     confirm["kind"] = "task.create.confirm"
     confirm["payload"] = {"proposal_id": "proposal_1", "confirmed": True}
-    runner = FakeRunner(['{"type":"done","terminal":true}\n'])
+    started = {
+        "session_id": "sess_1", "task_id": "task_1", "run_id": "run_1",
+        "agent_id": "codex-cli", "state": "idle", "resume_supported": True,
+        "resume_ready": True, "version": 3, "updated_at": 10.0,
+        "turn_id": "turn_1", "assistant_text": "READY", "decision": None, "events": [],
+    }
+    runner = FakeRunner([json.dumps(started)])
 
-    OsstackSessionPort(runner=runner).create_task(
+    OsstackSessionPort(runner=runner, default_repo="/workspace/ostag").create_task(
         RelayEnvelope.from_dict(confirm), RelayEnvelope.from_dict(proposal)
     )
     argv = runner.calls[0]
-    assert argv[:3] == ("osstack", "task", "submit")
-    assert argv[3] == "修复登录；rm -rf /"
-    assert argv[argv.index("--tag") + 1] == "proposal_1"
-    assert argv[argv.index("--repo") + 1] == "ostag"
+    assert argv[:3] == ("osstack", "session", "start")
+    assert argv[argv.index("--request-id") + 1] == "proposal_1"
+    assert argv[argv.index("--text") + 1] == "修复登录；rm -rf /"
+    assert argv[argv.index("--repo") + 1] == "/workspace/ostag"
+
+
+def test_confirmed_task_requires_a_safe_absolute_repository_and_exact_start_result() -> None:
+    proposal = _instruction().to_dict()
+    proposal["kind"] = "task.create.proposal"
+    proposal["payload"] = {
+        "proposal_id": "proposal_1", "objective": "修复登录",
+        "repository": "current", "workspace": "managed", "suggested_agent": "codex-cli",
+        "acceptance_criteria": [], "sensitive_operations": [],
+    }
+    confirm = _instruction().to_dict()
+    confirm["kind"] = "task.create.confirm"
+    confirm["payload"] = {"proposal_id": "proposal_1", "confirmed": True}
+    with pytest.raises(OsstackPortError, match="repository"):
+        OsstackSessionPort(runner=FakeRunner([])).create_task(
+            RelayEnvelope.from_dict(confirm), RelayEnvelope.from_dict(proposal)
+        )
+
+    leaked = {
+        "session_id": "sess_1", "task_id": "task_1", "run_id": "run_1",
+        "agent_id": "codex-cli", "state": "idle", "resume_supported": True,
+        "resume_ready": True, "version": 3, "updated_at": 10.0,
+        "turn_id": "turn_1", "assistant_text": "READY", "decision": None, "events": [],
+        "native_session_id": "secret",
+    }
+    with pytest.raises(OsstackPortError, match="fields"):
+        OsstackSessionPort(
+            runner=FakeRunner([json.dumps(leaked)]), default_repo="/workspace/ostag"
+        ).create_task(RelayEnvelope.from_dict(confirm), RelayEnvelope.from_dict(proposal))

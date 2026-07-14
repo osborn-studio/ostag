@@ -38,11 +38,13 @@ class CopilotFeishuController:
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         write_enabled: bool = True,
+        canary_session_ids: frozenset[str] = frozenset(),
     ) -> None:
         self.service = service
         self.store = service.store
         self.clock = clock
         self.write_enabled = write_enabled
+        self.canary_session_ids = canary_session_ids
 
     @staticmethod
     def callback_value(callback_id: str) -> dict[str, str]:
@@ -98,6 +100,10 @@ class CopilotFeishuController:
             return None
         if not self.write_enabled and text not in {"/任务", "任务", "/切换任务", "切换任务"}:
             return FeishuRelayResponse("Copilot Relay 当前处于只读灰度，远程写入尚未启用。")
+        if text not in {"/任务", "任务", "/切换任务", "切换任务"}:
+            current = self.store.current_session(principal.platform, principal.actor_id)
+            if current is not None and not self._session_write_allowed(current.session_id):
+                return FeishuRelayResponse("当前任务不在写入灰度范围，请切换到灰度任务。")
         if text in {"/任务", "任务"}:
             current = self.store.current_session(principal.platform, principal.actor_id)
             if current is None:
@@ -231,7 +237,8 @@ class CopilotFeishuController:
             return FeishuRelayResponse(
                 "请确认新任务。",
                 render_task_proposal_card(
-                    session, result.outbound, can_act=self._can_act(principal),
+                    session, result.outbound,
+                    can_act=self._can_act(principal, session.session_id),
                     callback_factory=factory,
                 ),
                 message_id,
@@ -264,7 +271,7 @@ class CopilotFeishuController:
                     },
                 }
             )
-            if self._can_act(principal):
+            if self._can_act(principal, session.session_id):
                 callback_id = self.issue_callback(
                     principal,
                     destination,
@@ -305,9 +312,16 @@ class CopilotFeishuController:
             )
         return render_current_task_card(
             session,
-            can_act=self._can_act(principal),
+            can_act=self._can_act(principal, session.session_id),
             callback_factory=factory,
         )
 
-    def _can_act(self, principal: Principal) -> bool:
-        return self.write_enabled and principal == self.service.policy.owner
+    def _session_write_allowed(self, session_id: str) -> bool:
+        return not self.canary_session_ids or session_id in self.canary_session_ids
+
+    def _can_act(self, principal: Principal, session_id: str) -> bool:
+        return (
+            self.write_enabled
+            and principal == self.service.policy.owner
+            and self._session_write_allowed(session_id)
+        )

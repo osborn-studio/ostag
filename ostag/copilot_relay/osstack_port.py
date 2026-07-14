@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ _SNAPSHOT_KEYS = {
     "session_id", "task_id", "run_id", "agent_id", "state", "version", "turn_id",
     "assistant_text", "decision", "updated_at",
 }
+_START_KEYS = _SESSION_KEYS | {"turn_id", "assistant_text", "decision", "events"}
 
 
 def _default_runner(argv: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
@@ -55,10 +57,12 @@ class OsstackSessionPort:
         binary: str = "osstack",
         runner: Runner | None = None,
         timeout_seconds: float = 120,
+        default_repo: str = "",
     ) -> None:
         self.binary = binary
         self.runner = runner or _default_runner
         self.timeout_seconds = timeout_seconds
+        self.default_repo = default_repo
 
     def _run(self, argv: list[str]) -> str:
         try:
@@ -157,17 +161,33 @@ class OsstackSessionPort:
             raise OsstackPortError("task creation requires proposal and confirmation")
         if confirmation.payload["proposal_id"] != proposal.payload["proposal_id"]:
             raise OsstackPortError("proposal confirmation mismatch")
-        output = self._run(
+        repository = str(proposal.payload["repository"])
+        if repository == "current":
+            repository = self.default_repo
+        if not repository or not Path(repository).is_absolute():
+            raise OsstackPortError("task creation requires a configured absolute repository")
+        objective = str(proposal.payload["objective"])
+        value = self._run_json(
             [
-                self.binary, "task", "submit", str(proposal.payload["objective"]),
-                "--kind", "code.write", "--agent", str(proposal.payload["suggested_agent"]),
-                "--tag", str(proposal.payload["proposal_id"]),
-                "--repo", str(proposal.payload["repository"]),
+                self.binary, "session", "start",
+                "--request-id", str(proposal.payload["proposal_id"]),
+                "--agent", str(proposal.payload["suggested_agent"]),
+                "--repo", repository,
+                "--title", objective[:160],
+                "--text", objective,
+                "--json",
             ]
         )
-        try:
-            frames = [json.loads(line) for line in output.splitlines() if line.strip()]
-        except json.JSONDecodeError as exc:
-            raise OsstackPortError("task submit output was not JSON") from exc
-        if not frames or not isinstance(frames[-1], dict) or frames[-1].get("terminal") is not True:
-            raise OsstackPortError("task submit did not return a terminal event")
+        result = self._exact(value, _START_KEYS, "session start result")
+        if (
+            result["resume_supported"] is not True
+            or result["resume_ready"] is not True
+            or isinstance(result["version"], bool)
+            or not isinstance(result["version"], int)
+            or not isinstance(result["events"], list)
+            or "native_session" in json.dumps(result)
+        ):
+            raise OsstackPortError("session start result is invalid")
+        sanitized = sanitize_assistant_text(result["assistant_text"])
+        if sanitized.blocked_categories or sanitized.truncated:
+            raise OsstackPortError("session start result is unsafe or oversized")

@@ -181,11 +181,13 @@ class Settings:
     copilot_relay_enabled: bool = False
     copilot_relay_server_enabled: bool = True
     copilot_relay_write_enabled: bool = True
+    copilot_relay_canary_session_ids: tuple[str, ...] = ()
     copilot_relay_instance_id: str = "local"
     copilot_relay_secret: str = ""
     copilot_relay_central_url: str = ""
     copilot_relay_spool_db: Path = Path("./logs/copilot_relay_spool.sqlite3")
     copilot_relay_osstack_bin: str = "osstack"
+    copilot_relay_default_repo: str = ""
     copilot_relay_poll_interval_seconds: int = 5
     copilot_relay_max_text_chars: int = 4_000
     daily_task_boards_enabled: bool = False
@@ -226,6 +228,8 @@ class Settings:
             missing = next((name for name, value in required.items() if not value), "")
             if missing:
                 raise ValueError(f"copilot relay requires {missing}")
+            if self.copilot_relay_default_repo and not Path(self.copilot_relay_default_repo).is_absolute():
+                raise ValueError("copilot relay default repository must be absolute")
             url = self.copilot_relay_central_url
             local_http = url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
             if not url.startswith("https://") and not local_http:
@@ -422,6 +426,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
         copilot_relay_server_enabled=_bool("OSTAG_COPILOT_RELAY_SERVER_ENABLED", True),
         copilot_relay_write_enabled=_bool("OSTAG_COPILOT_RELAY_WRITE_ENABLED", True),
+        copilot_relay_canary_session_ids=_csv("OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS"),
         copilot_relay_instance_id=os.getenv("OSTAG_COPILOT_RELAY_INSTANCE_ID", "local"),
         copilot_relay_secret=os.getenv("OSTAG_COPILOT_RELAY_SECRET", ""),
         copilot_relay_central_url=os.getenv("OSTAG_COPILOT_RELAY_CENTRAL_URL", ""),
@@ -429,6 +434,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
             os.getenv("OSTAG_COPILOT_RELAY_SPOOL_DB", "./logs/copilot_relay_spool.sqlite3")
         ),
         copilot_relay_osstack_bin=os.getenv("OSTAG_COPILOT_RELAY_OSSTACK_BIN", "osstack"),
+        copilot_relay_default_repo=os.getenv("OSTAG_COPILOT_RELAY_DEFAULT_REPO", ""),
         copilot_relay_poll_interval_seconds=_int("OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS", 5),
         copilot_relay_max_text_chars=_int("OSTAG_COPILOT_RELAY_MAX_TEXT_CHARS", 4_000),
         daily_task_boards_enabled=_bool("OSTAG_DAILY_TASK_BOARDS_ENABLED", False),
