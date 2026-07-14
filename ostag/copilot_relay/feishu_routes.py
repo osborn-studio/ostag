@@ -37,10 +37,12 @@ class CopilotFeishuController:
         service: CopilotRelayService,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        write_enabled: bool = True,
     ) -> None:
         self.service = service
         self.store = service.store
         self.clock = clock
+        self.write_enabled = write_enabled
 
     @staticmethod
     def callback_value(callback_id: str) -> dict[str, str]:
@@ -94,6 +96,8 @@ class CopilotFeishuController:
             if is_command or text:
                 return FeishuRelayResponse("Copilot 写操作仅支持已绑定的负责人私聊。")
             return None
+        if not self.write_enabled and text not in {"/任务", "任务", "/切换任务", "切换任务"}:
+            return FeishuRelayResponse("Copilot Relay 当前处于只读灰度，远程写入尚未启用。")
         if text in {"/任务", "任务"}:
             current = self.store.current_session(principal.platform, principal.actor_id)
             if current is None:
@@ -140,6 +144,8 @@ class CopilotFeishuController:
         principal: Principal,
         destination: Destination,
     ) -> FeishuRelayResponse:
+        if not self.write_enabled:
+            return FeishuRelayResponse("Copilot Relay 当前处于只读灰度，远程写入尚未启用。")
         mapped = self.store.consume_callback(
             callback_id,
             platform=principal.platform,
@@ -247,23 +253,25 @@ class CopilotFeishuController:
             {"tag": "div", "text": {"tag": "plain_text", "content": "请选择明确的目标任务"}}
         ]
         for session in sessions[:10]:
-            callback_id = self.issue_callback(
-                principal,
-                destination,
-                action="switch",
-                reference=f"{session.instance_id}\0{session.session_id}",
-            )
-            elements.extend(
-                (
-                    {
-                        "tag": "div",
-                        "text": {
-                            "tag": "plain_text",
-                            "content": safe_plain_text(
-                                f"{session.title}\n{session.instance_id} · {session.agent_id} · {session.state}"
-                            ),
-                        },
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": safe_plain_text(
+                            f"{session.title}\n{session.instance_id} · {session.agent_id} · {session.state}"
+                        ),
                     },
+                }
+            )
+            if self._can_act(principal):
+                callback_id = self.issue_callback(
+                    principal,
+                    destination,
+                    action="switch",
+                    reference=f"{session.instance_id}\0{session.session_id}",
+                )
+                elements.append(
                     {
                         "tag": "action",
                         "actions": [
@@ -274,9 +282,8 @@ class CopilotFeishuController:
                                 "value": {"callback_id": callback_id},
                             }
                         ],
-                    },
+                    }
                 )
-            )
         card = {
             "config": {"wide_screen_mode": False, "enable_forward": False},
             "header": {
@@ -303,4 +310,4 @@ class CopilotFeishuController:
         )
 
     def _can_act(self, principal: Principal) -> bool:
-        return principal == self.service.policy.owner
+        return self.write_enabled and principal == self.service.policy.owner

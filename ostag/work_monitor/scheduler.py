@@ -347,7 +347,7 @@ class WorkMonitorScheduler:
                     card = render_decision_card(
                         session,
                         envelope,
-                        can_act=True,
+                        can_act=bool(self.copilot.write_enabled),
                         callback_factory=relay_callback,
                     )
                     text = f"需要决策：{envelope.payload['question']}"
@@ -360,7 +360,7 @@ class WorkMonitorScheduler:
                 else:
                     card = render_current_task_card(
                         session,
-                        can_act=True,
+                        can_act=bool(self.copilot.write_enabled),
                         callback_factory=relay_callback,
                     )
                     text = f"阶段更新：{session.latest_summary}"

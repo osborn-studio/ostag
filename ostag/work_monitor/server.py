@@ -183,7 +183,8 @@ def create_app(
                 from ostag.copilot_relay.store import RelayStore
 
                 runtime.copilot = CopilotFeishuController(
-                    CopilotRelayService(RelayStore(runtime.service.store), RelayPolicy(owner))
+                    CopilotRelayService(RelayStore(runtime.service.store), RelayPolicy(owner)),
+                    write_enabled=configured.copilot_relay_write_enabled,
                 )
         if (
             feishu_ws is None
@@ -485,12 +486,13 @@ def create_app(
 
     from ostag.copilot_relay.routes import create_copilot_router
 
-    app.include_router(
-        create_copilot_router(
-            dependencies=lambda: (dependencies()[0], dependencies()[2]),
-            bounded_body=bounded_body,
+    if configured.copilot_relay_server_enabled:
+        app.include_router(
+            create_copilot_router(
+                dependencies=lambda: (dependencies()[0], dependencies()[2]),
+                bounded_body=bounded_body,
+            )
         )
-    )
 
     for extension in routers:
         if not isinstance(extension, tuple) or len(extension) != 2:

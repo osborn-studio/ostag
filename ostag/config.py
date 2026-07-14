@@ -179,6 +179,8 @@ class Settings:
     monitor_offline_seconds: int = 600
     monitor_notification_retry_cap: int = 5
     copilot_relay_enabled: bool = False
+    copilot_relay_server_enabled: bool = True
+    copilot_relay_write_enabled: bool = True
     copilot_relay_instance_id: str = "local"
     copilot_relay_secret: str = ""
     copilot_relay_central_url: str = ""
@@ -418,6 +420,8 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
         monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
         copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
+        copilot_relay_server_enabled=_bool("OSTAG_COPILOT_RELAY_SERVER_ENABLED", True),
+        copilot_relay_write_enabled=_bool("OSTAG_COPILOT_RELAY_WRITE_ENABLED", True),
         copilot_relay_instance_id=os.getenv("OSTAG_COPILOT_RELAY_INSTANCE_ID", "local"),
         copilot_relay_secret=os.getenv("OSTAG_COPILOT_RELAY_SECRET", ""),
         copilot_relay_central_url=os.getenv("OSTAG_COPILOT_RELAY_CENTRAL_URL", ""),

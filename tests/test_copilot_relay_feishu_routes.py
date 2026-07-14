@@ -155,3 +155,16 @@ def test_switch_picker_is_unambiguous_and_group_writes_are_refused(tmp_path) -> 
         _event("改变实现方向", event_id="group", destination="group-chat", chat_type="group")
     )
     assert refused.text == "Copilot 写操作仅支持已绑定的负责人私聊。"
+
+
+def test_read_only_rollout_shows_sessions_but_creates_no_outbound_write(tmp_path) -> None:
+    controller, store = _controller(tmp_path)
+    readonly = CopilotFeishuController(controller.service, clock=lambda: NOW, write_enabled=False)
+
+    current = readonly.handle_event(_event("/任务", event_id="read"))
+    blocked = readonly.handle_event(_event("继续开发", event_id="write"))
+
+    assert current.card is not None
+    assert not any(item["tag"] == "action" for item in current.card["elements"])
+    assert "只读灰度" in blocked.text
+    assert store.envelope_for_message("relay_write") is None

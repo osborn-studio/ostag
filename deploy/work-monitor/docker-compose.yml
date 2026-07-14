@@ -10,6 +10,8 @@ services:
         required: false
     environment:
       OSTAG_MONITOR_SERVER_DB: /var/lib/ostag/work_monitor.sqlite3
+      OSTAG_COPILOT_RELAY_SERVER_ENABLED: ${OSTAG_COPILOT_RELAY_SERVER_ENABLED:-true}
+      OSTAG_COPILOT_RELAY_WRITE_ENABLED: ${OSTAG_COPILOT_RELAY_WRITE_ENABLED:-false}
     ports:
       - "127.0.0.1:${OSTAG_MONITOR_PORT:-8000}:8000"
     volumes:
