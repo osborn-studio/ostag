@@ -276,7 +276,11 @@ class WorkMonitorScheduler:
                 destination = Destination(platform, destination_id, str(payload["chat_type"]))
                 recipient = Principal.from_dict(payload["recipient"])
                 active = (
-                    {"chat_type": destination.chat_type}
+                    {
+                        "chat_type": destination.chat_type,
+                        "principal_platform": recipient.platform,
+                        "actor_id": recipient.actor_id,
+                    }
                     if self.identities.binding(destination) is not None
                     and self.identities.allows(recipient, destination, "write")
                     else None
@@ -302,6 +306,11 @@ class WorkMonitorScheduler:
         )
         try:
             transport = self.transports[platform]
+            transport_destination_id = destination_id
+            if platform == "feishu" and str(active["chat_type"]) == "private":
+                # Feishu stores the private chat id as the authorization boundary,
+                # while proactive delivery requires the bound user's open_id.
+                transport_destination_id = str(active["actor_id"])
             relay_message_id = str(payload.get("relay_message_id", ""))
             if (
                 platform == "feishu"
@@ -365,7 +374,7 @@ class WorkMonitorScheduler:
                     )
                     text = f"阶段更新：{session.latest_summary}"
                 delivery = transport.send_card(
-                    destination_id,
+                    transport_destination_id,
                     card,
                     text,
                     delivery_id=item["delivery_id"],
@@ -390,12 +399,12 @@ class WorkMonitorScheduler:
                         )
                 card = render_feishu_card(view, callback_factory=factory)
                 delivery = transport.send_card(
-                    destination_id, card, text, delivery_id=item["delivery_id"],
+                    transport_destination_id, card, text, delivery_id=item["delivery_id"],
                     chat_type=active["chat_type"],
                 )
             else:
                 delivery = transport.send_message(
-                    destination_id, text, delivery_id=item["delivery_id"],
+                    transport_destination_id, text, delivery_id=item["delivery_id"],
                     chat_type=active["chat_type"],
                 )
             platform_message_id = await asyncio.wait_for(

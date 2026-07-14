@@ -148,7 +148,7 @@ async def test_work_monitor_owner_delivers_relay_card_and_persists_quote_binding
             (decision.message_id,),
         ).fetchone()
     assert row[0] == decision.message_id
-    assert platform_id == "owner-chat"
+    assert platform_id == "owner"
 
 
 @pytest.mark.asyncio
