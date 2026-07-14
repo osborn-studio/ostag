@@ -1,6 +1,6 @@
 # OS Tag Secret Hygiene
 
-- Generated at: `2026-07-13T11:48:55Z`
+- Generated at: `2026-07-14T13:23:23Z`
 - Status: `pass`
 - Matches: `0`
 - Scope: release bundle and formal handoff artifacts

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased — 2026-07-14
+
+- Added the OStag Copilot Relay: an owner-scoped Feishu console for discovering
+  osstack sessions, viewing bounded assistant snapshots, answering explicit
+  decisions, changing direction, and creating governed tasks without exposing
+  native agent identifiers, source, terminal logs, local paths, or credentials.
+- Added durable signed central/local mailboxes, idempotent callbacks and task
+  creation, monotonic session versions, restart recovery, one-session canary
+  allowlists, read-only rollout controls, and approval holds for high-risk work.
+- Added Feishu current-task, latest-reply, decision, and receipt cards. Private
+  proactive delivery now resolves the bound user's `open_id` while preserving
+  the private chat as the authorization scope.
+- Added launchd and Compose deployment assets, a production runbook, rollback
+  procedure, security/redaction gates, and cross-repository same-session smoke
+  coverage with osstack.
+
 ## 0.2.0 — 2026-07-05
 
 The governance-layer release: OS Tag becomes an open control plane for
