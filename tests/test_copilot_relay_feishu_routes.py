@@ -55,7 +55,7 @@ def _controller(tmp_path):
     store = RelayStore(MonitorStore(tmp_path / "monitor.db"))
     for session_id in ("session-1", "session-2"):
         store.upsert_session(_envelope(f"upsert-{session_id}", session_id=session_id))
-    service = CopilotRelayService(store, RelayPolicy(OWNER))
+    service = CopilotRelayService(store, RelayPolicy(OWNER), clock=lambda: NOW)
     service.select_session(OWNER, "macmini", "session-1", selected_at="2026-07-14T01:00:00Z")
     return CopilotFeishuController(service, clock=lambda: NOW), store
 
@@ -107,6 +107,11 @@ def test_quote_binding_survives_restart_and_stale_decision_is_rejected(tmp_path)
     )
     assert answer.text.startswith("回答已排队")
     assert store.envelope_for_message("relay_answer").kind == "decision.answer"
+    with store.monitor_store.connect() as connection:
+        row = connection.execute(
+            "SELECT state FROM relay_decisions WHERE decision_id='decision-1'"
+        ).fetchone()
+    assert row["state"] == "answered"
 
     store.upsert_session(_envelope("upsert-v2", version=2))
     stale = restarted.handle_event(

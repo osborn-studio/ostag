@@ -528,6 +528,45 @@ class RelayStore:
             )
         return result.rowcount == 1
 
+    def enqueue_decision_answer(self, envelope: RelayEnvelope, *, answered_at: str) -> bool:
+        """Atomically claim a pending decision and enqueue its answer."""
+        if envelope.kind != "decision.answer":
+            raise ValueError("decision answer requires decision.answer")
+        binding = envelope.binding
+        binding_json = _canonical(binding.to_dict())
+        payload_json = _canonical(envelope.to_dict())
+        with self.monitor_store.transaction() as connection:
+            result = connection.execute(
+                "UPDATE relay_decisions SET state='answered',answered_at=? WHERE decision_id=? "
+                "AND instance_id=? AND session_id=? AND turn_id=? AND session_version=? "
+                "AND state='pending' AND expires_at>?",
+                (
+                    answered_at,
+                    envelope.payload["decision_id"],
+                    binding.instance_id,
+                    binding.session_id,
+                    binding.turn_id,
+                    binding.session_version,
+                    answered_at,
+                ),
+            )
+            if result.rowcount != 1:
+                return False
+            connection.execute(
+                "INSERT INTO relay_messages("
+                "message_id,direction,kind,binding_json,payload_json,state,next_attempt_at,created_at"
+                ") VALUES (?,'outbound',?,?,?,'pending',?,?)",
+                (
+                    envelope.message_id,
+                    envelope.kind,
+                    binding_json,
+                    payload_json,
+                    envelope.created_at,
+                    envelope.created_at,
+                ),
+            )
+        return True
+
     def record_proposal(self, envelope: RelayEnvelope) -> bool:
         if envelope.kind != "task.create.proposal":
             raise ValueError("proposal record requires task.create.proposal")

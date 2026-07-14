@@ -71,10 +71,18 @@ def test_quoted_decision_reply_uses_original_turn_and_rejects_stale_version(tmp_
     }
     decision = RelayEnvelope.from_dict(request)
     store.enqueue(decision, direction="inbound")
+    store.record_decision(decision)
+    service.clock = lambda: datetime(2026, 7, 14, 1, 0, tzinfo=timezone.utc)
 
     result = service.handle_text(OWNER, "采用 B", quote_message_id="om_decision_7")
     assert result.outbound.kind == "decision.answer"
     assert result.outbound.binding.turn_id == "turn_3"
+    with store.monitor_store.connect() as connection:
+        row = connection.execute(
+            "SELECT state,answered_at FROM relay_decisions WHERE decision_id='decision_7'"
+        ).fetchone()
+    assert row["state"] == "answered"
+    assert row["answered_at"]
 
     store.upsert_session(_session_envelope(version=4))
     with pytest.raises(RelayRoutingError, match="stale"):

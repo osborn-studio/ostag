@@ -98,8 +98,10 @@ class CopilotRelayService:
                 },
                 event_id,
             )
-            inserted = self.store.enqueue(outbound, direction="outbound")
-            return RelayResult("queued" if inserted else "duplicate", outbound=outbound, policy=policy)
+            answered_at = self.clock().astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            if not self.store.enqueue_decision_answer(outbound, answered_at=answered_at):
+                raise RelayRoutingError("decision expired or was already answered")
+            return RelayResult("queued", outbound=outbound, policy=policy)
         if policy.outcome == "requires_confirmation":
             proposal_id = f"proposal_{event_id or uuid4().hex}"
             objective = text.split("：", 1)[-1].split(":", 1)[-1].strip()
