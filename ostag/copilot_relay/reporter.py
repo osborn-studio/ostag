@@ -50,6 +50,7 @@ class CopilotReporter:
         self._after_local_apply: Callable[[], None] = lambda: None
         self.spool_path.parent.mkdir(parents=True, exist_ok=True)
         self._migrate()
+        self.spool_path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.spool_path)

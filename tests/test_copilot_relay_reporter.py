@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import stat
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -79,6 +80,12 @@ def _reporter(tmp_path, *, transport=None, port=None, clock=lambda: NOW):
         spool_path=tmp_path / "relay.sqlite3", port=port or FakePort(),
         transport=transport or FakeTransport(), clock=clock,
     )
+
+
+def test_spool_database_is_owner_only(tmp_path) -> None:
+    reporter = _reporter(tmp_path)
+
+    assert stat.S_IMODE(reporter.spool_path.stat().st_mode) == 0o600
 
 
 @pytest.mark.asyncio
