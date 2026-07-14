@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shlex
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -185,8 +186,12 @@ class LarkCLIRequirementTableConnector:
 
 
 def _open_feishu_json(request: urllib.request.Request) -> dict[str, Any]:
-    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
-        value = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+            body = response.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read()
+    value = json.loads(body.decode("utf-8"))
     if not isinstance(value, dict):
         raise RuntimeError("Feishu returned a non-object response")
     return value

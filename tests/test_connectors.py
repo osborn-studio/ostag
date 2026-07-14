@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 
 from ostag.connectors.requirements import (
     DwsRequirementTableConnector,
@@ -84,6 +86,31 @@ async def test_feishu_base_read_connector_rejects_api_errors() -> None:
         assert "secret-demo" not in str(exc)
     else:
         raise AssertionError("expected Feishu API error")
+
+
+async def test_feishu_base_read_connector_preserves_json_http_errors(monkeypatch) -> None:
+    def reject(request, timeout):
+        raise HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            {},
+            BytesIO(b'{"code":99991672,"msg":"missing scope"}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", reject)
+    connector = FeishuBaseReadConnector(
+        api_base_url="https://open.feishu.cn",
+        app_id="cli_demo",
+        app_secret="secret-demo",
+    )
+
+    try:
+        await connector.list_records("appToken", "tblDemo", ["需求描述"])
+    except RuntimeError as exc:
+        assert "99991672" in str(exc)
+    else:
+        raise AssertionError("expected Feishu HTTP error")
 
 
 async def test_requirement_connector_search_builds_lark_cli_arguments() -> None:
