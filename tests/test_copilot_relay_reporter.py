@@ -267,3 +267,25 @@ async def test_task_proposal_is_staged_until_matching_confirmation(tmp_path) -> 
     assert await reporter.poll_inbound_once() == 2
     assert await reporter.apply_inbound_once() == 1
     assert port.created_tasks == [("confirm_message", "proposal_1")]
+
+
+@pytest.mark.asyncio
+async def test_decision_timeout_receipt_is_consumed_without_guessing_an_answer(tmp_path) -> None:
+    receipt = _instruction(message_id="timeout_decision_1").to_dict()
+    receipt["kind"] = "delivery.receipt"
+    receipt["payload"] = {
+        "related_message_id": "decision_1", "state": "expired",
+        "summary": "decision timed out without an answer", "error_code": "decision_timeout",
+    }
+    port = FakePort()
+    reporter = _reporter(
+        tmp_path,
+        port=port,
+        transport=FakeTransport(
+            [TransportResponse(200, json.dumps({"messages": [receipt]}).encode())]
+        ),
+    )
+    assert await reporter.poll_inbound_once() == 1
+    assert await reporter.apply_inbound_once() == 1
+    assert port.sent == []
+    assert not any(item.kind == "delivery.receipt" for item in reporter.pending_outbound())

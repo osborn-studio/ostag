@@ -409,6 +409,14 @@ class CopilotReporter:
                     )
                 self._finish_inbound(message, "applied", "confirmed osstack task created")
                 applied += 1
+            elif message.kind == "delivery.receipt":
+                with self._connect() as db:
+                    updated = db.execute(
+                        "UPDATE relay_inbound SET state='applied',applied_at=? "
+                        "WHERE message_id=? AND state='pending'",
+                        (self._utc(), message.message_id),
+                    ).rowcount
+                applied += int(updated == 1)
         return applied
 
     def _finish_inbound(self, message: RelayEnvelope, state: str, summary: str) -> None:

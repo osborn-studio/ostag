@@ -222,6 +222,7 @@ def create_app(
                 degraded_seconds=configured.monitor_degraded_seconds,
                 offline_seconds=configured.monitor_offline_seconds,
                 retry_cap=configured.monitor_notification_retry_cap,
+                copilot=runtime.copilot,
             )
         if (
             daily_scheduler is None

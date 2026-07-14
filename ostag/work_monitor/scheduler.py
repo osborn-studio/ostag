@@ -48,6 +48,7 @@ class WorkMonitorScheduler:
         lease_seconds: float = 30,
         recovery_limit: int = 10,
         recovery_cooldown_seconds: int = 60,
+        copilot: Any | None = None,
     ) -> None:
         self.store, self.identities, self.transports = store, identities, transports
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -58,8 +59,14 @@ class WorkMonitorScheduler:
         self.lease_seconds = lease_seconds
         self.recovery_limit = recovery_limit
         self.recovery_cooldown_seconds = recovery_cooldown_seconds
+        self.copilot = copilot
         self.owner = uuid.uuid4().hex
         self.ledger = RunLedger(store.path.with_name("run_ledger.jsonl"), clock=self.clock)
+        from ostag.copilot_relay.scheduler import CopilotRelayScheduler
+
+        self.relay_scheduler = CopilotRelayScheduler(
+            store, identities, clock=self.clock
+        )
 
     def wake(self) -> None:
         """Compatibility hook: producers only wake; they never drain."""
@@ -129,12 +136,19 @@ class WorkMonitorScheduler:
         owner_lease = now + timedelta(seconds=max(30.0, self.poll_seconds * 3))
         with self.store.transaction() as db:
             db.execute("DELETE FROM monitor_scheduler_owners WHERE lease_until<=?", (now.isoformat(),))
+            active_owner = db.execute(
+                "SELECT owner_id FROM monitor_scheduler_owners WHERE owner_id<>? LIMIT 1",
+                (self.owner,),
+            ).fetchone()
+            if active_owner is not None:
+                return
             db.execute(
                 "INSERT INTO monitor_scheduler_owners(owner_id,lease_until,heartbeat_at) "
                 "VALUES (?,?,?) ON CONFLICT(owner_id) DO UPDATE SET "
                 "lease_until=excluded.lease_until,heartbeat_at=excluded.heartbeat_at",
                 (self.owner, owner_lease.isoformat(), now.isoformat()),
             )
+        self.relay_scheduler.plan_once()
         subscriptions = self._subscriptions()
         with self.store.connect() as db:
             tasks = [dict(r) for r in db.execute("SELECT * FROM tasks")]
@@ -288,7 +302,76 @@ class WorkMonitorScheduler:
         )
         try:
             transport = self.transports[platform]
-            if platform == "feishu" and payload.get("task_id") and hasattr(transport, "send_card"):
+            relay_message_id = str(payload.get("relay_message_id", ""))
+            if (
+                platform == "feishu"
+                and payload.get("kind", "").startswith("relay.")
+                and relay_message_id
+                and self.copilot is not None
+                and hasattr(transport, "send_card")
+            ):
+                from ostag.copilot_relay.feishu_cards import (
+                    render_current_task_card,
+                    render_decision_card,
+                    render_receipt_card,
+                    render_snapshot_card,
+                )
+                from ostag.copilot_relay.store import RelayStore
+
+                relay = RelayStore(self.store)
+                envelope = relay.envelope_for_message(relay_message_id)
+                if envelope is None:
+                    raise ValueError("relay notification target no longer exists")
+                session = relay.get_session(
+                    envelope.binding.instance_id, envelope.binding.session_id
+                )
+                if session is None:
+                    raise ValueError("relay session projection no longer exists")
+                principal = Principal.from_dict(payload["recipient"])
+                destination = Destination("feishu", destination_id, str(active["chat_type"]))
+
+                def relay_callback(action: str, reference: str) -> str:
+                    stored_reference = (
+                        f"{envelope.message_id}\0{reference}"
+                        if action == "decision"
+                        else reference
+                    )
+                    return self.copilot.issue_callback(
+                        principal,
+                        destination,
+                        action=action,
+                        reference=stored_reference,
+                    )
+
+                if payload["kind"] == "relay.decision":
+                    card = render_decision_card(
+                        session,
+                        envelope,
+                        can_act=True,
+                        callback_factory=relay_callback,
+                    )
+                    text = f"需要决策：{envelope.payload['question']}"
+                elif payload["kind"] == "relay.snapshot":
+                    card = render_snapshot_card(session, envelope)
+                    text = f"AI 最新回复：{envelope.payload['assistant_text']}"
+                elif payload["kind"] == "relay.receipt":
+                    card = render_receipt_card(session, envelope)
+                    text = f"指令回执：{envelope.payload['summary']}"
+                else:
+                    card = render_current_task_card(
+                        session,
+                        can_act=True,
+                        callback_factory=relay_callback,
+                    )
+                    text = f"阶段更新：{session.latest_summary}"
+                delivery = transport.send_card(
+                    destination_id,
+                    card,
+                    text,
+                    delivery_id=item["delivery_id"],
+                    chat_type=active["chat_type"],
+                )
+            elif platform == "feishu" and payload.get("task_id") and hasattr(transport, "send_card"):
                 from .feishu_cards import render_feishu_card
                 from .feishu_routes import issue_feishu_callback
                 from .service import WorkMonitorService
@@ -315,10 +398,17 @@ class WorkMonitorScheduler:
                     destination_id, text, delivery_id=item["delivery_id"],
                     chat_type=active["chat_type"],
                 )
-            await asyncio.wait_for(
+            platform_message_id = await asyncio.wait_for(
                 delivery,
                 timeout=self.lease_seconds * 0.8,
             )
+            if relay_message_id and platform_message_id and self.copilot is not None:
+                self.copilot.record_delivery(
+                    platform_message_id=str(platform_message_id),
+                    relay_message_id=relay_message_id,
+                    principal=Principal.from_dict(payload["recipient"]),
+                    destination=Destination(platform, destination_id, str(active["chat_type"])),
+                )
         except Exception as exc:
             renew_stop.set()
             await renewer

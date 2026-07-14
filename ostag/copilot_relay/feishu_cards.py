@@ -171,3 +171,52 @@ def render_task_proposal_card(
             )
         )
     return _card("OStag Copilot · 新任务确认", elements)
+
+
+def render_snapshot_card(session: RelaySession, envelope: RelayEnvelope) -> dict[str, Any]:
+    if envelope.kind != "assistant.snapshot" or not envelope.payload["assistant_text"]:
+        raise ValueError("snapshot card requires a non-empty assistant.snapshot")
+    elements = [
+        {"tag": "markdown", "content": _context(session)},
+        {
+            "tag": "markdown",
+            "content": "**AI 最新回复**\n" + _safe(envelope.payload["assistant_text"], 4_000),
+        },
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": "内容已按安全策略过滤"
+                    + (" · 已截断" if envelope.payload["truncated"] else ""),
+                }
+            ],
+        },
+    ]
+    return _card("OStag Copilot · 最新回复", elements)
+
+
+def render_receipt_card(session: RelaySession, envelope: RelayEnvelope) -> dict[str, Any]:
+    if envelope.kind != "delivery.receipt":
+        raise ValueError("receipt card requires delivery.receipt")
+    state = str(envelope.payload["state"])
+    labels = {
+        "queued": "已排队", "delivered": "已送达本地", "accepted": "原会话已接受",
+        "applied": "原会话已应用", "rejected": "原会话已拒绝", "expired": "已过期",
+        "indeterminate": "结果待核对",
+    }
+    elements = [
+        {"tag": "markdown", "content": _context(session)},
+        {
+            "tag": "markdown",
+            "content": f"**{labels.get(state, _safe(state, 40))}**\n"
+            + _safe(envelope.payload["summary"], 1_000),
+        },
+        {
+            "tag": "note",
+            "elements": [
+                {"tag": "plain_text", "content": "此状态仅代表消息处理，不代表代码或部署验收完成"}
+            ],
+        },
+    ]
+    return _card("OStag Copilot · 指令回执", elements)
