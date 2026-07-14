@@ -196,6 +196,60 @@ async def test_ws_monitor_task_uses_production_card_helper_and_persists_opaque_b
 
 
 @pytest.mark.asyncio
+async def test_copilot_card_runs_after_monitor_precedence_and_records_platform_binding(
+    monkeypatch,
+) -> None:
+    adapter = FeishuAdapter(Settings(dry_run=False))
+    recorded = []
+
+    class Response:
+        text = "当前任务"
+        card = {"elements": []}
+        relay_message_id = "relay-1"
+
+    class Controller:
+        def handle_event(self, event):
+            return Response()
+
+        def record_delivery(self, **kwargs):
+            recorded.append(kwargs)
+
+    class Runner:
+        copilot_relay = Controller()
+
+    async def send_card(*args, **kwargs):
+        return "feishu-card-message"
+
+    monkeypatch.setattr(adapter, "send_card", send_card)
+    event = NormalizedEvent(
+        platform="feishu", event_id="copilot", chat_id="oc", message_id="incoming",
+        sender_id="owner", text="/任务", mention_bot=True, chat_type="private",
+        destination_id="oc",
+    )
+    assert await adapter._handle_copilot(event, Runner()) is True
+    assert recorded[0]["platform_message_id"] == "feishu-card-message"
+    assert recorded[0]["relay_message_id"] == "relay-1"
+
+
+@pytest.mark.asyncio
+async def test_feishu_normalization_preserves_quoted_parent_message_id() -> None:
+    adapter = FeishuAdapter(Settings())
+    event = await adapter.normalize_event(
+        {
+            "header": {"event_id": "evt"},
+            "event": {
+                "sender": {"sender_id": {"open_id": "owner"}},
+                "message": {
+                    "message_id": "answer", "parent_id": "decision-card", "chat_id": "oc",
+                    "chat_type": "p2p", "content": '{"text":"采用 A"}',
+                },
+            },
+        }
+    )
+    assert event.quote_message_id == "decision-card"
+
+
+@pytest.mark.asyncio
 async def test_ws_rich_dispatch_leaves_watch_to_runner_once_and_replies_for_missing_task(
     monkeypatch, tmp_path: Path
 ) -> None:

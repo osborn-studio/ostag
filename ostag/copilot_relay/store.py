@@ -300,6 +300,103 @@ class RelayStore:
                 return envelope
         return None
 
+    def bind_platform_message(
+        self,
+        *,
+        platform: str,
+        platform_message_id: str,
+        relay_message_id: str,
+        destination_id: str,
+        actor_id: str,
+        created_at: str,
+    ) -> bool:
+        if self.envelope_for_message(relay_message_id) is None:
+            raise ValueError("cannot bind an unknown relay message")
+        with self.monitor_store.transaction() as connection:
+            result = connection.execute(
+                "INSERT OR IGNORE INTO relay_platform_messages(platform,platform_message_id,"
+                "relay_message_id,destination_id,actor_id,created_at) VALUES (?,?,?,?,?,?)",
+                (platform, platform_message_id, relay_message_id, destination_id, actor_id, created_at),
+            )
+            if result.rowcount == 1:
+                return True
+            row = connection.execute(
+                "SELECT relay_message_id,destination_id,actor_id FROM relay_platform_messages "
+                "WHERE platform=? AND platform_message_id=?",
+                (platform, platform_message_id),
+            ).fetchone()
+            if row is None or tuple(row) != (relay_message_id, destination_id, actor_id):
+                raise MessageConflictError("platform message binding collision")
+        return False
+
+    def relay_message_for_platform(
+        self, platform: str, platform_message_id: str, *, destination_id: str
+    ) -> str | None:
+        with self.monitor_store.connect() as connection:
+            row = connection.execute(
+                "SELECT relay_message_id FROM relay_platform_messages WHERE platform=? "
+                "AND platform_message_id=? AND destination_id=?",
+                (platform, platform_message_id, destination_id),
+            ).fetchone()
+        return None if row is None else str(row["relay_message_id"])
+
+    def create_callback(
+        self,
+        callback_id: str,
+        *,
+        action: str,
+        reference_id: str,
+        platform: str,
+        actor_id: str,
+        destination_id: str,
+        chat_type: str,
+        expires_at: int,
+    ) -> None:
+        with self.monitor_store.transaction() as connection:
+            connection.execute(
+                "INSERT INTO relay_callbacks(callback_id,action,reference_id,platform,actor_id,"
+                "destination_id,chat_type,expires_at) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    callback_id, action, reference_id, platform, actor_id,
+                    destination_id, chat_type, expires_at,
+                ),
+            )
+
+    def consume_callback(
+        self,
+        callback_id: str,
+        *,
+        platform: str,
+        actor_id: str,
+        destination_id: str,
+        chat_type: str,
+        now: int,
+    ) -> dict[str, str] | None:
+        with self.monitor_store.transaction() as connection:
+            row = connection.execute(
+                "SELECT action,reference_id,platform,actor_id,destination_id,chat_type,"
+                "expires_at,consumed_at FROM relay_callbacks WHERE callback_id=?",
+                (callback_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if (
+                row["platform"] != platform
+                or row["actor_id"] != actor_id
+                or row["destination_id"] != destination_id
+                or row["chat_type"] != chat_type
+            ):
+                return {"error": "identity_mismatch"}
+            if row["consumed_at"] is not None or int(row["expires_at"]) < now:
+                return {"error": "expired"}
+            result = connection.execute(
+                "UPDATE relay_callbacks SET consumed_at=? WHERE callback_id=? AND consumed_at IS NULL",
+                (now, callback_id),
+            )
+            if result.rowcount != 1:
+                return None
+        return {"action": str(row["action"]), "reference_id": str(row["reference_id"])}
+
     def acknowledge_messages(
         self,
         acknowledgements: tuple[tuple[str, str], ...],

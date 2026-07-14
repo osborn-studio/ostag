@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import time
 from collections.abc import Callable
+from typing import Any
 
 from fastapi import APIRouter, Request
 
@@ -34,11 +35,16 @@ def issue_feishu_callback(
 
 def create_feishu_card_router(
     service: WorkMonitorService | Callable[[], WorkMonitorService],
+    *,
+    copilot: object | Callable[[], object | None] | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
     def active() -> WorkMonitorService:
         return service() if callable(service) else service
+
+    def active_copilot() -> Any | None:
+        return copilot() if callable(copilot) else copilot
 
     def create_callback(
         principal: Principal, destination: Destination, *, action: str, task_id: str,
@@ -66,6 +72,19 @@ def create_feishu_card_router(
         if set(value) != {"callback_id"} or not isinstance(value["callback_id"], str):
             return failure_card("操作无效")
         try:
+            relay = active_copilot()
+            if value["callback_id"].startswith("cr_") and relay is not None:
+                response = relay.handle_callback(
+                    value["callback_id"],
+                    principal=verified.principal,
+                    destination=verified.destination,
+                )
+                result: dict[str, object] = {
+                    "toast": {"type": "success", "content": response.text}
+                }
+                if response.card is not None:
+                    result["card"] = response.card
+                return result
             mapped = active().store.consume_control_callback(
                 value["callback_id"], principal_platform=verified.principal.platform,
                 actor_id=verified.principal.actor_id,

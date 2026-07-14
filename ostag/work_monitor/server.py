@@ -107,6 +107,7 @@ class _Runtime:
     def __init__(self, service: WorkMonitorService | None, projector: Projector | None) -> None:
         self.service = service
         self.projector = projector
+        self.copilot: object | None = None
 
 
 async def _supervise(owner: LifespanOwner, stop: asyncio.Event, backoff: tuple[float, ...]) -> None:
@@ -166,6 +167,24 @@ def create_app(
                 human_credentials=configured.monitor_human_credentials_dict(),
                 admin_token=configured.monitor_admin_token,
             )
+        if runtime.copilot is None and auth is not None:
+            owner = next(
+                (
+                    credential.principal
+                    for credential in (auth.human_credentials or {}).values()
+                    if runtime.service.identities.is_global_owner(credential.principal)
+                ),
+                None,
+            )
+            if owner is not None:
+                from ostag.copilot_relay.feishu_routes import CopilotFeishuController
+                from ostag.copilot_relay.policy import RelayPolicy
+                from ostag.copilot_relay.service import CopilotRelayService
+                from ostag.copilot_relay.store import RelayStore
+
+                runtime.copilot = CopilotFeishuController(
+                    CopilotRelayService(RelayStore(runtime.service.store), RelayPolicy(owner))
+                )
         if (
             feishu_ws is None
             and auto_feishu_ws is None
@@ -177,7 +196,9 @@ def create_app(
             from ostag.core.runner import OSTagRunner
 
             assert runtime.service is not None
-            runner = OSTagRunner(configured, work_monitor=runtime.service)
+            runner = OSTagRunner(
+                configured, work_monitor=runtime.service, copilot_relay=runtime.copilot
+            )
             auto_feishu_ws = FeishuAdapter(configured, runner=runner)
         if scheduler is None and auto_scheduler is None and configured.monitor_scheduler_enabled:
             from ostag.adapters.feishu import FeishuAdapter
@@ -281,6 +302,9 @@ def create_app(
             raise HTTPException(status_code=503, detail="service not started")
         return runtime.service
 
+    def active_copilot() -> object | None:
+        return runtime.copilot
+
     if all(
         (
             configured.feishu_app_id,
@@ -301,7 +325,7 @@ def create_app(
         )
         register_feishu_card_router(
             app,
-            create_feishu_card_router(active_service),
+            create_feishu_card_router(active_service, copilot=active_copilot),
             security=SecurityContract("verified_platform", card_security),
         )
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from ostag.backends.base import Backend, BackendError
 from ostag.backends.factory import create_backend
 from ostag.config import Settings
@@ -37,6 +39,7 @@ class OSTagRunner:
         run_ledger: RunLedger | None = None,
         approvals: ApprovalService | None = None,
         work_monitor: WorkMonitorService | None = None,
+        copilot_relay: Any | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
@@ -50,6 +53,7 @@ class OSTagRunner:
         self.approvals = approvals or ApprovalService(config, self.run_ledger, executors)
         self.budget = BudgetService(config, self.run_ledger)
         self.work_monitor = work_monitor
+        self.copilot_relay = copilot_relay
         # Run id of the most recent handled event; set by handle_event so CLI
         # callers can report which run their submission created.
         self.last_run_id = ""
@@ -111,6 +115,11 @@ class OSTagRunner:
         # adapter-derived actor and destination fields.
         if self.work_monitor is not None and parse_monitor_command(event.text) is not None:
             return self.work_monitor.handle_event(event)
+
+        if self.copilot_relay is not None and event.platform == "feishu":
+            response = self.copilot_relay.handle_event(event)
+            if response is not None:
+                return response.text
 
         run = self.run_ledger.open_run(event, executor_id=self.config.backend)
         self.last_run_id = run.run_id

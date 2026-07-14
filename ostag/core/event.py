@@ -21,6 +21,7 @@ class NormalizedEvent:
     chat_type: ChatType
     destination_id: str
     thread_id: str | None = None
+    quote_message_id: str | None = None
     raw: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:

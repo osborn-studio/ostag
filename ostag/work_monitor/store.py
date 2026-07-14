@@ -184,6 +184,12 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS relay_instance_cursors (instance_id TEXT PRIMARY KEY,last_sequence INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT '')",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS relay_platform_messages (platform TEXT NOT NULL,platform_message_id TEXT NOT NULL,relay_message_id TEXT NOT NULL,destination_id TEXT NOT NULL,actor_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(platform,platform_message_id))",
+            "CREATE TABLE IF NOT EXISTS relay_callbacks (callback_id TEXT PRIMARY KEY,action TEXT NOT NULL,reference_id TEXT NOT NULL,platform TEXT NOT NULL,actor_id TEXT NOT NULL,destination_id TEXT NOT NULL,chat_type TEXT NOT NULL,expires_at INTEGER NOT NULL,consumed_at INTEGER)",
+        )
+    ),
 )
 
 

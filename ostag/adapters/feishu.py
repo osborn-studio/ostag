@@ -177,6 +177,8 @@ class FeishuAdapter:
         event = await self.normalize_event(raw)
         if await self._handle_monitor_card(event, runner):
             return
+        if await self._handle_copilot(event, runner):
+            return
         reply = await runner.handle_event(event)
         if reply:
             await self.reply(event, reply)
@@ -243,6 +245,36 @@ class FeishuAdapter:
         )
         return True
 
+    async def _handle_copilot(self, event: NormalizedEvent, runner: Any) -> bool:
+        controller = getattr(runner, "copilot_relay", None)
+        if controller is None:
+            return False
+        response = controller.handle_event(event)
+        if response is None:
+            return False
+        if response.card is not None:
+            recipient_id = event.sender_id if event.chat_type == "private" else event.destination_id
+            platform_message_id = await self.send_card(
+                recipient_id,
+                response.card,
+                response.text,
+                chat_type=event.chat_type,
+                delivery_id=f"copilot-{event.event_id or event.message_id}",
+            )
+            if platform_message_id and response.relay_message_id:
+                from ostag.core.identity import Principal
+                from ostag.work_monitor.identity import Destination
+
+                controller.record_delivery(
+                    platform_message_id=platform_message_id,
+                    relay_message_id=response.relay_message_id,
+                    principal=Principal("feishu", event.sender_id),
+                    destination=Destination("feishu", event.destination_id, event.chat_type),
+                )
+        elif response.text:
+            await self.reply(event, response.text)
+        return True
+
     async def normalize_event(self, raw_event: dict[str, Any]) -> NormalizedEvent:
         event = raw_event.get("event", raw_event)
         header = raw_event.get("header", {})
@@ -277,6 +309,7 @@ class FeishuAdapter:
             chat_type=chat_type,
             destination_id=chat_id,
             thread_id=message.get("thread_id") or message.get("root_id"),
+            quote_message_id=message.get("parent_id") or event.get("parent_id"),
             raw=raw_event,
         )
 
@@ -361,11 +394,11 @@ class FeishuAdapter:
         *,
         chat_type: str = "group",
         delivery_id: str,
-    ) -> None:
+    ) -> str | None:
         """Proactively deliver an interactive card, falling back to plain text."""
         if self.config.dry_run:
             print(fallback_text)
-            return
+            return None
         receive_id_type = "open_id" if chat_type == "private" else "chat_id"
         token = await self._tenant_access_token()
         payload = json.dumps(
@@ -391,10 +424,13 @@ class FeishuAdapter:
             response = await asyncio.to_thread(_urlopen_json, req)
             if response.get("code", 0) != 0:
                 raise RuntimeError("Feishu rejected interactive card")
+            data = response.get("data") or {}
+            return str(data.get("message_id") or "") or None
         except (RuntimeError, TimeoutError):
             await self.send_message(
                 destination_id, fallback_text, chat_type=chat_type, delivery_id=delivery_id
             )
+            return None
 
     async def _tenant_access_token(self) -> str:
         body = json.dumps(
