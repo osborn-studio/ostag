@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
+
+import pytest
 
 from ostag.config import load_settings
 from ostag.core.ambient import (
@@ -54,9 +56,14 @@ class CapturingAmbientAdapter:
 
     def __init__(self):
         self.sent = []
+        self.cards = []
 
     async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.sent.append((chat_id, text))
+
+    async def send_card(self, chat_id: str, card: dict, fallback: str, *, delivery_id: str) -> None:
+        assert delivery_id
+        self.cards.append((chat_id, card))
 
 
 def test_ambient_monitor_is_disabled_by_default(tmp_path: Path) -> None:
@@ -703,3 +710,100 @@ async def test_ambient_scheduler_is_disabled_by_config(tmp_path: Path, monkeypat
 
     assert result.sent == 0
     assert result.skipped == 1
+
+
+def daily_board_config(tmp_path: Path):
+    return load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        ambient_enabled=True,
+        ambient_chat_ids=("oc_demo",),
+        ambient_daily_board_enabled=True,
+        ambient_daily_board_hour=12,
+        ambient_daily_board_window_minutes=60,
+        ambient_timezone="Asia/Shanghai",
+        ambient_daily_board_group_name="Dadao 投研交易 FDE",
+        ambient_daily_board_base_url="https://example.feishu.cn/base/demo?table=tblDemo",
+        auto_base_default_base_token="base_demo",
+        auto_base_default_table_id="tblDemo",
+    )
+
+
+def daily_board_store(config, tmp_path: Path):
+    store = ChannelBrainStore(config, root=tmp_path)
+    store.save(ChannelBrain(platform="feishu", chat_id="oc_demo",
+                            policy=ChannelPolicy(ambient_enabled=True)))
+    return store
+
+
+async def test_daily_board_sends_on_weekend_shanghai_noon_and_persists_idempotency(tmp_path: Path):
+    config = daily_board_config(tmp_path)
+    store = daily_board_store(config, tmp_path)
+    adapter = CapturingAmbientAdapter()
+    connector = FakeRequirementConnector({"data": {"records": []}})
+    def saturday_noon():
+        return datetime(2026, 7, 18, 4, 5, tzinfo=UTC)
+
+    first = await AmbientScheduler(config, adapter=adapter, channel_brain_store=store,
+                                   requirement_connector=connector, now=saturday_noon).run_once()
+    second = await AmbientScheduler(config, adapter=adapter, channel_brain_store=store,
+                                    requirement_connector=connector, now=saturday_noon).run_once()
+
+    assert first.sent == 1 and first.errors == 0
+    assert second.sent == 0
+    assert len(adapter.cards) == 1
+    assert "12:00（北京时间）" in str(adapter.cards[0][1])
+    assert store.load("feishu", "oc_demo").action_counts["daily_board:2026-07-18"] == 1
+
+
+async def test_daily_board_skips_before_shanghai_noon(tmp_path: Path):
+    config = daily_board_config(tmp_path)
+    adapter = CapturingAmbientAdapter()
+    result = await AmbientScheduler(
+        config, adapter=adapter, channel_brain_store=daily_board_store(config, tmp_path),
+        requirement_connector=FakeRequirementConnector({"data": {"records": []}}),
+        now=lambda: datetime(2026, 7, 18, 3, 59, tzinfo=UTC),
+    ).run_once()
+    assert result.sent == 0
+    assert adapter.cards == []
+
+
+async def test_daily_board_failure_retries_without_success_marker(tmp_path: Path):
+    class FlakyAdapter(CapturingAmbientAdapter):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        async def send_card(
+            self, chat_id: str, card: dict, fallback: str, *, delivery_id: str
+        ) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("temporary send failure")
+            await super().send_card(chat_id, card, fallback, delivery_id=delivery_id)
+
+    config = daily_board_config(tmp_path)
+    store = daily_board_store(config, tmp_path)
+    adapter = FlakyAdapter()
+    scheduler = AmbientScheduler(
+        config, adapter=adapter, channel_brain_store=store,
+        requirement_connector=FakeRequirementConnector({"data": {"records": []}}),
+        now=lambda: datetime(2026, 7, 18, 4, 5, tzinfo=UTC),
+    )
+
+    first = await scheduler.run_once()
+    assert first.errors == 1
+    assert "daily_board:2026-07-18" not in store.load("feishu", "oc_demo").action_counts
+    second = await scheduler.run_once()
+    assert second.sent == 1 and adapter.attempts == 2
+
+
+def test_daily_board_settings_validate_hour_window_and_timezone(tmp_path: Path):
+    with pytest.raises(ValueError, match="HOUR"):
+        load_settings(None, audit_log=tmp_path / "audit.log", ambient_daily_board_hour=24)
+    with pytest.raises(ValueError, match="WINDOW"):
+        load_settings(None, audit_log=tmp_path / "audit.log",
+                      ambient_daily_board_window_minutes=0)
+    with pytest.raises(ValueError, match="TIMEZONE"):
+        load_settings(None, audit_log=tmp_path / "audit.log",
+                      ambient_timezone="Mars/Olympus")

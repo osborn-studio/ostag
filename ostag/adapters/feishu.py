@@ -432,30 +432,6 @@ class FeishuAdapter:
             )
             return None
 
-    async def send_card(self, chat_id: str, card: dict[str, Any]) -> None:
-        if self.config.dry_run:
-            print(json.dumps(card, ensure_ascii=False))
-            return
-        token = await self._tenant_access_token()
-        payload = json.dumps(
-            {
-                "receive_id": chat_id,
-                "msg_type": "interactive",
-                "content": json.dumps(card, ensure_ascii=False),
-            }
-        ).encode()
-        url = f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type=chat_id"
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-        )
-        await asyncio.to_thread(_urlopen_json, req)
-
     async def _tenant_access_token(self) -> str:
         body = json.dumps(
             {

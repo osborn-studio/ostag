@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
-from ostag.adapters.base import Adapter
+from ostag.adapters.base import Adapter, StructuredCardAdapter
+from ostag.adapters.feishu_cards import render_requirement_board_card
 from ostag.config import Settings
 from ostag.connectors.requirements import (
     DwsCLI,
@@ -20,7 +22,11 @@ from ostag.core.followups import FollowUpService
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import LedgerEvent, new_id
 from ostag.core.logging import write_audit_log
-from ostag.core.requirement_board import RequirementSnapshot
+from ostag.core.requirement_board import (
+    RequirementSnapshot,
+    analyze_daily_requirement_board,
+    format_daily_requirement_board_text,
+)
 from ostag.workflows.auto_base import LarkCLI, cell_to_text, extract_matching_records
 
 
@@ -218,8 +224,8 @@ class AmbientScheduler:
         self.store = channel_brain_store or ChannelBrainStore(config)
         self.requirements = requirement_connector or _requirement_connector_for_platform(config)
         self.monitor = AmbientMonitor(self.store)
-        self.now = now or datetime.now
-        self.today = today or (lambda: self.now().date())
+        self.now = now or (lambda: datetime.now(UTC))
+        self.today = today or (lambda: self._local_now().date())
         self.followups = FollowUpService(config, RunLedger(config.run_ledger_path))
 
     async def run_forever(self) -> None:
@@ -265,6 +271,31 @@ class AmbientScheduler:
                     limit=self.config.ambient_record_limit,
                 )
                 snapshots = snapshots_from_records(data)
+                if self.config.ambient_daily_board_enabled and self._daily_board_window_open():
+                    local_today = self._local_now().date()
+                    if not self._daily_board_sent(chat_id, local_today):
+                        board = analyze_daily_requirement_board(snapshots, today=local_today)
+                        card = render_requirement_board_card(
+                            board,
+                            group_name=self.config.ambient_daily_board_group_name,
+                            base_url=self.config.ambient_daily_board_base_url,
+                        )
+                        text = format_daily_requirement_board_text(board)
+                        if isinstance(self.adapter, StructuredCardAdapter):
+                            await self.adapter.send_card(
+                                chat_id,
+                                card,
+                                text,
+                                delivery_id=_delivery_id(chat_id, text),
+                            )
+                        else:
+                            await self.adapter.send_message(
+                                chat_id, text, delivery_id=_delivery_id(chat_id, text)
+                            )
+                        self._record_daily_board(chat_id, local_today)
+                        sent += 1
+                        self._audit(chat_id, text, status="ok")
+                    continue
                 digest = self._due_daily_digest(chat_id, snapshots)
                 if digest:
                     await self.adapter.send_message(
@@ -304,7 +335,42 @@ class AmbientScheduler:
                 self._audit(chat_id, "", status="error", error=f"{type(exc).__name__}: {exc}")
         return AmbientRunResult(checked=checked, sent=sent, skipped=skipped, errors=errors)
 
-    def _due_daily_digest(self, chat_id: str, snapshots: list[RequirementSnapshot]) -> str | None:
+    def _local_now(self) -> datetime:
+        moment = self.now()
+        zone = ZoneInfo(self.config.ambient_timezone)
+        if moment.tzinfo is None:
+            return moment.replace(tzinfo=zone)
+        return moment.astimezone(zone)
+
+    def _daily_board_window_open(self) -> bool:
+        local = self._local_now()
+        minute = local.hour * 60 + local.minute
+        start = self.config.ambient_daily_board_hour * 60
+        return start <= minute < start + self.config.ambient_daily_board_window_minutes
+
+    def _daily_board_sent(self, chat_id: str, today: date) -> bool:
+        brain = self.store.load(self.config.platform, chat_id)
+        return int(brain.action_counts.get(f"daily_board:{today.isoformat()}", 0)) > 0
+
+    def _record_daily_board(self, chat_id: str, today: date) -> None:
+        brain = self.store.load(self.config.platform, chat_id)
+        counts = dict(brain.action_counts)
+        counts[f"daily_board:{today.isoformat()}"] = 1
+        self.store.save(
+            type(brain)(
+                platform=brain.platform,
+                chat_id=brain.chat_id,
+                facts=brain.facts,
+                preferences=brain.preferences,
+                policy=brain.policy,
+                action_counts=counts,
+                updated_at=brain.updated_at,
+            )
+        )
+
+    def _due_daily_digest(
+        self, chat_id: str, snapshots: list[RequirementSnapshot]
+    ) -> str | None:
         kind = self._digest_kind_due()
         if not kind:
             return None

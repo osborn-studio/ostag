@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     from dotenv import load_dotenv
@@ -157,6 +158,12 @@ class Settings:
     ambient_stale_days: int = 7
     ambient_suppress_days: int = 3
     ambient_max_decisions: int = 3
+    ambient_daily_board_enabled: bool = False
+    ambient_daily_board_hour: int = 12
+    ambient_daily_board_window_minutes: int = 60
+    ambient_timezone: str = "Asia/Shanghai"
+    ambient_daily_board_group_name: str = "Dadao 投研交易 FDE"
+    ambient_daily_board_base_url: str = ""
     monitor_enabled: bool = False
     monitor_instance_id: str = "local"
     monitor_instance_secret: str = ""
@@ -207,6 +214,14 @@ class Settings:
     daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
     def validate(self) -> Settings:
+        if not 0 <= self.ambient_daily_board_hour <= 23:
+            raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_HOUR must be between 0 and 23")
+        if self.ambient_daily_board_window_minutes <= 0:
+            raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_WINDOW_MINUTES must be positive")
+        try:
+            ZoneInfo(self.ambient_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Invalid OSTAG_AMBIENT_TIMEZONE: {self.ambient_timezone}") from exc
         if (
             not 0 <= self.monitor_morning_digest_hour <= 23
             or not 0 <= self.monitor_evening_digest_hour <= 23
@@ -294,8 +309,6 @@ class Settings:
             )
             for token, platform, actor, destination, chat_type in self.monitor_human_credentials
         }
-
-
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
     if load_dotenv:
         load_dotenv(config_path or ".env", override=False)
@@ -396,6 +409,14 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         ambient_stale_days=_int("OSTAG_AMBIENT_STALE_DAYS", 7),
         ambient_suppress_days=_int("OSTAG_AMBIENT_SUPPRESS_DAYS", 3),
         ambient_max_decisions=_int("OSTAG_AMBIENT_MAX_DECISIONS", 3),
+        ambient_daily_board_enabled=_bool("OSTAG_AMBIENT_DAILY_BOARD_ENABLED", False),
+        ambient_daily_board_hour=_int("OSTAG_AMBIENT_DAILY_BOARD_HOUR", 12),
+        ambient_daily_board_window_minutes=_int("OSTAG_AMBIENT_DAILY_BOARD_WINDOW_MINUTES", 60),
+        ambient_timezone=os.getenv("OSTAG_AMBIENT_TIMEZONE", "Asia/Shanghai"),
+        ambient_daily_board_group_name=os.getenv(
+            "OSTAG_AMBIENT_DAILY_BOARD_GROUP_NAME", "Dadao 投研交易 FDE"
+        ).strip('"'),
+        ambient_daily_board_base_url=os.getenv("OSTAG_AMBIENT_DAILY_BOARD_BASE_URL", ""),
         monitor_enabled=_bool("OSTAG_MONITOR_ENABLED", False),
         monitor_instance_id=os.getenv("OSTAG_MONITOR_INSTANCE_ID", "local"),
         monitor_instance_secret=os.getenv("OSTAG_MONITOR_INSTANCE_SECRET", ""),

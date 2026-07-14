@@ -30,5 +30,12 @@ class Adapter(Protocol):
 
 @runtime_checkable
 class StructuredCardAdapter(Protocol):
-    async def send_card(self, chat_id: str, card: dict[str, Any]) -> None:
+    async def send_card(
+        self,
+        destination_id: str,
+        card: dict[str, Any],
+        fallback_text: str,
+        *,
+        delivery_id: str,
+    ) -> str | None:
         """Send a native structured card to a chat."""

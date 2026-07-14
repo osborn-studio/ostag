@@ -334,13 +334,14 @@ async def test_feishu_send_card_uses_interactive_message(monkeypatch, tmp_path: 
     monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
     card = {"schema": "2.0", "body": {"elements": []}}
 
-    await adapter.send_card("oc_demo", card)
+    await adapter.send_card("oc_demo", card, "fallback", delivery_id="daily-board-1")
 
     payload = json.loads(captured["body"].decode())
     assert payload["receive_id"] == "oc_demo"
     assert payload["msg_type"] == "interactive"
     assert json.loads(payload["content"]) == card
     assert "receive_id_type=chat_id" in captured["url"]
+    assert "uuid=daily-board-1" in captured["url"]
     assert isinstance(adapter, StructuredCardAdapter)
 
 
