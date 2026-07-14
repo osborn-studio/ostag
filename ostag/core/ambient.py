@@ -234,6 +234,14 @@ class AmbientScheduler:
             await asyncio.sleep(max(60, self.config.ambient_interval_seconds))
 
     async def run_once(self) -> AmbientRunResult:
+        return await self._run_once()
+
+    async def run_daily_board_once(self, *, force: bool = True) -> AmbientRunResult:
+        return await self._run_once(force_daily_board=force, board_only=True)
+
+    async def _run_once(
+        self, *, force_daily_board: bool = False, board_only: bool = False
+    ) -> AmbientRunResult:
         if self.config.followup_enabled:
             try:
                 async def send_followup(chat_id: str, message: str) -> None:
@@ -271,7 +279,10 @@ class AmbientScheduler:
                     limit=self.config.ambient_record_limit,
                 )
                 snapshots = snapshots_from_records(data)
-                if self.config.ambient_daily_board_enabled and self._daily_board_window_open():
+                board_due = self.config.ambient_daily_board_enabled and (
+                    force_daily_board or self._daily_board_window_open()
+                )
+                if board_due:
                     local_today = self._local_now().date()
                     if not self._daily_board_sent(chat_id, local_today):
                         board = analyze_daily_requirement_board(snapshots, today=local_today)
@@ -295,6 +306,9 @@ class AmbientScheduler:
                         self._record_daily_board(chat_id, local_today)
                         sent += 1
                         self._audit(chat_id, text, status="ok")
+                    continue
+                if board_only:
+                    skipped += 1
                     continue
                 digest = self._due_daily_digest(chat_id, snapshots)
                 if digest:

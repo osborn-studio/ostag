@@ -187,6 +187,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ambient_run.add_argument("--json", action="store_true")
     ambient_run.add_argument("--config")
+    ambient_board = ambient_sub.add_parser(
+        "board-once", help="Build the daily requirement board now. Dry by default."
+    )
+    ambient_board.add_argument(
+        "--send", action="store_true", help="Actually send the card via the platform adapter."
+    )
+    ambient_board.add_argument("--json", action="store_true")
+    ambient_board.add_argument("--config")
 
     budget = subparsers.add_parser("budget", help="Cost budget inspection.")
     budget_sub = budget.add_subparsers(dest="budget_command", required=True)
@@ -588,9 +596,13 @@ class _CollectingAdapter:
 
     def __init__(self) -> None:
         self.messages: list[dict[str, str]] = []
+        self.cards: list[dict[str, object]] = []
 
     async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.messages.append({"chat_id": chat_id, "text": text})
+
+    async def send_card(self, chat_id: str, card: dict) -> None:
+        self.cards.append({"chat_id": chat_id, "card": card})
 
 
 async def run_ambient_command(args: argparse.Namespace) -> int:
@@ -601,7 +613,10 @@ async def run_ambient_command(args: argparse.Namespace) -> int:
     else:
         adapter = _CollectingAdapter()
     scheduler = AmbientScheduler(config, adapter=adapter)
-    result = await scheduler.run_once()
+    if args.ambient_command == "board-once":
+        result = await scheduler.run_daily_board_once(force=True)
+    else:
+        result = await scheduler.run_once()
     payload: dict[str, object] = {
         "checked": result.checked,
         "sent": result.sent,
@@ -611,6 +626,7 @@ async def run_ambient_command(args: argparse.Namespace) -> int:
     }
     if isinstance(adapter, _CollectingAdapter):
         payload["messages"] = adapter.messages
+        payload["cards"] = adapter.cards
     _emit(payload, as_json=as_json)
     return 0 if result.errors == 0 else 1
 
