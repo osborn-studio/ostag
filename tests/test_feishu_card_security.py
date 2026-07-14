@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 
@@ -129,6 +130,49 @@ def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
         tampered = b'{"encrypt":"changed"}'
         assert client.post("/callback", content=tampered, headers=_headers(body)).status_code == 401
     assert calls == []
+
+
+def test_bad_signature_emits_safe_transport_diagnostics_only(tmp_path, caplog) -> None:
+    body = b'{"encrypt":"TOP-SECRET-CIPHERTEXT"}'
+    security = FeishuCardSecurity(
+        encrypt_key="TOP-SECRET-ENCRYPT-KEY",
+        verification_token="TOP-SECRET-VERIFY-TOKEN",
+        expected_app_id="app",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"),
+    )
+    headers = {
+        "X-Lark-Request-Timestamp": "1700000000-SECRET",
+        "X-Lark-Request-Nonce": "TOP-SECRET-NONCE",
+        "X-Lark-Signature": "TOP-SECRET-SIGNATURE",
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Encoding": "identity",
+    }
+
+    with caplog.at_level("WARNING", logger="ostag.work_monitor.feishu_card_security"):
+        with TestClient(_app(security)) as client:
+            response = client.post("/callback", content=body, headers=headers)
+
+    assert response.status_code == 401
+    diagnostic = caplog.text
+    assert "feishu_signature_mismatch" in diagnostic
+    assert '"timestamp_present": true' in diagnostic
+    assert '"timestamp_length": 17' in diagnostic
+    assert '"nonce_present": true' in diagnostic
+    assert '"nonce_length": 16' in diagnostic
+    assert '"signature_present": true' in diagnostic
+    assert '"signature_length": 20' in diagnostic
+    assert f'"body_length": {len(body)}' in diagnostic
+    assert f'"body_sha256": "{hashlib.sha256(body).hexdigest()[:16]}"' in diagnostic
+    assert '"content_encoding": "identity"' in diagnostic
+    assert '"content_type": "application/json"' in diagnostic
+    assert '"body_has_gzip_magic": false' in diagnostic
+    assert '"verification_token_key_matches": false' in diagnostic
+    for secret in (
+        body.decode(), "TOP-SECRET-CIPHERTEXT", "1700000000-SECRET",
+        "TOP-SECRET-NONCE", "TOP-SECRET-SIGNATURE", "TOP-SECRET-ENCRYPT-KEY",
+        "TOP-SECRET-VERIFY-TOKEN",
+    ):
+        assert secret not in diagnostic
 
 
 def test_signature_is_checked_before_json_and_real_router_has_no_side_effects(tmp_path) -> None:

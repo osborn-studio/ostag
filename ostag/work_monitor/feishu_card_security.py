@@ -6,6 +6,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
@@ -16,6 +17,9 @@ from ostag.core.identity import Principal
 
 from .identity import Destination
 from .store import MonitorStore
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,37 @@ class FeishuCardSecurity:
             raise HTTPException(401, "FEISHU_ENCRYPT_KEY is required for card callbacks")
         expected = feishu_signature(timestamp, nonce, self.encrypt_key, body)
         if not timestamp or not nonce or not hmac.compare_digest(supplied, expected):
+            verification_expected = feishu_signature(
+                timestamp, nonce, self.verification_token, body
+            ) if self.verification_token else ""
+            content_encoding = request.headers.get("content-encoding", "").lower().strip()
+            if content_encoding not in {"identity", "gzip", "br", "deflate"}:
+                content_encoding = "other" if content_encoding else "absent"
+            content_type = request.headers.get("content-type", "").lower().split(";", 1)[0].strip()
+            if content_type not in {"application/json", "application/octet-stream"}:
+                content_type = "other" if content_type else "absent"
+            diagnostic = {
+                "body_has_gzip_magic": body.startswith(b"\x1f\x8b"),
+                "body_length": len(body),
+                "body_sha256": hashlib.sha256(body).hexdigest()[:16],
+                "content_encoding": content_encoding,
+                "content_type": content_type,
+                "nonce_length": len(nonce),
+                "nonce_present": bool(nonce),
+                "signature_length": len(supplied),
+                "signature_present": bool(supplied),
+                "timestamp_length": len(timestamp),
+                "timestamp_present": bool(timestamp),
+                "transfer_encoding_present": "transfer-encoding" in request.headers,
+                "verification_token_key_matches": bool(
+                    supplied and verification_expected
+                    and hmac.compare_digest(supplied, verification_expected)
+                ),
+            }
+            logger.warning(
+                "feishu_signature_mismatch %s",
+                json.dumps(diagnostic, sort_keys=True),
+            )
             raise HTTPException(401, "invalid Feishu callback signature")
 
         # 3. Enforce freshness and persist replay state before decrypting.
