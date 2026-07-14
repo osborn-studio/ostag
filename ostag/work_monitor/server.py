@@ -458,6 +458,15 @@ def create_app(
         dependencies()
         return {"status": "ok"}
 
+    from ostag.copilot_relay.routes import create_copilot_router
+
+    app.include_router(
+        create_copilot_router(
+            dependencies=lambda: (dependencies()[0], dependencies()[2]),
+            bounded_body=bounded_body,
+        )
+    )
+
     for extension in routers:
         if not isinstance(extension, tuple) or len(extension) != 2:
             raise ValueError("router registration requires an explicit security contract")

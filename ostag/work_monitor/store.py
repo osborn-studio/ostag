@@ -179,6 +179,11 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS relay_task_proposals (proposal_id TEXT PRIMARY KEY, platform TEXT NOT NULL, actor_id TEXT NOT NULL, payload_json TEXT NOT NULL, state TEXT NOT NULL, expires_at TEXT NOT NULL, confirmed_at TEXT NOT NULL DEFAULT '')",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS relay_instance_cursors (instance_id TEXT PRIMARY KEY,last_sequence INTEGER NOT NULL DEFAULT 0,updated_at TEXT NOT NULL DEFAULT '')",
+        )
+    ),
 )
 
 

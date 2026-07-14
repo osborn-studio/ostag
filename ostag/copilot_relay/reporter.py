@@ -70,9 +70,15 @@ class CopilotReporter:
                     next_attempt_at TEXT NOT NULL DEFAULT '');
                 CREATE TABLE IF NOT EXISTS relay_inbound(
                     message_id TEXT PRIMARY KEY,payload TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',
-                    applied_at TEXT NOT NULL DEFAULT '',last_error TEXT NOT NULL DEFAULT '');
+                    applied_at TEXT NOT NULL DEFAULT '',acked_at TEXT NOT NULL DEFAULT '',
+                    last_error TEXT NOT NULL DEFAULT '');
                 """
             )
+            columns = {row[1] for row in db.execute("PRAGMA table_info(relay_inbound)")}
+            if "acked_at" not in columns:
+                db.execute(
+                    "ALTER TABLE relay_inbound ADD COLUMN acked_at TEXT NOT NULL DEFAULT ''"
+                )
 
     @staticmethod
     def _dump(value: object) -> str:
@@ -282,7 +288,7 @@ class CopilotReporter:
     async def poll_inbound_once(self) -> int:
         body = b"{}"
         try:
-            response = self._request("/v1/copilot/poll", body)
+            response = self._request("/v1/copilot/messages/poll", body)
         except OSError:
             return 0
         if not 200 <= response.status < 300:
@@ -428,4 +434,41 @@ class CopilotReporter:
             self._insert_outbound(db, receipt)
 
     async def flush_receipts_once(self) -> int:
-        return await self.flush_outbound_once()
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT message_id,payload FROM relay_inbound "
+                "WHERE state IN ('applied','expired') AND acked_at='' ORDER BY rowid LIMIT 100"
+            ).fetchall()
+        if not rows:
+            return 0
+        acks = [
+            {
+                "message_id": str(row["message_id"]),
+                "payload_hash": hashlib.sha256(str(row["payload"]).encode()).hexdigest(),
+            }
+            for row in rows
+        ]
+        body = self._dump({"acks": acks}).encode()
+        try:
+            response = self._request("/v1/copilot/messages/ack", body)
+        except OSError:
+            return 0
+        if not 200 <= response.status < 300:
+            return 0
+        try:
+            result = json.loads(response.body)
+            acked = result["acked"]
+            if not isinstance(acked, list) or any(not isinstance(item, str) for item in acked):
+                raise ValueError
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            return 0
+        allowed = {str(row["message_id"]) for row in rows}
+        if not set(acked) <= allowed:
+            return 0
+        with self._connect() as db:
+            for message_id in acked:
+                db.execute(
+                    "UPDATE relay_inbound SET acked_at=? WHERE message_id=? AND acked_at=''",
+                    (self._utc(), message_id),
+                )
+        return len(acked)

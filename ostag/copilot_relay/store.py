@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -105,6 +107,30 @@ class RelayStore:
             row = connection.execute("SELECT COUNT(*) AS count FROM relay_messages").fetchone()
         return int(row["count"])
 
+    def instance_cursor(self, instance_id: str) -> int:
+        with self.monitor_store.connect() as connection:
+            row = connection.execute(
+                "SELECT last_sequence FROM relay_instance_cursors WHERE instance_id=?",
+                (instance_id,),
+            ).fetchone()
+        return 0 if row is None else int(row["last_sequence"])
+
+    def advance_instance_cursor(
+        self, instance_id: str, expected: int, new_value: int, *, updated_at: str
+    ) -> bool:
+        with self.monitor_store.transaction() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO relay_instance_cursors(instance_id,last_sequence,updated_at) "
+                "VALUES (?,0,?)",
+                (instance_id, updated_at),
+            )
+            result = connection.execute(
+                "UPDATE relay_instance_cursors SET last_sequence=?,updated_at=? "
+                "WHERE instance_id=? AND last_sequence=?",
+                (new_value, updated_at, instance_id, expected),
+            )
+        return result.rowcount == 1
+
     def binding_for_message(self, message_id: str) -> SessionBinding | None:
         with self.monitor_store.connect() as connection:
             row = connection.execute(
@@ -127,17 +153,27 @@ class RelayStore:
         now: str,
         lease_until: str,
         limit: int = 100,
+        instance_id: str | None = None,
     ) -> tuple[LeasedMessage, ...]:
         if direction not in {"inbound", "outbound"}:
             raise ValueError("direction must be inbound or outbound")
         if not 1 <= limit <= 200:
             raise ValueError("limit must be between 1 and 200")
         with self.monitor_store.transaction() as connection:
+            instance_clause = (
+                " AND json_extract(binding_json,'$.instance_id')=?" if instance_id else ""
+            )
+            parameters: tuple[object, ...] = (direction, now, now)
+            if instance_id:
+                parameters += (instance_id,)
+            parameters += (limit,)
             rows = connection.execute(
                 "SELECT message_id FROM relay_messages WHERE direction=? "
                 "AND state IN ('pending','leased') AND next_attempt_at<=? "
-                "AND (state='pending' OR lease_until<=?) ORDER BY created_at,message_id LIMIT ?",
-                (direction, now, now, limit),
+                "AND (state='pending' OR lease_until<=?)"
+                + instance_clause
+                + " ORDER BY created_at,message_id LIMIT ?",
+                parameters,
             ).fetchall()
             ids = [row["message_id"] for row in rows]
             for message_id in ids:
@@ -237,6 +273,81 @@ class RelayStore:
                 (instance_id, session_id),
             ).fetchone()
         return None if row is None else RelaySession(**dict(row))
+
+    def list_sessions(self, instance_ids: frozenset[str] | None = None) -> tuple[RelaySession, ...]:
+        with self.monitor_store.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM relay_sessions ORDER BY updated_at DESC,instance_id,session_id"
+            ).fetchall()
+        sessions = tuple(RelaySession(**dict(row)) for row in rows)
+        return sessions if instance_ids is None else tuple(
+            session for session in sessions if session.instance_id in instance_ids
+        )
+
+    def latest_snapshot(self, instance_id: str, session_id: str) -> RelayEnvelope | None:
+        with self.monitor_store.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM relay_messages WHERE direction='inbound' "
+                "AND kind='assistant.snapshot' ORDER BY created_at DESC,rowid DESC"
+            ).fetchall()
+        for row in rows:
+            envelope = RelayEnvelope.from_dict(json.loads(row["payload_json"]))
+            if (
+                envelope.binding.instance_id == instance_id
+                and envelope.binding.session_id == session_id
+                and envelope.payload["assistant_text"] != ""
+            ):
+                return envelope
+        return None
+
+    def acknowledge_messages(
+        self,
+        acknowledgements: tuple[tuple[str, str], ...],
+        *,
+        owner: str,
+        delivered_at: str,
+    ) -> tuple[str, ...]:
+        """Atomically validate and acknowledge an instance's leased messages."""
+        if not acknowledgements:
+            return ()
+        if len({message_id for message_id, _ in acknowledgements}) != len(acknowledgements):
+            raise MessageConflictError("duplicate message_id in acknowledgement batch")
+        with self.monitor_store.transaction() as connection:
+            rows = {}
+            for message_id, _ in acknowledgements:
+                row = connection.execute(
+                    "SELECT payload_json,state,lease_owner FROM relay_messages WHERE message_id=? "
+                    "AND direction='outbound'",
+                    (message_id,),
+                ).fetchone()
+                if row is None or row["state"] != "leased" or row["lease_owner"] != owner:
+                    raise MessageConflictError("message is not leased to authenticated instance")
+                rows[message_id] = row
+            for message_id, supplied_hash in acknowledgements:
+                expected = hashlib.sha256(str(rows[message_id]["payload_json"]).encode()).hexdigest()
+                if not hmac.compare_digest(supplied_hash, expected):
+                    raise MessageConflictError("ack payload hash mismatch")
+            for message_id, _ in acknowledgements:
+                connection.execute(
+                    "UPDATE relay_messages SET state='delivered',delivered_at=?,lease_owner='',"
+                    "lease_until='' WHERE message_id=?",
+                    (delivered_at, message_id),
+                )
+        return tuple(message_id for message_id, _ in acknowledgements)
+
+    def acknowledge_message(
+        self, message_id: str, *, owner: str, payload_hash: str, delivered_at: str
+    ) -> bool:
+        try:
+            return bool(
+                self.acknowledge_messages(
+                    ((message_id, payload_hash),), owner=owner, delivered_at=delivered_at
+                )
+            )
+        except MessageConflictError as exc:
+            if str(exc) == "message is not leased to authenticated instance":
+                return False
+            raise
 
     def select_current_task(
         self,

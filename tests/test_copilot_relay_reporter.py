@@ -203,6 +203,33 @@ async def test_crash_after_local_apply_replays_same_message_id_and_osstack_dedup
 
 
 @pytest.mark.asyncio
+async def test_applied_inbound_is_acknowledged_with_stable_payload_hash(tmp_path) -> None:
+    instruction = _instruction()
+    transport = FakeTransport(
+        [
+            TransportResponse(200, json.dumps({"messages": [instruction.to_dict()]}).encode()),
+            TransportResponse(200, b'{"acked":["in_1"]}'),
+        ]
+    )
+    reporter = _reporter(tmp_path, transport=transport)
+    assert await reporter.poll_inbound_once() == 1
+    assert await reporter.apply_inbound_once() == 1
+    assert await reporter.flush_receipts_once() == 1
+
+    method, url, body, _ = transport.requests[-1]
+    assert method == "POST" and url.endswith("/v1/copilot/messages/ack")
+    ack = json.loads(body)["acks"][0]
+    canonical = json.dumps(
+        instruction.to_dict(), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    assert ack == {
+        "message_id": "in_1",
+        "payload_hash": hashlib.sha256(canonical.encode()).hexdigest(),
+    }
+    assert await reporter.flush_receipts_once() == 0
+
+
+@pytest.mark.asyncio
 async def test_snapshot_request_returns_safe_snapshot_to_outbound_spool(tmp_path) -> None:
     request = _instruction(message_id="snapshot_request").to_dict()
     request["kind"] = "assistant.snapshot"
