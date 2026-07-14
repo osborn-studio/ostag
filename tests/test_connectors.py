@@ -29,6 +29,16 @@ async def test_feishu_base_read_connector_uses_app_identity_and_read_only_search
         requests.append(request)
         if request.full_url.endswith("/auth/v3/tenant_access_token/internal"):
             return {"code": 0, "tenant_access_token": "tenant-token"}
+        if "/fields?" in request.full_url:
+            return {
+                "code": 0,
+                "data": {
+                    "items": [
+                        {"field_name": "需求描述"},
+                        {"field_name": "需求状态"},
+                    ]
+                },
+            }
         return {
             "code": 0,
             "data": {
@@ -46,17 +56,21 @@ async def test_feishu_base_read_connector_uses_app_identity_and_read_only_search
     )
 
     result = await connector.list_records(
-        "appToken", "tblDemo", ["需求描述", "需求状态"], limit=200
+        "appToken", "tblDemo", ["需求描述", "不存在字段", "需求状态"], limit=200
     )
 
     assert result["data"]["items"][0]["record_id"] == "rec1"
-    assert len(requests) == 2
-    auth, search = requests
+    assert len(requests) == 3
+    auth, fields, search = requests
     assert auth.get_method() == "POST"
     assert json.loads(auth.data) == {
         "app_id": "cli_demo",
         "app_secret": "secret-demo",
     }
+    assert fields.get_method() == "GET"
+    assert fields.full_url.endswith(
+        "/open-apis/bitable/v1/apps/appToken/tables/tblDemo/fields?page_size=100"
+    )
     assert search.get_method() == "POST"
     assert search.full_url.endswith(
         "/open-apis/bitable/v1/apps/appToken/tables/tblDemo/records/search?page_size=200"
@@ -69,6 +83,7 @@ async def test_feishu_base_read_connector_rejects_api_errors() -> None:
     responses = iter(
         [
             {"code": 0, "tenant_access_token": "tenant-token"},
+            {"code": 0, "data": {"items": [{"field_name": "需求描述"}]}},
             {"code": 99991672, "msg": "missing scope"},
         ]
     )

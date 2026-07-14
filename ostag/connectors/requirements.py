@@ -229,6 +229,32 @@ class FeishuBaseReadConnector:
             raise RuntimeError(f"Feishu tenant token request failed: code={code}")
         return token
 
+    async def _list_fields_with_token(
+        self, token: str, base_token: str, table_id: str
+    ) -> dict[str, Any]:
+        path = (
+            f"/open-apis/bitable/v1/apps/{quote(base_token, safe='')}"
+            f"/tables/{quote(table_id, safe='')}/fields"
+        )
+        request = urllib.request.Request(
+            f"{self.api_base_url}{path}?{urlencode({'page_size': 100})}",
+            method="GET",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        response = await asyncio.to_thread(self.opener, request)
+        if response.get("code", 0) != 0:
+            code = response.get("code", "unknown")
+            message = str(response.get("msg") or "request rejected")[:200]
+            raise RuntimeError(f"Feishu Base field read failed: code={code} msg={message}")
+        data = response.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("items", []), list):
+            raise RuntimeError("Feishu Base field read returned an invalid payload")
+        return response
+
+    async def list_fields(self, base_token: str, table_id: str) -> dict[str, Any]:
+        token = await self._tenant_access_token()
+        return await self._list_fields_with_token(token, base_token, table_id)
+
     async def list_records(
         self,
         base_token: str,
@@ -239,13 +265,23 @@ class FeishuBaseReadConnector:
         if not 1 <= limit <= 500:
             raise ValueError("Feishu Base record limit must be in 1..500")
         token = await self._tenant_access_token()
+        fields_response = await self._list_fields_with_token(token, base_token, table_id)
+        items = fields_response["data"]["items"]
+        existing_names = {
+            str(item.get("field_name") or item.get("name") or "")
+            for item in items
+            if isinstance(item, dict)
+        }
+        selected_fields = [name for name in projection_fields if name in existing_names]
+        if not selected_fields:
+            raise RuntimeError("Feishu Base has none of the configured projection fields")
         path = (
             f"/open-apis/bitable/v1/apps/{quote(base_token, safe='')}"
             f"/tables/{quote(table_id, safe='')}/records/search"
         )
         request = urllib.request.Request(
             f"{self.api_base_url}{path}?{urlencode({'page_size': limit})}",
-            data=json.dumps({"field_names": projection_fields}, ensure_ascii=False).encode(),
+            data=json.dumps({"field_names": selected_fields}, ensure_ascii=False).encode(),
             method="POST",
             headers={
                 "Authorization": f"Bearer {token}",
