@@ -224,7 +224,7 @@ def test_command_poll_is_single_consumer_and_ack_is_instance_scoped(tmp_path: Pa
         "expected_lifecycle": "running",
         "requested_by": "feishu:alice",
         "issued_at": "2026-07-13T00:00:00+00:00",
-        "expires_at": "2026-07-14T00:00:00+00:00",
+        "expires_at": "2099-07-14T00:00:00+00:00",
     }
     ledger = WorkMonitorService(store, IdentityStore(store.path)).ledger
     ledger.record_receipt(
