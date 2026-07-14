@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -26,9 +27,16 @@ class RelayResult:
 
 
 class CopilotRelayService:
-    def __init__(self, store: RelayStore, policy: RelayPolicy) -> None:
+    def __init__(
+        self,
+        store: RelayStore,
+        policy: RelayPolicy,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ) -> None:
         self.store = store
         self.policy = policy
+        self.clock = clock
 
     def select_session(
         self, principal: Principal, instance_id: str, session_id: str, *, selected_at: str
@@ -72,6 +80,8 @@ class CopilotRelayService:
             raise RelayRoutingError("no current session; select a task first")
         if not self.policy.can_access(principal, current.instance_id):
             raise PermissionError("principal cannot access this instance")
+        if current.state in {"completed", "failed", "cancelled"}:
+            raise RelayRoutingError("session is terminal; select an active task")
         policy = self.policy.classify(text)
         if policy.outcome == "requires_approval":
             return RelayResult("requires_approval", policy=policy)
@@ -175,15 +185,15 @@ class CopilotRelayService:
             turn_id, session.session_version,
         )
 
-    @staticmethod
     def _envelope(
+        self,
         principal: Principal,
         binding: SessionBinding,
         kind: str,
         payload: dict[str, object],
         event_id: str | None,
     ) -> RelayEnvelope:
-        now = datetime.now(timezone.utc).replace(microsecond=0)
+        now = self.clock().astimezone(timezone.utc).replace(microsecond=0)
         expires = now + timedelta(minutes=10)
         return RelayEnvelope.from_dict(
             {

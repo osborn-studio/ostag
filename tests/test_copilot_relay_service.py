@@ -126,6 +126,16 @@ def test_snapshot_request_is_bound_to_current_session_without_exposing_local_ids
     assert result.outbound.payload["assistant_text"] == ""
 
 
+def test_answer_in_flight_is_rejected_if_session_completed(tmp_path) -> None:
+    service, store = _service(tmp_path)
+    completed = _session_envelope(version=4).to_dict()
+    completed["payload"]["state"] = "completed"
+    store.upsert_session(RelayEnvelope.from_dict(completed))
+
+    with pytest.raises(RelayRoutingError, match="terminal"):
+        service.handle_text(OWNER, "继续")
+
+
 @pytest.mark.parametrize(
     "text",
     ["部署到生产", "删除生成文件", "更新 token", "购买云资源", "给客户发消息", "修改权限"],

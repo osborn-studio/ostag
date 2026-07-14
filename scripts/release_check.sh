@@ -21,6 +21,7 @@ if [[ -n "$missing_tests" ]]; then
 fi
 uv run pytest
 scripts/work_monitor_smoke.sh
+scripts/copilot_relay_smoke.sh
 scripts/secret_hygiene_check.sh
 docker compose -f deploy/work-monitor/docker-compose.yml config >/dev/null
 OSTAG_MONITOR_DATA_DIR=/var/lib/ostag docker compose \
