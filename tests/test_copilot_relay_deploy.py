@@ -46,6 +46,12 @@ def test_install_script_validates_absolute_repo_and_renders_launch_agent(tmp_pat
     assert "copilot-relay.env" in result.stdout
 
 
+def test_worker_launcher_quotes_standard_macos_paths_with_spaces() -> None:
+    launcher = Path("deploy/copilot-relay/run-worker.sh").read_text(encoding="utf-8")
+
+    assert 'exec "/opt/ostag/.venv/bin/python"' in launcher
+
+
 def test_runbook_covers_rotation_backup_rollout_rollback_and_evidence() -> None:
     text = Path("docs/runbooks/copilot-relay.md").read_text(encoding="utf-8").casefold()
     for topic in (

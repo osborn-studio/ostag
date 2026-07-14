@@ -9,4 +9,4 @@ fi
 set -a
 source "$ENV_FILE"
 set +a
-exec /opt/ostag/.venv/bin/python -m ostag.copilot_relay.worker
+exec "/opt/ostag/.venv/bin/python" -m ostag.copilot_relay.worker
