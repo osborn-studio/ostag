@@ -104,6 +104,9 @@ class FeishuCardSecurity:
             try:
                 bootstrap = json.loads(body)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                self._log_unsigned_transport_failure(
+                    request, body=body, stage="json_parse", encrypted_envelope=False
+                )
                 raise HTTPException(401, "unsigned Feishu callback is not a setup challenge") from exc
             if isinstance(bootstrap, dict) and set(bootstrap) == {"encrypt"} \
                     and isinstance(bootstrap.get("encrypt"), str):
@@ -113,6 +116,9 @@ class FeishuCardSecurity:
                         self.decryptor(bootstrap["encrypt"], self.encrypt_key)
                     )
                 except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    self._log_unsigned_transport_failure(
+                        request, body=body, stage="decrypt", encrypted_envelope=True
+                    )
                     raise HTTPException(
                         401, "unsigned Feishu callback is not a setup challenge"
                     ) from exc
@@ -301,5 +307,30 @@ class FeishuCardSecurity:
         }
         logger.warning(
             "feishu_unsigned_callback_rejected %s",
+            json.dumps(diagnostic, sort_keys=True),
+        )
+
+    @staticmethod
+    def _log_unsigned_transport_failure(
+        request: Request, *, body: bytes, stage: str, encrypted_envelope: bool
+    ) -> None:
+        content_encoding = request.headers.get("content-encoding", "").lower().strip()
+        if content_encoding not in {"identity", "gzip", "br", "deflate"}:
+            content_encoding = "other" if content_encoding else "absent"
+        content_type = request.headers.get("content-type", "").lower().split(";", 1)[0].strip()
+        if content_type not in {"application/json", "application/octet-stream"}:
+            content_type = "other" if content_type else "absent"
+        diagnostic = {
+            "body_has_gzip_magic": body.startswith(b"\x1f\x8b"),
+            "body_length": len(body),
+            "body_sha256": hashlib.sha256(body).hexdigest()[:16],
+            "content_encoding": content_encoding,
+            "content_type": content_type,
+            "encrypted_envelope": encrypted_envelope,
+            "stage": stage,
+            "transfer_encoding_present": "transfer-encoding" in request.headers,
+        }
+        logger.warning(
+            "feishu_unsigned_callback_transport_failure %s",
             json.dumps(diagnostic, sort_keys=True),
         )

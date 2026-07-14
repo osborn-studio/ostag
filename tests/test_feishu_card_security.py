@@ -154,6 +154,40 @@ def test_unsigned_action_emits_safe_shape_and_token_diagnostics(tmp_path, caplog
         assert secret not in diagnostic
 
 
+def test_unsigned_parse_and_decrypt_failures_emit_transport_shape_only(tmp_path, caplog) -> None:
+    security = FeishuCardSecurity(
+        encrypt_key="TOP-SECRET-ENCRYPT-KEY",
+        verification_token="TOP-SECRET-VERIFY-TOKEN",
+        expected_app_id="TOP-SECRET-APP-ID",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"),
+        decryptor=lambda cipher, key: (_ for _ in ()).throw(ValueError("secret failure")),
+    )
+    with caplog.at_level("WARNING", logger="ostag.work_monitor.feishu_card_security"):
+        with TestClient(_app(security)) as client:
+            invalid = client.post(
+                "/callback", content=b"TOP-SECRET-NOT-JSON",
+                headers={"Content-Type": "application/octet-stream", "Content-Encoding": "gzip"},
+            )
+            encrypted = client.post(
+                "/callback", json={"encrypt": "TOP-SECRET-CIPHERTEXT"},
+            )
+
+    assert invalid.status_code == 401
+    assert encrypted.status_code == 401
+    diagnostic = caplog.text
+    assert '"stage": "json_parse"' in diagnostic
+    assert '"stage": "decrypt"' in diagnostic
+    assert '"content_type": "application/octet-stream"' in diagnostic
+    assert '"content_encoding": "gzip"' in diagnostic
+    assert '"encrypted_envelope": true' in diagnostic
+    assert '"encrypted_envelope": false' in diagnostic
+    for secret in (
+        "TOP-SECRET-NOT-JSON", "TOP-SECRET-CIPHERTEXT", "secret failure",
+        "TOP-SECRET-ENCRYPT-KEY", "TOP-SECRET-VERIFY-TOKEN", "TOP-SECRET-APP-ID",
+    ):
+        assert secret not in diagnostic
+
+
 def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
     calls: list[str] = []
     security = FeishuCardSecurity(
