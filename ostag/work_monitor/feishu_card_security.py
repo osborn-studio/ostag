@@ -178,15 +178,28 @@ class FeishuCardSecurity:
         try:
             signed_at = int(timestamp)
         except ValueError as exc:
+            logger.warning(
+                'feishu_signature_verified {"fresh": false, "timestamp_integer": false}'
+            )
             raise HTTPException(401, "invalid Feishu callback timestamp") from exc
         now = int(self.clock())
-        if abs(now - signed_at) > self.max_clock_skew_seconds:
+        fresh = abs(now - signed_at) <= self.max_clock_skew_seconds
+        logger.warning(
+            "feishu_signature_verified %s",
+            json.dumps({"fresh": fresh, "timestamp_integer": True}, sort_keys=True),
+        )
+        if not fresh:
             raise HTTPException(401, "stale Feishu callback")
         replay_store = self.store() if callable(self.store) else self.store
-        if not replay_store.consume_instance_nonce(
+        nonce_accepted = replay_store.consume_instance_nonce(
             "feishu-card", nonce, now=now,
             expires_at=max(now, signed_at) + self.max_clock_skew_seconds,
-        ):
+        )
+        logger.warning(
+            "feishu_replay_check %s",
+            json.dumps({"nonce_accepted": nonce_accepted}, sort_keys=True),
+        )
+        if not nonce_accepted:
             raise HTTPException(401, "replayed Feishu callback")
 
         # 4. Only authenticated and non-replayed bytes may be parsed/decrypted.
@@ -207,6 +220,7 @@ class FeishuCardSecurity:
         else:
             payload = envelope
 
+        self._log_authenticated_payload(payload)
         verified = self._verify_payload(payload)
         request.state.feishu_callback = verified
         return verified
@@ -392,3 +406,30 @@ class FeishuCardSecurity:
             "v1_event_envelope": bool(payload_dict.get("uuid") and payload_dict.get("event")),
         }
         logger.warning("feishu_callback_intake %s", json.dumps(diagnostic, sort_keys=True))
+
+    def _log_authenticated_payload(self, payload: object) -> None:
+        payload_dict = payload if isinstance(payload, dict) else {}
+        header = payload_dict.get("header")
+        header = header if isinstance(header, dict) else {}
+        event_type = header.get("event_type")
+        if event_type == "card.action.trigger":
+            event_type_kind = "card_action_trigger"
+        elif event_type == "url_verification":
+            event_type_kind = "url_verification"
+        else:
+            event_type_kind = "other" if event_type is not None else "absent"
+        diagnostic = {
+            "app_id_matches": bool(
+                header.get("app_id") and hmac.compare_digest(
+                    str(header["app_id"]), self.expected_app_id
+                )
+            ),
+            "event_type": event_type_kind,
+            "json_object": isinstance(payload, dict),
+            "schema_v2": payload_dict.get("schema") == "2.0",
+            "token_matches": self._token(header.get("token")),
+        }
+        logger.warning(
+            "feishu_authenticated_payload %s",
+            json.dumps(diagnostic, sort_keys=True),
+        )

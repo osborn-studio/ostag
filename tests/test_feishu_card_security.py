@@ -207,6 +207,49 @@ def test_bad_signature_and_tamper_never_decrypt(tmp_path) -> None:
     assert calls == []
 
 
+def test_authenticated_envelope_logs_token_and_app_match_without_values(tmp_path, caplog) -> None:
+    decrypted = json.dumps({
+        "schema": "2.0",
+        "header": {
+            "event_type": "card.action.trigger",
+            "token": "TOP-SECRET-WRONG-TOKEN",
+            "app_id": "TOP-SECRET-APP-ID",
+        },
+        "event": {},
+    }).encode()
+    security = FeishuCardSecurity(
+        encrypt_key="TOP-SECRET-ENCRYPT-KEY",
+        verification_token="TOP-SECRET-VERIFY-TOKEN",
+        expected_app_id="TOP-SECRET-APP-ID",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"),
+        clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: decrypted,
+    )
+    body = b'{"encrypt":"TOP-SECRET-CIPHERTEXT"}'
+
+    with caplog.at_level("WARNING", logger="ostag.work_monitor.feishu_card_security"):
+        with TestClient(_app(security)) as client:
+            response = client.post(
+                "/callback", content=body,
+                headers=_headers(body, key="TOP-SECRET-ENCRYPT-KEY"),
+            )
+
+    assert response.status_code == 401
+    diagnostic = caplog.text
+    assert "feishu_signature_verified" in diagnostic
+    assert '"fresh": true' in diagnostic
+    assert "feishu_authenticated_payload" in diagnostic
+    assert '"schema_v2": true' in diagnostic
+    assert '"event_type": "card_action_trigger"' in diagnostic
+    assert '"token_matches": false' in diagnostic
+    assert '"app_id_matches": true' in diagnostic
+    for secret in (
+        "TOP-SECRET-WRONG-TOKEN", "TOP-SECRET-VERIFY-TOKEN",
+        "TOP-SECRET-APP-ID", "TOP-SECRET-ENCRYPT-KEY", "TOP-SECRET-CIPHERTEXT",
+    ):
+        assert secret not in diagnostic
+
+
 def test_bad_signature_emits_safe_transport_diagnostics_only(tmp_path, caplog) -> None:
     body = b'{"encrypt":"TOP-SECRET-CIPHERTEXT"}'
     security = FeishuCardSecurity(
