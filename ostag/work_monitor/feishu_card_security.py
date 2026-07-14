@@ -100,12 +100,14 @@ class FeishuCardSecurity:
         # token-authenticated setup challenge in that bootstrap state; actions and
         # partially signed requests remain fail-closed below.
         if not timestamp and not nonce and not supplied:
+            encrypted_envelope = False
             try:
                 bootstrap = json.loads(body)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                 raise HTTPException(401, "unsigned Feishu callback is not a setup challenge") from exc
             if isinstance(bootstrap, dict) and set(bootstrap) == {"encrypt"} \
                     and isinstance(bootstrap.get("encrypt"), str):
+                encrypted_envelope = True
                 try:
                     bootstrap = json.loads(
                         self.decryptor(bootstrap["encrypt"], self.encrypt_key)
@@ -117,6 +119,9 @@ class FeishuCardSecurity:
             if not isinstance(bootstrap, dict) or set(bootstrap) != {
                 "challenge", "token", "type",
             }:
+                self._log_unsigned_callback_rejected(
+                    bootstrap, body=body, encrypted_envelope=encrypted_envelope
+                )
                 raise HTTPException(401, "unsigned Feishu callback is not a setup challenge")
             verified = self._verify_payload(bootstrap)
             request.state.feishu_callback = verified
@@ -256,4 +261,45 @@ class FeishuCardSecurity:
     def _token(self, candidate: object) -> bool:
         return isinstance(candidate, str) and bool(self.verification_token) and hmac.compare_digest(
             candidate, self.verification_token
+        )
+
+    def _log_unsigned_callback_rejected(
+        self, payload: object, *, body: bytes, encrypted_envelope: bool
+    ) -> None:
+        header = payload.get("header") if isinstance(payload, dict) else None
+        header = header if isinstance(header, dict) else {}
+        event_type = header.get("event_type")
+        if event_type == "card.action.trigger":
+            event_type_kind = "card_action_trigger"
+        elif event_type == "url_verification":
+            event_type_kind = "url_verification"
+        else:
+            event_type_kind = "other" if event_type is not None else "absent"
+        legacy_shape = bool(
+            isinstance(payload, dict)
+            and {"open_id", "open_message_id", "action", "token"} <= set(payload)
+        )
+        diagnostic = {
+            "body_length": len(body),
+            "body_sha256": hashlib.sha256(body).hexdigest()[:16],
+            "encrypted_envelope": encrypted_envelope,
+            "event_type": event_type_kind,
+            "header_app_id_matches": bool(
+                header.get("app_id") and hmac.compare_digest(
+                    str(header["app_id"]), self.expected_app_id
+                )
+            ),
+            "header_token_matches": self._token(header.get("token")),
+            "json_object": isinstance(payload, dict),
+            "legacy_shape": legacy_shape,
+            "legacy_token_matches": bool(
+                isinstance(payload, dict) and self._token(payload.get("token"))
+            ),
+            "schema_v2": bool(
+                isinstance(payload, dict) and payload.get("schema") == "2.0"
+            ),
+        }
+        logger.warning(
+            "feishu_unsigned_callback_rejected %s",
+            json.dumps(diagnostic, sort_keys=True),
         )
