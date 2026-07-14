@@ -11,6 +11,18 @@ from .osstack_port import OsstackSessionPort
 from .reporter import CopilotReporter
 
 
+async def run_cycle(reporter: CopilotReporter, *, write_enabled: bool) -> None:
+    """Run one reporter cycle, keeping inbound execution independently gated."""
+    await reporter.discover_sessions_once()
+    await reporter.capture_changed_snapshots_once()
+    await reporter.flush_outbound_once()
+    if write_enabled:
+        await reporter.poll_inbound_once()
+        await reporter.apply_inbound_once()
+    await reporter.flush_receipts_once()
+    await reporter.flush_outbound_once()
+
+
 async def run_worker(stop: asyncio.Event | None = None) -> None:
     settings = load_settings().validate()
     if not settings.copilot_relay_enabled:
@@ -25,13 +37,7 @@ async def run_worker(stop: asyncio.Event | None = None) -> None:
     stop = stop or asyncio.Event()
     while not stop.is_set():
         try:
-            await reporter.discover_sessions_once()
-            await reporter.capture_changed_snapshots_once()
-            await reporter.flush_outbound_once()
-            await reporter.poll_inbound_once()
-            await reporter.apply_inbound_once()
-            await reporter.flush_receipts_once()
-            await reporter.flush_outbound_once()
+            await run_cycle(reporter, write_enabled=settings.copilot_relay_write_enabled)
         except Exception as exc:  # noqa: BLE001 - launch worker retries without logging payloads
             print(f"copilot relay cycle failed: {type(exc).__name__}", flush=True)
         try:
