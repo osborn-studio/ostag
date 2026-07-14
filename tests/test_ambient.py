@@ -636,7 +636,7 @@ async def test_ambient_scheduler_sends_morning_digest_once_per_day(
         adapter=adapter,
         channel_brain_store=store,
         requirement_connector=connector,
-        now=lambda: datetime(2026, 7, 1, 9, 5),
+        now=lambda: datetime(2026, 7, 1, 1, 5, tzinfo=UTC),
     )
 
     first = await scheduler.run_once()

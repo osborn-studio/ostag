@@ -401,7 +401,7 @@ class AmbientScheduler:
     def _digest_kind_due(self) -> str | None:
         if not self.config.ambient_daily_digest_enabled:
             return None
-        now = self.now()
+        now = self._local_now()
         minute_of_day = now.hour * 60 + now.minute
         window = max(1, self.config.ambient_digest_window_minutes)
         morning = self.config.ambient_morning_digest_hour * 60
