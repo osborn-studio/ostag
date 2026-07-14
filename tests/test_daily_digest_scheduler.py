@@ -106,6 +106,33 @@ async def test_noon_requirement_board_uses_durable_window_and_read_only_connecto
 
 
 @pytest.mark.asyncio
+async def test_noon_requirement_board_does_not_catch_up_after_window(
+    tmp_path: Path,
+) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    now = datetime(2026, 7, 18, 5, 1, tzinfo=UTC)
+    connector, transport = Connector(), Transport()
+    profile = _requirement_profile(connector, transport)
+
+    await DailyTaskBoardScheduler(
+        store,
+        (),
+        requirement_profiles=(profile,),
+        requirement_window_minutes=60,
+        clock=lambda: now,
+    ).tick()
+
+    assert connector.calls == 0
+    assert transport.sent == []
+    with store.connect() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM daily_digest_windows "
+            "WHERE window_key LIKE '%requirement_noon%'"
+        ).fetchone()[0]
+    assert count == 0
+
+
+@pytest.mark.asyncio
 async def test_morning_profiles_send_once_and_restart_deduplicates(tmp_path: Path) -> None:
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     now = datetime(2026, 7, 13, 1, 5, tzinfo=UTC)

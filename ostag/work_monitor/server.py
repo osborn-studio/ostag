@@ -297,6 +297,9 @@ def create_app(
                 poll_seconds=min(poll_values),
                 requirement_profiles=requirement_profiles,
                 requirement_hour=configured.ambient_daily_board_hour,
+                requirement_window_minutes=(
+                    configured.ambient_daily_board_window_minutes
+                ),
             )
         stop = asyncio.Event()
         owners = tuple(

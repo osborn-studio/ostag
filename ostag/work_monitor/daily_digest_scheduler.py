@@ -81,6 +81,7 @@ class DailyTaskBoardScheduler:
         retry_cap: int = 5,
         requirement_profiles: tuple[DailyRequirementBoardProfile, ...] = (),
         requirement_hour: int = 12,
+        requirement_window_minutes: int = 60,
     ) -> None:
         if not 0 <= morning_hour <= 23 or not 0 <= evening_hour <= 23:
             raise ValueError("daily digest hours must be in 0..23")
@@ -88,6 +89,8 @@ class DailyTaskBoardScheduler:
             raise ValueError("daily digest hours must be different")
         if not 0 <= requirement_hour <= 23:
             raise ValueError("daily requirement board hour must be in 0..23")
+        if requirement_window_minutes <= 0:
+            raise ValueError("daily requirement board window must be positive")
         self.store = store
         self.profiles = profiles
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -97,6 +100,7 @@ class DailyTaskBoardScheduler:
         self.retry_cap = max(1, retry_cap)
         self.requirement_profiles = requirement_profiles
         self.requirement_hour = requirement_hour
+        self.requirement_window_minutes = requirement_window_minutes
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -179,7 +183,10 @@ class DailyTaskBoardScheduler:
                             ),
                         )
         requirement_at = start.replace(hour=self.requirement_hour)
-        if requirement_at <= local:
+        requirement_deadline = requirement_at + timedelta(
+            minutes=self.requirement_window_minutes
+        )
+        if requirement_at <= local < requirement_deadline:
             for profile in self.requirement_profiles:
                 if not profile.enabled:
                     continue
