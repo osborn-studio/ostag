@@ -232,6 +232,32 @@ class IdentityStore:
             ).fetchone()
         return row is not None
 
+    def is_global_owner(self, principal: Principal) -> bool:
+        """A bound private owner/admin may operate across registered employee instances."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM monitor_bindings WHERE chat_type='private' "
+                "AND owner_platform=? AND owner_actor_id=? AND role IN ('owner','admin') "
+                "AND revoked=0 LIMIT 1",
+                (principal.platform, principal.actor_id),
+            ).fetchone()
+        return row is not None
+
+    def allowed_instances(self, principal: Principal) -> frozenset[str] | None:
+        """Return None for global owners, otherwise exact instance scopes granted to an actor."""
+        if self.is_global_owner(principal):
+            return None
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT b.scope FROM monitor_grants g JOIN monitor_bindings b "
+                "ON b.platform=g.platform AND b.destination_id=g.destination_id "
+                "WHERE g.principal_platform=? AND g.actor_id=? AND g.revoked=0 AND b.revoked=0 "
+                "AND g.capability IN ('read','propose','write','admin')",
+                (principal.platform, principal.actor_id),
+            ).fetchall()
+        scopes = {str(row["scope"]) for row in rows}
+        return frozenset(scope.removeprefix("instance:") for scope in scopes if scope.startswith("instance:"))
+
     def list_bindings(self, owner: Principal) -> tuple[Destination, ...]:
         with self._connect() as connection:
             rows = connection.execute(

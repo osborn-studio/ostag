@@ -112,6 +112,13 @@ class RelayStore:
             ).fetchone()
         return None if row is None else SessionBinding.from_dict(json.loads(row["binding_json"]))
 
+    def envelope_for_message(self, message_id: str) -> RelayEnvelope | None:
+        with self.monitor_store.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM relay_messages WHERE message_id=?", (message_id,)
+            ).fetchone()
+        return None if row is None else RelayEnvelope.from_dict(json.loads(row["payload_json"]))
+
     def claim_messages(
         self,
         *,
@@ -315,11 +322,19 @@ class RelayStore:
                     envelope.payload["proposal_id"],
                     envelope.sender.platform,
                     envelope.sender.actor_id,
-                    _canonical(envelope.payload),
+                    _canonical(envelope.to_dict()),
                     envelope.expires_at,
                 ),
             )
         return result.rowcount == 1
+
+    def proposal_envelope(self, proposal_id: str) -> RelayEnvelope | None:
+        with self.monitor_store.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM relay_task_proposals WHERE proposal_id=?",
+                (proposal_id,),
+            ).fetchone()
+        return None if row is None else RelayEnvelope.from_dict(json.loads(row["payload_json"]))
 
     def confirm_proposal(self, envelope: RelayEnvelope, *, confirmed_at: str) -> bool:
         if envelope.kind != "task.create.confirm":

@@ -110,7 +110,7 @@ def test_envelope_binding_sender_and_payload_reject_unknown_keys() -> None:
 
     raw = _envelope()
     raw["sender"] = {"platform": "feishu", "actor_id": "owner", "admin": True}
-    with pytest.raises(ValueError, match="unknown keys.*admin"):
+    with pytest.raises(ValueError, match="exactly platform and actor_id"):
         RelayEnvelope.from_dict(raw)
 
     raw = _envelope()

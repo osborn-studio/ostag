@@ -148,6 +148,23 @@ def test_owner_and_group_reader_permission_matrix(tmp_path: Path) -> None:
     assert identities.allows(reader, group, "read")
     assert not identities.allows(reader, group, "propose")
     assert not identities.allows(reader, group, "write")
+    assert identities.allowed_instances(owner) is None
+    assert identities.allowed_instances(reader) == frozenset()
+
+
+def test_non_owner_instance_scope_never_expands_to_other_employee_instances(tmp_path: Path) -> None:
+    identities = IdentityStore(tmp_path / "monitor.sqlite3")
+    owner = Principal("feishu", "owner")
+    member = Principal("feishu", "member")
+    private = Destination("feishu", "private", "private")
+    group = Destination("feishu", "group", "group")
+    identities.bind_private(owner=owner, destination=private, local_admin=True)
+    identities.enroll_group(owner, group, scope="instance:employee-a", local_admin=True)
+    identities.grant(owner, group, member, "write")
+
+    assert identities.is_global_owner(owner)
+    assert not identities.is_global_owner(member)
+    assert identities.allowed_instances(member) == frozenset({"employee-a"})
 
 
 def test_legacy_binding_schema_migrates_scope_column(tmp_path: Path) -> None:

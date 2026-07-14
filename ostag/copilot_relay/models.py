@@ -10,6 +10,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, ClassVar
 
+from ostag.core.identity import Principal
+
 
 RELAY_KINDS = frozenset(
     {
@@ -114,27 +116,6 @@ def _require_string_list(
         raise ValueError(f"{field} must contain at most {maximum_items} items")
     for item in value:
         _require_string(item, f"{field} item", max_length=item_max_length)
-
-
-@dataclass(frozen=True)
-class Principal:
-    platform: str
-    actor_id: str
-
-    _KEYS: ClassVar[tuple[str, ...]] = ("platform", "actor_id")
-
-    def __post_init__(self) -> None:
-        _require_string(self.platform, "platform", max_length=32)
-        _require_string(self.actor_id, "actor_id")
-
-    @classmethod
-    def from_dict(cls, payload: object) -> Principal:
-        _validate_keys(payload, required=cls._KEYS, model_name=cls.__name__)
-        assert isinstance(payload, Mapping)
-        return cls(platform=payload["platform"], actor_id=payload["actor_id"])
-
-    def to_dict(self) -> dict[str, str]:
-        return {"platform": self.platform, "actor_id": self.actor_id}
 
 
 @dataclass(frozen=True)
