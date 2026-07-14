@@ -162,6 +162,12 @@ async def test_awaiting_decision_snapshot_spools_a_real_decision_request(tmp_pat
         "blocking": True,
         "safe_work": [],
     }
+    with reporter._connect() as db:
+        db.execute("DELETE FROM relay_outbound")
+        db.execute("UPDATE relay_local_sessions SET exported_decision_id='' ")
+
+    assert await reporter.capture_changed_snapshots_once() == 1
+    assert [item.kind for item in reporter.pending_outbound()] == ["decision.request"]
 
 
 @pytest.mark.asyncio

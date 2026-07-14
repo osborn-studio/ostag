@@ -186,11 +186,12 @@ class CopilotReporter:
             snapshot_hash = hashlib.sha256(self._dump(snapshot).encode()).hexdigest()
             decision = snapshot["decision"]
             decision_id = "" if decision is None else str(decision["decision_id"])
-            if (
+            base_changed = not (
                 int(row["exported_version"]) >= local.version
                 and row["snapshot_hash"] == snapshot_hash
-                and row["exported_decision_id"] == decision_id
-            ):
+            )
+            decision_changed = row["exported_decision_id"] != decision_id
+            if not base_changed and not decision_changed:
                 continue
             binding = SessionBinding(
                 self.instance_id, local.task_id, local.run_id, local.session_id,
@@ -198,23 +199,29 @@ class CopilotReporter:
             )
             with self._connect() as db:
                 db.execute("BEGIN IMMEDIATE")
-                upsert = self._make_envelope(
-                    db, binding, "session.upsert",
-                    {
-                        "agent_id": local.agent_id, "title": local.task_id, "state": local.state,
-                        "resume_supported": local.resume_supported,
-                        "latest_summary": str(snapshot["assistant_text"])[:1_000],
-                    },
-                    f"session_{local.session_id}_v{local.version}",
-                )
-                created += int(self._insert_outbound(db, upsert))
-                snap = self._make_envelope(
-                    db, binding, "assistant.snapshot",
-                    {"assistant_text": snapshot["assistant_text"], "redaction_count": 0, "truncated": False},
-                    f"snapshot_{local.session_id}_v{local.version}_{snapshot_hash[:12]}",
-                )
-                created += int(self._insert_outbound(db, snap))
-                if decision is not None:
+                if base_changed:
+                    upsert = self._make_envelope(
+                        db, binding, "session.upsert",
+                        {
+                            "agent_id": local.agent_id, "title": local.task_id,
+                            "state": local.state,
+                            "resume_supported": local.resume_supported,
+                            "latest_summary": str(snapshot["assistant_text"])[:1_000],
+                        },
+                        f"session_{local.session_id}_v{local.version}",
+                    )
+                    created += int(self._insert_outbound(db, upsert))
+                    snap = self._make_envelope(
+                        db, binding, "assistant.snapshot",
+                        {
+                            "assistant_text": snapshot["assistant_text"],
+                            "redaction_count": 0,
+                            "truncated": False,
+                        },
+                        f"snapshot_{local.session_id}_v{local.version}_{snapshot_hash[:12]}",
+                    )
+                    created += int(self._insert_outbound(db, snap))
+                if decision is not None and decision_changed:
                     request = self._make_envelope(
                         db,
                         binding,
