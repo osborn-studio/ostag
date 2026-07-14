@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import sqlite3
 import stat
 from datetime import UTC, datetime, timedelta
 
@@ -86,6 +87,23 @@ def test_spool_database_is_owner_only(tmp_path) -> None:
     reporter = _reporter(tmp_path)
 
     assert stat.S_IMODE(reporter.spool_path.stat().st_mode) == 0o600
+
+
+def test_spool_migration_adds_durable_decision_export_cursor(tmp_path) -> None:
+    path = tmp_path / "relay.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE relay_local_sessions("
+            "session_id TEXT PRIMARY KEY,payload TEXT NOT NULL,"
+            "exported_version INTEGER NOT NULL DEFAULT 0,"
+            "snapshot_hash TEXT NOT NULL DEFAULT '')"
+        )
+
+    reporter = _reporter(tmp_path)
+
+    with reporter._connect() as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(relay_local_sessions)")}
+    assert "exported_decision_id" in columns
 
 
 @pytest.mark.asyncio

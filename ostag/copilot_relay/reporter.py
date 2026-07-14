@@ -64,7 +64,8 @@ class CopilotReporter:
                 CREATE TABLE IF NOT EXISTS relay_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS relay_local_sessions(
                     session_id TEXT PRIMARY KEY,payload TEXT NOT NULL,
-                    exported_version INTEGER NOT NULL DEFAULT 0,snapshot_hash TEXT NOT NULL DEFAULT '');
+                    exported_version INTEGER NOT NULL DEFAULT 0,snapshot_hash TEXT NOT NULL DEFAULT '',
+                    exported_decision_id TEXT NOT NULL DEFAULT '');
                 CREATE TABLE IF NOT EXISTS relay_outbound(
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
                     payload TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
@@ -79,6 +80,14 @@ class CopilotReporter:
             if "acked_at" not in columns:
                 db.execute(
                     "ALTER TABLE relay_inbound ADD COLUMN acked_at TEXT NOT NULL DEFAULT ''"
+                )
+            session_columns = {
+                row[1] for row in db.execute("PRAGMA table_info(relay_local_sessions)")
+            }
+            if "exported_decision_id" not in session_columns:
+                db.execute(
+                    "ALTER TABLE relay_local_sessions ADD COLUMN "
+                    "exported_decision_id TEXT NOT NULL DEFAULT ''"
                 )
 
     @staticmethod
@@ -175,7 +184,13 @@ class CopilotReporter:
             local = OsstackSession(**json.loads(row["payload"]))
             snapshot = self.port.snapshot(local.session_id)
             snapshot_hash = hashlib.sha256(self._dump(snapshot).encode()).hexdigest()
-            if int(row["exported_version"]) >= local.version and row["snapshot_hash"] == snapshot_hash:
+            decision = snapshot["decision"]
+            decision_id = "" if decision is None else str(decision["decision_id"])
+            if (
+                int(row["exported_version"]) >= local.version
+                and row["snapshot_hash"] == snapshot_hash
+                and row["exported_decision_id"] == decision_id
+            ):
                 continue
             binding = SessionBinding(
                 self.instance_id, local.task_id, local.run_id, local.session_id,
@@ -199,7 +214,6 @@ class CopilotReporter:
                     f"snapshot_{local.session_id}_v{local.version}_{snapshot_hash[:12]}",
                 )
                 created += int(self._insert_outbound(db, snap))
-                decision = snapshot["decision"]
                 if decision is not None:
                     request = self._make_envelope(
                         db,
@@ -217,8 +231,9 @@ class CopilotReporter:
                     )
                     created += int(self._insert_outbound(db, request))
                 db.execute(
-                    "UPDATE relay_local_sessions SET exported_version=?,snapshot_hash=? WHERE session_id=?",
-                    (local.version, snapshot_hash, local.session_id),
+                    "UPDATE relay_local_sessions SET exported_version=?,snapshot_hash=?,"
+                    "exported_decision_id=? WHERE session_id=?",
+                    (local.version, snapshot_hash, decision_id, local.session_id),
                 )
         return created
 
