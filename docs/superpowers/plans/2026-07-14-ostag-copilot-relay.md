@@ -13,7 +13,7 @@
 **Repositories and branches:**
 
 - OStag implementation worktree: `/Users/gilbertchen/Documents/CODE/agentsteam/ostag-copilot-relay`, branch `codex/copilot-relay`, based on `codex/daily-task-boards` commit `7f662cd`.
-- osstack implementation must use a new clean worktree at `/Users/gilbertchen/Documents/CODE/agentsteam/osstack-copilot-session`, branch `codex/copilot-session`, based on the current committed osstack revision. Do not modify or clean `/Users/gilbertchen/Documents/CODE/agentsteam/osstack`; it contains unrelated user changes.
+- osstack implementation must use a new clean worktree at `/Users/gilbertchen/Documents/CODE/agentsteam/osstack-copilot-session`, branch `codex/copilot-session`, based on fetched `origin/main` commit `1595f2e` (or its reviewed fast-forward successor). Do not modify or clean `/Users/gilbertchen/Documents/CODE/agentsteam/osstack`; its local `main` is behind the remote and contains unrelated user changes.
 - osstack management card: `card_227f12f3`. Its legal progression is `triage -> ready -> running -> blocked|done`. Card comments record every task commit and verification gate.
 
 **Non-goals for v1:** arbitrary terminal control, Codex Desktop control, repository browsing from Feishu, source/diff/log/secret upload, ungoverned shell commands, group-chat task selection, or automatic execution of high-risk actions.
@@ -56,9 +56,10 @@ Expected: the card appears once under `READY`, with no implementation task marke
 
 ```bash
 git -C /Users/gilbertchen/Documents/CODE/agentsteam/osstack status --short
+git -C /Users/gilbertchen/Documents/CODE/agentsteam/osstack fetch origin --prune
 git -C /Users/gilbertchen/Documents/CODE/agentsteam/osstack worktree add \
   -b codex/copilot-session \
-  /Users/gilbertchen/Documents/CODE/agentsteam/osstack-copilot-session HEAD
+  /Users/gilbertchen/Documents/CODE/agentsteam/osstack-copilot-session origin/main
 git -C /Users/gilbertchen/Documents/CODE/agentsteam/osstack-copilot-session status --short --branch
 ```
 
