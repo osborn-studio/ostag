@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 import shlex
+import urllib.request
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
+from urllib.parse import quote, urlencode
 
 
 class RequirementTableConnector(Protocol):
@@ -180,6 +182,80 @@ class LarkCLIRequirementTableConnector:
         for name in projection_fields:
             args.extend(["--field-id", name])
         return await self.cli.json(*args)
+
+
+def _open_feishu_json(request: urllib.request.Request) -> dict[str, Any]:
+    with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+        value = json.loads(response.read().decode("utf-8"))
+    if not isinstance(value, dict):
+        raise RuntimeError("Feishu returned a non-object response")
+    return value
+
+
+class FeishuBaseReadConnector:
+    """Read Base records with the server app identity, without user CLI state."""
+
+    def __init__(
+        self,
+        *,
+        api_base_url: str,
+        app_id: str,
+        app_secret: str,
+        opener: Callable[[urllib.request.Request], dict[str, Any]] = _open_feishu_json,
+    ) -> None:
+        self.api_base_url = api_base_url.rstrip("/")
+        self.app_id = app_id
+        self.app_secret = app_secret
+        self.opener = opener
+
+    async def _tenant_access_token(self) -> str:
+        request = urllib.request.Request(
+            f"{self.api_base_url}/open-apis/auth/v3/tenant_access_token/internal",
+            data=json.dumps(
+                {"app_id": self.app_id, "app_secret": self.app_secret}
+            ).encode(),
+            method="POST",
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        response = await asyncio.to_thread(self.opener, request)
+        token = response.get("tenant_access_token")
+        if response.get("code", 0) != 0 or not isinstance(token, str) or not token:
+            code = response.get("code", "unknown")
+            raise RuntimeError(f"Feishu tenant token request failed: code={code}")
+        return token
+
+    async def list_records(
+        self,
+        base_token: str,
+        table_id: str,
+        projection_fields: list[str],
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if not 1 <= limit <= 500:
+            raise ValueError("Feishu Base record limit must be in 1..500")
+        token = await self._tenant_access_token()
+        path = (
+            f"/open-apis/bitable/v1/apps/{quote(base_token, safe='')}"
+            f"/tables/{quote(table_id, safe='')}/records/search"
+        )
+        request = urllib.request.Request(
+            f"{self.api_base_url}{path}?{urlencode({'page_size': limit})}",
+            data=json.dumps({"field_names": projection_fields}, ensure_ascii=False).encode(),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        response = await asyncio.to_thread(self.opener, request)
+        if response.get("code", 0) != 0:
+            code = response.get("code", "unknown")
+            message = str(response.get("msg") or "request rejected")[:200]
+            raise RuntimeError(f"Feishu Base read failed: code={code} msg={message}")
+        data = response.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("items", []), list):
+            raise RuntimeError("Feishu Base read returned an invalid payload")
+        return response
 
 
 class DwsCLI:

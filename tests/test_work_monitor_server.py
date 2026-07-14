@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
+from ostag.connectors.requirements import FeishuBaseReadConnector
 from ostag.core.identity import Principal
 from ostag.config import Settings
 from ostag.core.schemas import ActionReceipt
@@ -613,4 +614,5 @@ def test_lifespan_adds_noon_requirement_board_to_the_single_daily_owner(
         profiles = owners[0].kwargs["requirement_profiles"]
         assert len(profiles) == 1
         assert profiles[0].destination_id == "oc_fde"
+        assert isinstance(profiles[0].connector, FeishuBaseReadConnector)
         assert owners[0].kwargs["requirement_hour"] == 12

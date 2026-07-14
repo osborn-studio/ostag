@@ -238,9 +238,8 @@ def create_app(
             from ostag.connectors.requirements import (
                 DwsCLI,
                 DwsRequirementTableConnector,
-                LarkCLIRequirementTableConnector,
+                FeishuBaseReadConnector,
             )
-            from ostag.workflows.auto_base import LarkCLI
             from .daily_digest_scheduler import (
                 DailyDigestProfile,
                 DailyRequirementBoardProfile,
@@ -248,6 +247,11 @@ def create_app(
             )
 
             assert runtime.service is not None
+            feishu_base_connector = FeishuBaseReadConnector(
+                api_base_url=configured.feishu_api_base_url,
+                app_id=configured.feishu_app_id,
+                app_secret=configured.feishu_app_secret,
+            )
             profiles = (
                 DailyDigestProfile(
                     platform="feishu",
@@ -256,7 +260,7 @@ def create_app(
                     table_id=configured.daily_task_board_feishu_table_id,
                     table_url=configured.daily_task_board_feishu_table_url,
                     manager_ids=configured.daily_task_board_feishu_manager_ids,
-                    connector=LarkCLIRequirementTableConnector(LarkCLI(configured), "bot"),
+                    connector=feishu_base_connector,
                     transport=FeishuAdapter(configured),
                     record_limit=configured.daily_task_board_record_limit,
                 ),
@@ -279,7 +283,7 @@ def create_app(
                     table_id=configured.auto_base_default_table_id,
                     table_url=configured.ambient_daily_board_base_url,
                     group_name=configured.ambient_daily_board_group_name,
-                    connector=LarkCLIRequirementTableConnector(LarkCLI(configured), "bot"),
+                    connector=feishu_base_connector,
                     transport=FeishuAdapter(configured),
                     record_limit=configured.ambient_record_limit,
                 ),
