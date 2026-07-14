@@ -246,7 +246,9 @@ async def test_cli_daily_board_once_collects_card(
 
         async def run_daily_board_once(self, *, force=True):
             assert force is True
-            await self.adapter.send_card("oc_demo", {"schema": "2.0"})
+            await self.adapter.send_card(
+                "oc_demo", {"schema": "2.0"}, "fallback", delivery_id="daily-board-test"
+            )
             return AmbientRunResult(checked=1, sent=1)
 
     monkeypatch.setattr("ostag.main.AmbientScheduler", FakeScheduler)

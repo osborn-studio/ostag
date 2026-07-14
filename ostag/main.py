@@ -601,7 +601,10 @@ class _CollectingAdapter:
     async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.messages.append({"chat_id": chat_id, "text": text})
 
-    async def send_card(self, chat_id: str, card: dict) -> None:
+    async def send_card(
+        self, chat_id: str, card: dict, fallback: str, *, delivery_id: str
+    ) -> None:
+        assert delivery_id
         self.cards.append({"chat_id": chat_id, "card": card})
 
 

@@ -68,6 +68,48 @@ Example group commands:
 If multiple records match, OS Tag refuses to update and asks for a more specific
 requirement keyword or code.
 
+## Daily FDE Requirement Dashboard
+
+OStag can read the original requirement Base and send one interactive dashboard
+card every calendar day at 12:00 Asia/Shanghai time, including weekends. The
+scheduled path is read-only; Base writes remain limited to separately authorized
+explicit commands.
+
+Production values for the approved FDE rollout:
+
+```dotenv
+OSTAG_AMBIENT_ENABLED=true
+OSTAG_AMBIENT_CHAT_IDS=oc_ef8aba337000ae1c69aae11dfdfd8ef0
+OSTAG_AMBIENT_INTERVAL_SECONDS=300
+OSTAG_AMBIENT_RECORD_LIMIT=200
+OSTAG_AMBIENT_DAILY_BOARD_ENABLED=true
+OSTAG_AMBIENT_DAILY_BOARD_HOUR=12
+OSTAG_AMBIENT_DAILY_BOARD_WINDOW_MINUTES=60
+OSTAG_AMBIENT_TIMEZONE=Asia/Shanghai
+OSTAG_AMBIENT_DAILY_BOARD_GROUP_NAME="Dadao 投研交易 FDE"
+OSTAG_AMBIENT_DAILY_BOARD_BASE_URL=https://a2ekucppds.feishu.cn/base/Q3FkbLGQ6axmTuspP0fc8fLInQm?table=tblcj5dhYa9vQLd0
+OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=Q3FkbLGQ6axmTuspP0fc8fLInQm
+OSTAG_AUTO_BASE_DEFAULT_TABLE_ID=tblcj5dhYa9vQLd0
+OSTAG_AUTO_BASE_IDENTITY=bot
+```
+
+Publish the OStag app with `base:field:read` and `base:record:read`, in addition
+to its existing group-message send capability. Do not add scheduled Base write
+scope for this feature.
+
+Render without sending, then perform exactly one controlled live validation:
+
+```bash
+uv run python -m ostag.main ambient board-once --json
+uv run python -m ostag.main ambient board-once --send --json
+```
+
+Confirm counts against a fresh Base read, verify the two buttons, and verify that
+only overdue P0 owners are mentioned. The success marker prevents a second send
+for the same Asia/Shanghai date. Roll back by setting
+`OSTAG_AMBIENT_DAILY_BOARD_ENABLED=false` and restarting the single scheduler
+process.
+
 ## Deployment Preflight
 
 Run the full deploy preflight before a pilot launch:
