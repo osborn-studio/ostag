@@ -726,6 +726,8 @@ def daily_board_config(tmp_path: Path):
         ambient_daily_board_base_url="https://example.feishu.cn/base/demo?table=tblDemo",
         auto_base_default_base_token="base_demo",
         auto_base_default_table_id="tblDemo",
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
     )
 
 

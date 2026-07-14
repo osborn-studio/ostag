@@ -222,6 +222,23 @@ class Settings:
             ZoneInfo(self.ambient_timezone)
         except ZoneInfoNotFoundError as exc:
             raise ValueError(f"Invalid OSTAG_AMBIENT_TIMEZONE: {self.ambient_timezone}") from exc
+        if self.ambient_daily_board_enabled:
+            if len(self.ambient_chat_ids) != 1:
+                raise ValueError("daily requirement board requires exactly one ambient chat")
+            required = {
+                "auto_base_default_base_token": self.auto_base_default_base_token,
+                "auto_base_default_table_id": self.auto_base_default_table_id,
+                "ambient_daily_board_base_url": self.ambient_daily_board_base_url,
+                "feishu_app_id": self.feishu_app_id,
+                "feishu_app_secret": self.feishu_app_secret,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"daily requirement board requires {missing}")
+            if not self.ambient_daily_board_base_url.startswith("https://"):
+                raise ValueError("daily requirement board URL must use HTTPS")
+            if not 1 <= self.ambient_record_limit <= 500:
+                raise ValueError("daily requirement board record limit must be in 1..500")
         if (
             not 0 <= self.monitor_morning_digest_hour <= 23
             or not 0 <= self.monitor_evening_digest_hour <= 23

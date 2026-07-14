@@ -231,7 +231,7 @@ def create_app(
         if (
             daily_scheduler is None
             and auto_daily_scheduler is None
-            and configured.daily_task_boards_enabled
+            and (configured.daily_task_boards_enabled or configured.ambient_daily_board_enabled)
         ):
             from ostag.adapters.dingtalk import DingTalkAdapter
             from ostag.adapters.feishu import FeishuAdapter
@@ -241,7 +241,11 @@ def create_app(
                 LarkCLIRequirementTableConnector,
             )
             from ostag.workflows.auto_base import LarkCLI
-            from .daily_digest_scheduler import DailyDigestProfile, DailyTaskBoardScheduler
+            from .daily_digest_scheduler import (
+                DailyDigestProfile,
+                DailyRequirementBoardProfile,
+                DailyTaskBoardScheduler,
+            )
 
             assert runtime.service is not None
             profiles = (
@@ -267,13 +271,32 @@ def create_app(
                     transport=DingTalkAdapter(configured),
                     record_limit=configured.daily_task_board_record_limit,
                 ),
-            )
+            ) if configured.daily_task_boards_enabled else ()
+            requirement_profiles = (
+                DailyRequirementBoardProfile(
+                    destination_id=configured.ambient_chat_ids[0],
+                    base_token=configured.auto_base_default_base_token,
+                    table_id=configured.auto_base_default_table_id,
+                    table_url=configured.ambient_daily_board_base_url,
+                    group_name=configured.ambient_daily_board_group_name,
+                    connector=LarkCLIRequirementTableConnector(LarkCLI(configured), "bot"),
+                    transport=FeishuAdapter(configured),
+                    record_limit=configured.ambient_record_limit,
+                ),
+            ) if configured.ambient_daily_board_enabled else ()
+            poll_values = []
+            if configured.daily_task_boards_enabled:
+                poll_values.append(configured.daily_task_board_poll_seconds)
+            if configured.ambient_daily_board_enabled:
+                poll_values.append(configured.ambient_interval_seconds)
             auto_daily_scheduler = DailyTaskBoardScheduler(
                 runtime.service.store,
                 profiles,
                 morning_hour=configured.daily_task_board_morning_hour,
                 evening_hour=configured.daily_task_board_evening_hour,
-                poll_seconds=configured.daily_task_board_poll_seconds,
+                poll_seconds=min(poll_values),
+                requirement_profiles=requirement_profiles,
+                requirement_hour=configured.ambient_daily_board_hour,
             )
         stop = asyncio.Event()
         owners = tuple(

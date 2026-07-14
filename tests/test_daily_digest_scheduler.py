@@ -6,6 +6,7 @@ import pytest
 
 from ostag.work_monitor.daily_digest_scheduler import (
     DailyDigestProfile,
+    DailyRequirementBoardProfile,
     DailyTaskBoardScheduler,
 )
 from ostag.work_monitor.store import MonitorStore
@@ -61,6 +62,47 @@ def _profile(platform: str, connector, transport) -> DailyDigestProfile:
         connector=connector,
         transport=transport,
     )
+
+
+def _requirement_profile(connector, transport) -> DailyRequirementBoardProfile:
+    return DailyRequirementBoardProfile(
+        destination_id="oc_fde",
+        base_token="base_fde",
+        table_id="tbl_fde",
+        table_url="https://example.test/fde",
+        group_name="Dadao 投研交易 FDE",
+        connector=connector,
+        transport=transport,
+        record_limit=200,
+    )
+
+
+@pytest.mark.asyncio
+async def test_noon_requirement_board_uses_durable_window_and_read_only_connector(
+    tmp_path: Path,
+) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    now = datetime(2026, 7, 18, 4, 5, tzinfo=UTC)
+    connector, transport = Connector(), Transport()
+    profile = _requirement_profile(connector, transport)
+
+    await DailyTaskBoardScheduler(
+        store, (), requirement_profiles=(profile,), clock=lambda: now
+    ).tick()
+    await DailyTaskBoardScheduler(
+        store, (), requirement_profiles=(profile,), clock=lambda: now
+    ).tick()
+
+    assert connector.calls == 1
+    assert len(transport.sent) == 1
+    blob = json.dumps(transport.sent[0], ensure_ascii=False)
+    assert "OStag 每日需求看板" in blob
+    assert "12:00（北京时间）" in blob
+    with store.connect() as connection:
+        row = connection.execute(
+            "SELECT window_key,state FROM daily_digest_outbox WHERE window_key LIKE '%requirement_noon%'"
+        ).fetchone()
+    assert row["state"] == "delivered"
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,11 @@ from ostag.core.daily_digest_renderers import (
     render_daily_dingtalk_payload,
     render_daily_feishu_card,
 )
+from ostag.adapters.feishu_cards import render_requirement_board_card
+from ostag.core.requirement_board import (
+    analyze_daily_requirement_board,
+    format_daily_requirement_board_text,
+)
 
 from .store import MonitorStore
 
@@ -45,6 +50,24 @@ class DailyDigestProfile:
             raise ValueError("daily digest profile identifiers are required")
 
 
+@dataclass(frozen=True)
+class DailyRequirementBoardProfile:
+    destination_id: str
+    base_token: str
+    table_id: str
+    table_url: str
+    group_name: str
+    connector: RequirementTableConnector
+    transport: Any
+    enabled: bool = True
+    record_limit: int = 200
+    platform: str = "feishu"
+
+    def __post_init__(self) -> None:
+        if not all((self.destination_id, self.base_token, self.table_id, self.table_url)):
+            raise ValueError("daily requirement board profile identifiers are required")
+
+
 class DailyTaskBoardScheduler:
     def __init__(
         self,
@@ -56,11 +79,15 @@ class DailyTaskBoardScheduler:
         evening_hour: int = 18,
         poll_seconds: float = 30,
         retry_cap: int = 5,
+        requirement_profiles: tuple[DailyRequirementBoardProfile, ...] = (),
+        requirement_hour: int = 12,
     ) -> None:
         if not 0 <= morning_hour <= 23 or not 0 <= evening_hour <= 23:
             raise ValueError("daily digest hours must be in 0..23")
         if morning_hour == evening_hour:
             raise ValueError("daily digest hours must be different")
+        if not 0 <= requirement_hour <= 23:
+            raise ValueError("daily requirement board hour must be in 0..23")
         self.store = store
         self.profiles = profiles
         self.clock = clock or (lambda: datetime.now(UTC))
@@ -68,6 +95,8 @@ class DailyTaskBoardScheduler:
         self.evening_hour = evening_hour
         self.poll_seconds = max(5.0, poll_seconds)
         self.retry_cap = max(1, retry_cap)
+        self.requirement_profiles = requirement_profiles
+        self.requirement_hour = requirement_hour
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
@@ -149,6 +178,58 @@ class DailyTaskBoardScheduler:
                                 now.isoformat(),
                             ),
                         )
+        requirement_at = start.replace(hour=self.requirement_hour)
+        if requirement_at <= local:
+            for profile in self.requirement_profiles:
+                if not profile.enabled:
+                    continue
+                window_key = (
+                    f"{requirement_at.date()}:requirement_noon:feishu:{profile.destination_id}"
+                )
+                with self.store.connect() as connection:
+                    exists = connection.execute(
+                        "SELECT 1 FROM daily_digest_windows WHERE window_key=?", (window_key,)
+                    ).fetchone()
+                if exists is not None:
+                    continue
+                try:
+                    data = await profile.connector.list_records(
+                        profile.base_token,
+                        profile.table_id,
+                        AMBIENT_PROJECTION_FIELDS,
+                        limit=profile.record_limit,
+                    )
+                    board = analyze_daily_requirement_board(
+                        snapshots_from_records(data), today=local.date()
+                    )
+                    payload = render_requirement_board_card(
+                        board, group_name=profile.group_name, base_url=profile.table_url
+                    )
+                    fallback = format_daily_requirement_board_text(board)
+                except Exception:
+                    continue
+                delivery_id = "daily-" + hashlib.sha256(window_key.encode()).hexdigest()[:32]
+                with self.store.transaction() as connection:
+                    inserted = connection.execute(
+                        "INSERT OR IGNORE INTO daily_digest_windows(window_key,created_at) "
+                        "VALUES (?,?)",
+                        (window_key, now.isoformat()),
+                    ).rowcount
+                    if inserted:
+                        connection.execute(
+                            "INSERT INTO daily_digest_outbox(delivery_id,window_key,platform,"
+                            "destination_id,payload,fallback_text,next_attempt_at) "
+                            "VALUES (?,?,?,?,?,?,?)",
+                            (
+                                delivery_id,
+                                window_key,
+                                "feishu",
+                                profile.destination_id,
+                                json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                                fallback,
+                                now.isoformat(),
+                            ),
+                        )
         if drain:
             while await self.drain_once():
                 pass
@@ -163,6 +244,10 @@ class DailyTaskBoardScheduler:
         active_targets = {
             (profile.platform, profile.destination_id)
             for profile in self.profiles
+            if profile.enabled
+        } | {
+            (profile.platform, profile.destination_id)
+            for profile in self.requirement_profiles
             if profile.enabled
         }
         removed = next(
@@ -193,7 +278,7 @@ class DailyTaskBoardScheduler:
         profile = next(
             (
                 candidate
-                for candidate in self.profiles
+                for candidate in (*self.profiles, *self.requirement_profiles)
                 if candidate.enabled
                 and candidate.platform == item["platform"]
                 and candidate.destination_id == item["destination_id"]

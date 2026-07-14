@@ -576,3 +576,41 @@ def test_lifespan_owns_daily_boards_on_the_central_store(
         }
         assert owners[0].kwargs["morning_hour"] == 9
         assert owners[0].kwargs["evening_hour"] == 18
+
+
+def test_lifespan_adds_noon_requirement_board_to_the_single_daily_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owners = []
+
+    class DailyOwner:
+        def __init__(self, store, profiles, **kwargs):
+            self.profiles = profiles
+            self.kwargs = kwargs
+            owners.append(self)
+
+        async def run(self, stop) -> None:
+            await stop.wait()
+
+    monkeypatch.setattr(
+        "ostag.work_monitor.daily_digest_scheduler.DailyTaskBoardScheduler", DailyOwner
+    )
+    settings = Settings(
+        monitor_server_db=tmp_path / "central.sqlite3",
+        feishu_use_websocket=False,
+        monitor_scheduler_enabled=False,
+        ambient_daily_board_enabled=True,
+        ambient_chat_ids=("oc_fde",),
+        ambient_daily_board_base_url="https://example.test/fde",
+        auto_base_default_base_token="base_fde",
+        auto_base_default_table_id="tbl_fde",
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+    )
+
+    with TestClient(create_app(settings=settings)):
+        assert len(owners) == 1
+        profiles = owners[0].kwargs["requirement_profiles"]
+        assert len(profiles) == 1
+        assert profiles[0].destination_id == "oc_fde"
+        assert owners[0].kwargs["requirement_hour"] == 12
