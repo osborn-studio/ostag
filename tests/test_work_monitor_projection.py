@@ -152,6 +152,11 @@ def test_schema_contains_all_monitor_tables_and_unique_instance_sequence(tmp_pat
         "subscriptions",
         "notification_outbox",
         "commands",
+        "relay_sessions",
+        "relay_messages",
+        "relay_decisions",
+        "relay_current_tasks",
+        "relay_task_proposals",
     } <= tables
     assert any(index[2] for index in indexes)
 

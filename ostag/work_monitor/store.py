@@ -169,6 +169,16 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS daily_digest_outbox (delivery_id TEXT PRIMARY KEY, window_key TEXT NOT NULL, platform TEXT NOT NULL, destination_id TEXT NOT NULL, payload TEXT NOT NULL, fallback_text TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL, delivered_at TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '')",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS relay_sessions (instance_id TEXT NOT NULL, session_id TEXT NOT NULL, task_id TEXT NOT NULL, run_id TEXT NOT NULL, agent_id TEXT NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL, session_version INTEGER NOT NULL, last_turn_id TEXT NOT NULL, latest_summary TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(instance_id,session_id))",
+            "CREATE TABLE IF NOT EXISTS relay_messages (message_id TEXT PRIMARY KEY, direction TEXT NOT NULL, kind TEXT NOT NULL, binding_json TEXT NOT NULL, payload_json TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, delivered_at TEXT NOT NULL DEFAULT '', applied_at TEXT NOT NULL DEFAULT '', last_error TEXT NOT NULL DEFAULT '')",
+            "CREATE INDEX IF NOT EXISTS relay_messages_delivery ON relay_messages(direction,state,next_attempt_at,lease_until)",
+            "CREATE TABLE IF NOT EXISTS relay_decisions (decision_id TEXT PRIMARY KEY, instance_id TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, session_version INTEGER NOT NULL, question TEXT NOT NULL, choices_json TEXT NOT NULL, state TEXT NOT NULL, expires_at TEXT NOT NULL, answered_at TEXT NOT NULL DEFAULT '')",
+            "CREATE TABLE IF NOT EXISTS relay_current_tasks (platform TEXT NOT NULL, actor_id TEXT NOT NULL, instance_id TEXT NOT NULL, session_id TEXT NOT NULL, selected_at TEXT NOT NULL, PRIMARY KEY(platform,actor_id))",
+            "CREATE TABLE IF NOT EXISTS relay_task_proposals (proposal_id TEXT PRIMARY KEY, platform TEXT NOT NULL, actor_id TEXT NOT NULL, payload_json TEXT NOT NULL, state TEXT NOT NULL, expires_at TEXT NOT NULL, confirmed_at TEXT NOT NULL DEFAULT '')",
+        )
+    ),
 )
 
 
