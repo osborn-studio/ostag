@@ -139,6 +139,9 @@ def test_unsigned_action_emits_safe_shape_and_token_diagnostics(tmp_path, caplog
 
     assert response.status_code == 401
     diagnostic = caplog.text
+    assert "feishu_callback_intake" in diagnostic
+    assert '"signed_headers_complete": false' in diagnostic
+    assert '"url_verification_shape": false' in diagnostic
     assert "feishu_unsigned_callback_rejected" in diagnostic
     assert '"json_object": true' in diagnostic
     assert '"encrypted_envelope": false' in diagnostic

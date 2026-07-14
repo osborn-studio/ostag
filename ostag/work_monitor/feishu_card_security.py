@@ -94,6 +94,9 @@ class FeishuCardSecurity:
         timestamp = request.headers.get("X-Lark-Request-Timestamp", "")
         nonce = request.headers.get("X-Lark-Request-Nonce", "")
         supplied = request.headers.get("X-Lark-Signature", "")
+        self._log_callback_intake(
+            request, body=body, timestamp=timestamp, nonce=nonce, supplied=supplied
+        )
 
         # Feishu's developer-console URL probe is sent before server callback mode
         # is activated and carries no signature headers. Permit only the exact,
@@ -334,3 +337,58 @@ class FeishuCardSecurity:
             "feishu_unsigned_callback_transport_failure %s",
             json.dumps(diagnostic, sort_keys=True),
         )
+
+    def _log_callback_intake(
+        self,
+        request: Request,
+        *,
+        body: bytes,
+        timestamp: str,
+        nonce: str,
+        supplied: str,
+    ) -> None:
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            payload = None
+        payload_dict = payload if isinstance(payload, dict) else {}
+        header = payload_dict.get("header")
+        header = header if isinstance(header, dict) else {}
+        event_type = header.get("event_type")
+        if event_type == "card.action.trigger":
+            event_type_kind = "card_action_trigger"
+        elif event_type == "url_verification":
+            event_type_kind = "url_verification"
+        else:
+            event_type_kind = "other" if event_type is not None else "absent"
+        content_encoding = request.headers.get("content-encoding", "").lower().strip()
+        if content_encoding not in {"identity", "gzip", "br", "deflate"}:
+            content_encoding = "other" if content_encoding else "absent"
+        content_type = request.headers.get("content-type", "").lower().split(";", 1)[0].strip()
+        if content_type not in {"application/json", "application/octet-stream"}:
+            content_type = "other" if content_type else "absent"
+        known_legacy_fields = {"open_id", "open_message_id", "action", "token"}
+        diagnostic = {
+            "body_has_gzip_magic": body.startswith(b"\x1f\x8b"),
+            "body_length": len(body),
+            "body_sha256": hashlib.sha256(body).hexdigest()[:16],
+            "content_encoding": content_encoding,
+            "content_type": content_type,
+            "encrypted_envelope": set(payload_dict) == {"encrypt"},
+            "event_type": event_type_kind,
+            "header_app_id_matches": bool(
+                header.get("app_id") and hmac.compare_digest(
+                    str(header["app_id"]), self.expected_app_id
+                )
+            ),
+            "header_token_matches": self._token(header.get("token")),
+            "json_object": isinstance(payload, dict),
+            "legacy_shape": known_legacy_fields <= set(payload_dict),
+            "schema_v2": payload_dict.get("schema") == "2.0",
+            "signed_headers_any": bool(timestamp or nonce or supplied),
+            "signed_headers_complete": bool(timestamp and nonce and supplied),
+            "top_level_token_matches": self._token(payload_dict.get("token")),
+            "url_verification_shape": set(payload_dict) == {"challenge", "token", "type"},
+            "v1_event_envelope": bool(payload_dict.get("uuid") and payload_dict.get("event")),
+        }
+        logger.warning("feishu_callback_intake %s", json.dumps(diagnostic, sort_keys=True))
