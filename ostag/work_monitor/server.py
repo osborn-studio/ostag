@@ -491,6 +491,7 @@ def create_app(
             create_copilot_router(
                 dependencies=lambda: (dependencies()[0], dependencies()[2]),
                 bounded_body=bounded_body,
+                write_enabled=configured.copilot_relay_write_enabled,
             )
         )
 

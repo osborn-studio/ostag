@@ -50,6 +50,7 @@ def create_copilot_router(
     bounded_body: Callable[[Request], Awaitable[bytes]],
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     maximum_poll_seconds: float = 10.0,
+    write_enabled: bool = True,
 ) -> APIRouter:
     """Create mixed instance/HMAC and human/Bearer relay routes."""
     router = APIRouter(prefix="/v1/copilot")
@@ -109,6 +110,8 @@ def create_copilot_router(
         instance_id = auth.instance(request, body, service.store)
         if body not in (b"", b"{}"):
             raise HTTPException(422, "poll body must be empty")
+        if not write_enabled:
+            return {"messages": []}
         try:
             wait_seconds = min(
                 maximum_poll_seconds, max(0.0, float(request.query_params.get("wait_seconds", "0")))

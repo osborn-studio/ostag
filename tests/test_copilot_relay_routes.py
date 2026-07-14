@@ -20,7 +20,12 @@ from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 
 
-def _app(tmp_path: Path, *, max_body_bytes: int = 1_048_576):
+def _app(
+    tmp_path: Path,
+    *,
+    max_body_bytes: int = 1_048_576,
+    write_enabled: bool = True,
+):
     store = MonitorStore(tmp_path / "monitor.sqlite3")
     identities = IdentityStore(store.path)
     destination = Destination("feishu", "owner-chat", "private")
@@ -30,7 +35,10 @@ def _app(tmp_path: Path, *, max_body_bytes: int = 1_048_576):
     service = WorkMonitorService(store, identities)
     return (
         create_app(
-            settings=Settings(monitor_server_max_body_bytes=max_body_bytes),
+            settings=Settings(
+                monitor_server_max_body_bytes=max_body_bytes,
+                copilot_relay_write_enabled=write_enabled,
+            ),
             service=service,
             projector=Projector(store),
             auth=ServerAuth(
@@ -210,6 +218,25 @@ def test_poll_is_instance_scoped_leased_and_redelivered_after_expiry(tmp_path: P
             headers=_signed(b"{}", path, nonce="poll-4"),
         )
         assert timeout.status_code == 200 and timeout.json() == {"messages": []}
+
+
+def test_read_only_mode_does_not_deliver_previously_queued_writes(tmp_path: Path) -> None:
+    app, store = _app(tmp_path, write_enabled=False)
+    relay = RelayStore(store)
+    envelope = RelayEnvelope.from_dict(_envelope(1, kind="instruction.send"))
+    relay.enqueue(envelope, direction="outbound")
+    path = "/v1/copilot/messages/poll"
+
+    with TestClient(app) as client:
+        response = client.post(
+            path,
+            content=b"{}",
+            headers=_signed(b"{}", path, nonce="read-only-poll"),
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"messages": []}
+    assert relay.envelope_for_message(envelope.message_id) == envelope
 
 
 def test_ack_hash_mismatch_is_atomic_and_valid_ack_delivers(tmp_path: Path) -> None:
