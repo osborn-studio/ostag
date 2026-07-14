@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .models import RelayEnvelope
 from .redaction import sanitize_assistant_text
@@ -14,6 +16,7 @@ from .store import RelaySession
 
 MAX_CARD_BYTES = 24_000
 _MARKDOWN = re.compile(r"([\\`*_{}\[\]()#+.!|>~-])")
+_BEIJING = ZoneInfo("Asia/Shanghai")
 
 
 def _safe(value: object, limit: int = 240) -> str:
@@ -27,6 +30,11 @@ def _safe(value: object, limit: int = 240) -> str:
 def safe_plain_text(value: object, limit: int = 500) -> str:
     filtered = sanitize_assistant_text(str(value), max_codepoints=limit)
     return filtered.text if filtered.text else "[内容已隐藏]"
+
+
+def _beijing_time(value: str) -> str:
+    timestamp = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    return timestamp.astimezone(_BEIJING).strftime("%Y-%m-%d %H:%M 北京时间")
 
 
 def _action(
@@ -86,7 +94,7 @@ def render_current_task_card(
         {
             "tag": "note",
             "elements": [
-                {"tag": "plain_text", "content": f"最近更新 {session.updated_at[:19]} UTC"}
+                {"tag": "plain_text", "content": f"最近更新 {_beijing_time(session.updated_at)}"}
             ],
         },
     ]
@@ -124,7 +132,7 @@ def render_decision_card(
         {
             "tag": "note",
             "elements": [
-                {"tag": "plain_text", "content": f"回复此消息也可作答 · {envelope.expires_at[:19]} UTC 前有效"}
+                {"tag": "plain_text", "content": f"回复此消息也可作答 · {_beijing_time(envelope.expires_at)}前有效"}
             ],
         },
     ]

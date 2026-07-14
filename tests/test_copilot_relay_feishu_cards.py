@@ -109,6 +109,19 @@ def test_decision_and_proposal_cards_show_context_but_never_source_paths() -> No
     assert "sess-secret-native" not in decision + proposal
 
 
+def test_card_timestamps_are_rendered_in_beijing_time() -> None:
+    current = _encoded(render_current_task_card(_session(), can_act=False))
+    decision = _encoded(
+        render_decision_card(
+            _session(), _envelope("decision.request"), can_act=False
+        )
+    )
+
+    assert "2026-07-14 09:00 北京时间" in current
+    assert "2026-07-14 10:00 北京时间" in decision
+    assert " UTC" not in current + decision
+
+
 def test_non_owner_cards_have_no_action_elements() -> None:
     def callback(action: str, ref: str) -> str:
         return "must-not-be-called"
