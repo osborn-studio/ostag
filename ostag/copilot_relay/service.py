@@ -134,6 +134,7 @@ class CopilotRelayService:
         )
         if not self.store.confirm_proposal(confirmation, confirmed_at=confirmed_at):
             raise RelayRoutingError("proposal expired or was already confirmed")
+        self.store.enqueue(stored, direction="outbound")
         self.store.enqueue(confirmation, direction="outbound")
         return RelayResult("queued", outbound=confirmation)
 

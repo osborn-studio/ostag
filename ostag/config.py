@@ -178,6 +178,14 @@ class Settings:
     monitor_degraded_seconds: int = 120
     monitor_offline_seconds: int = 600
     monitor_notification_retry_cap: int = 5
+    copilot_relay_enabled: bool = False
+    copilot_relay_instance_id: str = "local"
+    copilot_relay_secret: str = ""
+    copilot_relay_central_url: str = ""
+    copilot_relay_spool_db: Path = Path("./logs/copilot_relay_spool.sqlite3")
+    copilot_relay_osstack_bin: str = "osstack"
+    copilot_relay_poll_interval_seconds: int = 5
+    copilot_relay_max_text_chars: int = 4_000
     daily_task_boards_enabled: bool = False
     daily_task_board_poll_seconds: int = 30
     daily_task_board_morning_hour: int = 9
@@ -206,6 +214,26 @@ class Settings:
             raise ValueError("monitor thresholds require 0 < degraded < offline")
         if self.monitor_notification_retry_cap <= 0:
             raise ValueError("monitor notification retry cap must be positive")
+        if self.copilot_relay_enabled:
+            required = {
+                "copilot_relay_instance_id": self.copilot_relay_instance_id,
+                "copilot_relay_secret": self.copilot_relay_secret,
+                "copilot_relay_central_url": self.copilot_relay_central_url,
+                "copilot_relay_osstack_bin": self.copilot_relay_osstack_bin,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"copilot relay requires {missing}")
+            url = self.copilot_relay_central_url
+            local_http = url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
+            if not url.startswith("https://") and not local_http:
+                raise ValueError("copilot relay central URL must use HTTPS outside localhost")
+            if self.env.casefold() in {"prod", "production"} and not url.startswith("https://"):
+                raise ValueError("copilot relay production central URL must use HTTPS")
+            if self.copilot_relay_poll_interval_seconds < 1:
+                raise ValueError("copilot relay poll interval must be positive")
+            if not 1 <= self.copilot_relay_max_text_chars <= 16_000:
+                raise ValueError("copilot relay max text must be in 1..16000")
         if self.daily_task_boards_enabled:
             if (
                 not 0 <= self.daily_task_board_morning_hour <= 23
@@ -389,6 +417,16 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_degraded_seconds=_int("OSTAG_MONITOR_DEGRADED_SECONDS", 120),
         monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
         monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
+        copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
+        copilot_relay_instance_id=os.getenv("OSTAG_COPILOT_RELAY_INSTANCE_ID", "local"),
+        copilot_relay_secret=os.getenv("OSTAG_COPILOT_RELAY_SECRET", ""),
+        copilot_relay_central_url=os.getenv("OSTAG_COPILOT_RELAY_CENTRAL_URL", ""),
+        copilot_relay_spool_db=Path(
+            os.getenv("OSTAG_COPILOT_RELAY_SPOOL_DB", "./logs/copilot_relay_spool.sqlite3")
+        ),
+        copilot_relay_osstack_bin=os.getenv("OSTAG_COPILOT_RELAY_OSSTACK_BIN", "osstack"),
+        copilot_relay_poll_interval_seconds=_int("OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS", 5),
+        copilot_relay_max_text_chars=_int("OSTAG_COPILOT_RELAY_MAX_TEXT_CHARS", 4_000),
         daily_task_boards_enabled=_bool("OSTAG_DAILY_TASK_BOARDS_ENABLED", False),
         daily_task_board_poll_seconds=_int("OSTAG_DAILY_TASK_BOARD_POLL_SECONDS", 30),
         daily_task_board_morning_hour=_int("OSTAG_DAILY_TASK_BOARD_MORNING_HOUR", 9),

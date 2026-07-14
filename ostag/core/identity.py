@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-PLATFORMS = frozenset({"slack", "feishu", "lark", "dingtalk", "telegram"})
+PLATFORMS = frozenset({"slack", "feishu", "lark", "dingtalk", "telegram", "osstack"})
 
 
 @dataclass(frozen=True)

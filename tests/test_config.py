@@ -1,3 +1,5 @@
+import pytest
+
 from ostag.config import Settings, load_settings
 
 
@@ -24,6 +26,36 @@ def _enabled_settings(**overrides) -> Settings:
 
 def test_daily_task_boards_are_disabled_by_default() -> None:
     assert Settings().daily_task_boards_enabled is False
+    assert Settings().copilot_relay_enabled is False
+
+
+def test_copilot_relay_requires_complete_secure_configuration() -> None:
+    base = {
+        "copilot_relay_enabled": True,
+        "copilot_relay_instance_id": "macmini",
+        "copilot_relay_secret": "secret",
+        "copilot_relay_central_url": "https://relay.example",
+    }
+    Settings(**base).validate()
+    Settings(**(base | {"copilot_relay_central_url": "http://127.0.0.1:8000"})).validate()
+    for field in ("copilot_relay_instance_id", "copilot_relay_secret", "copilot_relay_central_url"):
+        with pytest.raises(ValueError, match=field):
+            Settings(**(base | {field: ""})).validate()
+    with pytest.raises(ValueError, match="HTTPS"):
+        Settings(**(base | {"copilot_relay_central_url": "http://relay.example"})).validate()
+    with pytest.raises(ValueError, match="production.*HTTPS"):
+        Settings(**(base | {"env": "production", "copilot_relay_central_url": "http://localhost:8000"})).validate()
+
+
+def test_copilot_relay_environment_profile(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("OSTAG_COPILOT_RELAY_ENABLED", "true")
+    monkeypatch.setenv("OSTAG_COPILOT_RELAY_INSTANCE_ID", "macmini")
+    monkeypatch.setenv("OSTAG_COPILOT_RELAY_SECRET", "secret")
+    monkeypatch.setenv("OSTAG_COPILOT_RELAY_CENTRAL_URL", "https://relay.example")
+    monkeypatch.setenv("OSTAG_COPILOT_RELAY_SPOOL_DB", str(tmp_path / "relay.db"))
+    settings = load_settings(None)
+    assert settings.copilot_relay_enabled is True
+    assert settings.copilot_relay_spool_db == tmp_path / "relay.db"
 
 
 def test_enabled_daily_task_boards_require_complete_profiles() -> None:

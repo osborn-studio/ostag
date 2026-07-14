@@ -1,0 +1,242 @@
+import hashlib
+import hmac
+import json
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from ostag.copilot_relay.models import RelayEnvelope
+from ostag.copilot_relay.osstack_port import OsstackSession
+from ostag.copilot_relay.reporter import CopilotReporter
+from ostag.work_monitor.reporter import TransportResponse
+
+
+NOW = datetime(2026, 7, 14, 1, 0, tzinfo=UTC)
+
+
+class FakePort:
+    def __init__(self) -> None:
+        self.sessions = (
+            OsstackSession("sess_1", "task_1", "run_1", "codex-cli", "idle", True, True, 4, 1.0),
+        )
+        self.sent: list[str] = []
+        self.send_results = ["applied"]
+        self.created_tasks = []
+
+    def list_sessions(self):
+        return self.sessions
+
+    def snapshot(self, session_id):
+        return {
+            "session_id": session_id, "task_id": "task_1", "run_id": "run_1",
+            "agent_id": "codex-cli", "state": "idle", "version": 4,
+            "turn_id": "turn_4", "assistant_text": "请选择方案", "decision": None,
+            "updated_at": 1.0,
+        }
+
+    def send(self, envelope):
+        self.sent.append(envelope.message_id)
+        return {"state": self.send_results.pop(0), "session_version": 5, "events": []}
+
+    def create_task(self, confirmation, proposal):
+        self.created_tasks.append((confirmation.message_id, proposal.payload["proposal_id"]))
+
+
+class FakeTransport:
+    def __init__(self, responses=None):
+        self.responses = list(responses or [])
+        self.requests = []
+
+    def request(self, method, url, body, headers):
+        self.requests.append((method, url, body, headers))
+        if not self.responses:
+            raise OSError("offline")
+        return self.responses.pop(0)
+
+
+def _instruction(
+    *, message_id="in_1", version=4, created="2026-07-14T01:00:00Z",
+    expires="2026-07-14T02:00:00Z"
+):
+    return RelayEnvelope.from_dict(
+        {
+            "schema_version": 1, "message_id": message_id,
+            "binding": {
+                "instance_id": "macmini", "task_id": "task_1", "run_id": "run_1",
+                "session_id": "sess_1", "turn_id": "turn_4", "session_version": version,
+            },
+            "sequence": 1, "created_at": created, "expires_at": expires,
+            "sender": {"platform": "feishu", "actor_id": "owner"},
+            "kind": "instruction.send", "payload": {"text": "继续"},
+            "correlation_id": None, "causation_id": None,
+        }
+    )
+
+
+def _reporter(tmp_path, *, transport=None, port=None, clock=lambda: NOW):
+    return CopilotReporter(
+        instance_id="macmini", secret="relay-secret", central_url="https://relay.example",
+        spool_path=tmp_path / "relay.sqlite3", port=port or FakePort(),
+        transport=transport or FakeTransport(), clock=clock,
+    )
+
+
+@pytest.mark.asyncio
+async def test_discovery_snapshot_spools_in_order_and_survives_restart(tmp_path) -> None:
+    reporter = _reporter(tmp_path)
+    assert await reporter.discover_sessions_once() == 1
+    assert await reporter.capture_changed_snapshots_once() == 2
+    pending = reporter.pending_outbound()
+    assert [item.kind for item in pending] == ["session.upsert", "assistant.snapshot"]
+    assert [item.sequence for item in pending] == [1, 2]
+
+    restarted = _reporter(tmp_path)
+    assert [item.message_id for item in restarted.pending_outbound()] == [
+        item.message_id for item in pending
+    ]
+    assert await restarted.capture_changed_snapshots_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_flush_has_stable_hmac_and_ack_deletes_only_sent_sequence(tmp_path) -> None:
+    transport = FakeTransport([TransportResponse(200, b'{"ack_sequence":1}')])
+    reporter = _reporter(tmp_path, transport=transport)
+    await reporter.discover_sessions_once()
+    await reporter.capture_changed_snapshots_once()
+
+    assert await reporter.flush_outbound_once() == 1
+    method, url, body, headers = transport.requests[0]
+    assert method == "POST" and url.endswith("/v1/copilot/events")
+    canonical = "\n".join(
+        ("v1", "POST", "/v1/copilot/events", "macmini", headers["X-OStag-Timestamp"],
+         headers["X-OStag-Nonce"], hashlib.sha256(body).hexdigest())
+    ).encode()
+    assert headers["X-OStag-Signature"] == hmac.new(
+        b"relay-secret", canonical, hashlib.sha256
+    ).hexdigest()
+    assert [item.sequence for item in reporter.pending_outbound()] == [2]
+
+
+@pytest.mark.asyncio
+async def test_outbound_sequence_never_reuses_after_full_ack_and_restart(tmp_path) -> None:
+    transport = FakeTransport([TransportResponse(200, b'{"ack_sequence":2}')])
+    reporter = _reporter(tmp_path, transport=transport)
+    await reporter.discover_sessions_once()
+    await reporter.capture_changed_snapshots_once()
+    assert await reporter.flush_outbound_once() == 2
+    assert reporter.pending_outbound() == []
+
+    restarted = _reporter(tmp_path)
+    with restarted._connect() as db:
+        envelope = restarted._make_envelope(
+            db,
+            _instruction().binding,
+            "delivery.receipt",
+            {
+                "related_message_id": "x", "state": "applied", "summary": "ok",
+                "error_code": None,
+            },
+            "receipt_after_restart",
+        )
+        restarted._insert_outbound(db, envelope)
+    assert restarted.pending_outbound()[0].sequence == 3
+
+
+@pytest.mark.asyncio
+async def test_offline_retry_backoff_and_409_reconciliation_preserve_spool(tmp_path) -> None:
+    current = [NOW]
+    transport = FakeTransport(
+        [TransportResponse(500, b""), TransportResponse(409, b'{"expected_sequence":1}')]
+    )
+    reporter = _reporter(tmp_path, transport=transport, clock=lambda: current[0])
+    await reporter.discover_sessions_once()
+    await reporter.capture_changed_snapshots_once()
+    assert await reporter.flush_outbound_once() == 0
+    assert len(reporter.pending_outbound()) == 2
+    assert await reporter.flush_outbound_once() == 0
+    current[0] += timedelta(seconds=3)
+    assert await reporter.flush_outbound_once() == 0
+    assert reporter.reconciliation_required() is True
+    assert len(reporter.pending_outbound()) == 2
+
+
+@pytest.mark.asyncio
+async def test_duplicate_poll_expiry_exact_version_and_apply_ack_recovery(tmp_path) -> None:
+    messages = [_instruction().to_dict(), _instruction().to_dict()]
+    transport = FakeTransport([TransportResponse(200, json.dumps({"messages": messages}).encode())])
+    port = FakePort()
+    reporter = _reporter(tmp_path, transport=transport, port=port)
+    assert await reporter.poll_inbound_once() == 1
+    assert await reporter.apply_inbound_once() == 1
+    assert port.sent == ["in_1"]
+    receipts = [item for item in reporter.pending_outbound() if item.kind == "delivery.receipt"]
+    assert receipts[-1].payload["state"] == "applied"
+
+    expired_transport = FakeTransport(
+        [TransportResponse(200, json.dumps({"messages": [_instruction(
+            message_id="expired", created="2026-07-14T00:00:00Z",
+            expires="2026-07-14T00:59:59Z"
+        ).to_dict()]}).encode())]
+    )
+    expired = _reporter(tmp_path, transport=expired_transport, port=port)
+    assert await expired.poll_inbound_once() == 1
+    assert await expired.apply_inbound_once() == 0
+    assert "expired" not in port.sent
+
+
+@pytest.mark.asyncio
+async def test_crash_after_local_apply_replays_same_message_id_and_osstack_deduplicates(tmp_path) -> None:
+    transport = FakeTransport(
+        [TransportResponse(200, json.dumps({"messages": [_instruction().to_dict()]}).encode())]
+    )
+    port = FakePort()
+    port.send_results = ["applied", "duplicate"]
+    reporter = _reporter(tmp_path, transport=transport, port=port)
+    await reporter.poll_inbound_once()
+    reporter._after_local_apply = lambda: (_ for _ in ()).throw(RuntimeError("crash"))
+    with pytest.raises(RuntimeError, match="crash"):
+        await reporter.apply_inbound_once()
+
+    restarted = _reporter(tmp_path, port=port)
+    assert await restarted.apply_inbound_once() == 1
+    assert port.sent == ["in_1", "in_1"]
+
+
+@pytest.mark.asyncio
+async def test_snapshot_request_returns_safe_snapshot_to_outbound_spool(tmp_path) -> None:
+    request = _instruction(message_id="snapshot_request").to_dict()
+    request["kind"] = "assistant.snapshot"
+    request["payload"] = {"assistant_text": "", "redaction_count": 0, "truncated": False}
+    transport = FakeTransport(
+        [TransportResponse(200, json.dumps({"messages": [request]}).encode())]
+    )
+    reporter = _reporter(tmp_path, transport=transport)
+    await reporter.poll_inbound_once()
+    assert await reporter.apply_inbound_once() == 1
+    snapshots = [item for item in reporter.pending_outbound() if item.kind == "assistant.snapshot"]
+    assert snapshots[-1].payload["assistant_text"] == "请选择方案"
+
+
+@pytest.mark.asyncio
+async def test_task_proposal_is_staged_until_matching_confirmation(tmp_path) -> None:
+    proposal = _instruction(message_id="proposal_message").to_dict()
+    proposal["kind"] = "task.create.proposal"
+    proposal["payload"] = {
+        "proposal_id": "proposal_1", "objective": "修复登录", "repository": "ostag",
+        "workspace": "managed", "suggested_agent": "codex-cli",
+        "acceptance_criteria": ["tests pass"], "sensitive_operations": [],
+    }
+    confirmation = _instruction(message_id="confirm_message").to_dict()
+    confirmation["kind"] = "task.create.confirm"
+    confirmation["payload"] = {"proposal_id": "proposal_1", "confirmed": True}
+    port = FakePort()
+    reporter = _reporter(
+        tmp_path,
+        port=port,
+        transport=FakeTransport(
+            [TransportResponse(200, json.dumps({"messages": [proposal, confirmation]}).encode())]
+        ),
+    )
+    assert await reporter.poll_inbound_once() == 2
+    assert await reporter.apply_inbound_once() == 1
+    assert port.created_tasks == [("confirm_message", "proposal_1")]
