@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ostag.adapters.base import Adapter
+from ostag.adapters.base import Adapter, StructuredCardAdapter
 from ostag.adapters.dingtalk import DingTalkAdapter, signed_webhook_url
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.adapters.lark import LarkAdapter
@@ -313,6 +313,35 @@ async def test_feishu_reply_includes_required_message_type(monkeypatch, tmp_path
     payload = json.loads(captured["body"].decode())
     assert payload["msg_type"] == "text"
     assert json.loads(payload["content"]) == {"text": "live validation ok"}
+
+
+@pytest.mark.asyncio
+async def test_feishu_send_card_uses_interactive_message(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    async def fake_token():
+        return "tenant-token"
+
+    async def fake_to_thread(func, req):
+        captured["url"] = req.full_url
+        captured["body"] = req.data
+        return {"code": 0}
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False,
+                           feishu_app_id="cli_test", feishu_app_secret="secret_test")
+    adapter = FeishuAdapter(config)
+    monkeypatch.setattr(adapter, "_tenant_access_token", fake_token)
+    monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
+    card = {"schema": "2.0", "body": {"elements": []}}
+
+    await adapter.send_card("oc_demo", card)
+
+    payload = json.loads(captured["body"].decode())
+    assert payload["receive_id"] == "oc_demo"
+    assert payload["msg_type"] == "interactive"
+    assert json.loads(payload["content"]) == card
+    assert "receive_id_type=chat_id" in captured["url"]
+    assert isinstance(adapter, StructuredCardAdapter)
 
 
 @pytest.mark.asyncio
