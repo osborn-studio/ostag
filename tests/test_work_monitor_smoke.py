@@ -211,7 +211,7 @@ async def test_deterministic_two_instance_control_and_notification_loop(
 
     assert len(feishu.deliveries) == 1
     assert len(telegram.deliveries) == 1
-    assert feishu.deliveries[0][0] == destination.destination_id
+    assert feishu.deliveries[0][0] == principal.actor_id
     assert telegram.deliveries[0][0] == telegram_destination.destination_id
     assert {feishu.deliveries[0][1], telegram.deliveries[0][1]} == stable_delivery_ids
     with store.connect() as connection:
