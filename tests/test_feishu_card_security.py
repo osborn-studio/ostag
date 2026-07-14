@@ -237,7 +237,7 @@ def test_authenticated_envelope_logs_token_and_app_match_without_values(tmp_path
     assert response.status_code == 401
     diagnostic = caplog.text
     assert "feishu_signature_verified" in diagnostic
-    assert '"fresh": true' in diagnostic
+    assert '"timestamp_accepted": true' in diagnostic
     assert "feishu_authenticated_payload" in diagnostic
     assert '"schema_v2": true' in diagnostic
     assert '"event_type": "card_action_trigger"' in diagnostic
@@ -352,6 +352,32 @@ def test_replay_is_persisted_before_decrypt_and_encrypted_without_key_is_rejecte
     )
     with TestClient(_app(no_key)) as client:
         assert client.post("/callback", content=body, headers=_headers(body)).status_code == 401
+
+
+def test_opaque_signed_timestamp_is_accepted_but_nonce_replay_is_rejected(tmp_path) -> None:
+    body = b'{"encrypt":"ciphertext"}'
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test", verification_token="verify", expected_app_id="app",
+        store=MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1_700_000_000,
+        decryptor=lambda cipher, key: json.dumps({
+            "schema": "2.0",
+            "header": {
+                "event_type": "url_verification", "token": "verify", "app_id": "app",
+            },
+            "event": {"challenge": "opaque-time-ok"},
+        }).encode(),
+    )
+    headers = _headers(
+        body, timestamp="2026-07-14T12:34:56.789Z", nonce="opaque-time-nonce"
+    )
+
+    with TestClient(_app(security)) as client:
+        accepted = client.post("/callback", content=body, headers=headers)
+        replayed = client.post("/callback", content=body, headers=headers)
+
+    assert accepted.status_code == 200
+    assert accepted.json() == {"kind": "challenge", "actor": ""}
+    assert replayed.status_code == 401
 
 
 def test_verified_payload_derives_principal_and_ignores_button_identity(tmp_path) -> None:

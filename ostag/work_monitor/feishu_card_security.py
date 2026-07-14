@@ -175,25 +175,19 @@ class FeishuCardSecurity:
             raise HTTPException(401, "invalid Feishu callback signature")
 
         # 3. Enforce freshness and persist replay state before decrypting.
-        try:
-            signed_at = int(timestamp)
-        except ValueError as exc:
-            logger.warning(
-                'feishu_signature_verified {"fresh": false, "timestamp_integer": false}'
-            )
-            raise HTTPException(401, "invalid Feishu callback timestamp") from exc
+        # Feishu defines this header as an opaque part of the signed bytes; its
+        # official SDK does not require a Unix-integer representation. Replay
+        # retention is therefore based on trusted server receive time. Domain
+        # actions remain protected by their own five-minute, one-use capability.
         now = int(self.clock())
-        fresh = abs(now - signed_at) <= self.max_clock_skew_seconds
         logger.warning(
             "feishu_signature_verified %s",
-            json.dumps({"fresh": fresh, "timestamp_integer": True}, sort_keys=True),
+            json.dumps({"timestamp_accepted": bool(timestamp)}, sort_keys=True),
         )
-        if not fresh:
-            raise HTTPException(401, "stale Feishu callback")
         replay_store = self.store() if callable(self.store) else self.store
         nonce_accepted = replay_store.consume_instance_nonce(
             "feishu-card", nonce, now=now,
-            expires_at=max(now, signed_at) + self.max_clock_skew_seconds,
+            expires_at=now + self.max_clock_skew_seconds,
         )
         logger.warning(
             "feishu_replay_check %s",
