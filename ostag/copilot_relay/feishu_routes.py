@@ -194,9 +194,15 @@ class CopilotFeishuController:
                     or (action == "status_refresh" and reference == "team")
                     else "personal"
                 )
-                return self._status_board(
+                board = self._status_board(
                     principal, destination, scope=scope, mixed=False
                 )
+                toast = {
+                    "status_refresh": "看板已刷新",
+                    "status_personal": "已切换到我的设备",
+                    "status_team": "已切换到团队总览",
+                }[action]
+                return FeishuRelayResponse(toast, board.card)
             if action == "current":
                 current = self.store.current_session(
                     principal.platform, principal.actor_id

@@ -363,8 +363,16 @@ def test_member_status_is_scoped_and_owner_can_switch_to_team(tmp_path) -> None:
         principal=OWNER,
         destination=PRIVATE,
     )
+    assert team.text == "已切换到团队总览"
     team_encoded = json.dumps(team.card, ensure_ascii=False).replace("\\", "")
     assert "macmini" in team_encoded and "employee-mac" in team_encoded
+    personal_callback = _button_callback(team.card, "我的设备")
+    personal = owner_controller.handle_callback(
+        personal_callback,
+        principal=OWNER,
+        destination=PRIVATE,
+    )
+    assert personal.text == "已切换到我的设备"
     assert _outbound_count(store) == 0
 
 
@@ -383,4 +391,5 @@ def test_status_refresh_callback_is_read_only(tmp_path) -> None:
     )
 
     assert refreshed.card is not None
+    assert refreshed.text == "看板已刷新"
     assert _outbound_count(store) == before
