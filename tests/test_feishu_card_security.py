@@ -442,6 +442,109 @@ def test_verified_private_chat_type_comes_from_server_binding_not_oc_prefix(tmp_
     assert response.json() == {"chat_type": "private"}
 
 
+def test_copilot_card_callback_wraps_raw_card_for_new_feishu_protocol(tmp_path) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    principal = Principal("feishu", "ou_verified")
+    destination = Destination("feishu", "oc_private", "private")
+    identities = IdentityStore(store.path)
+    identities.bind_private(owner=principal, destination=destination, local_admin=True)
+    service = WorkMonitorService(store, identities)
+    card = {
+        "config": {"wide_screen_mode": False},
+        "elements": [{"tag": "markdown", "content": "已刷新"}],
+    }
+
+    class Copilot:
+        def handle_callback(self, callback_id, *, principal, destination):
+            from ostag.copilot_relay.feishu_routes import FeishuRelayResponse
+
+            return FeishuRelayResponse("刷新成功", card)
+
+    payload = {
+        "schema": "2.0",
+        "header": {
+            "event_id": "evt",
+            "event_type": "card.action.trigger",
+            "token": "verify",
+            "app_id": "app",
+        },
+        "event": {
+            "operator": {"open_id": principal.actor_id},
+            "context": {"open_chat_id": destination.destination_id},
+            "action": {"tag": "button", "value": {"callback_id": "cr_test"}},
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test",
+        verification_token="verify",
+        expected_app_id="app",
+        store=store,
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app,
+        create_feishu_card_router(service, copilot=Copilot()),
+        security=SecurityContract("verified_platform", security),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/feishu/card-action", content=body, headers=_headers(body)
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "toast": {"type": "success", "content": "刷新成功"},
+        "card": {"type": "raw", "data": card},
+    }
+
+
+def test_invalid_callback_failure_card_uses_new_feishu_raw_wrapper(tmp_path) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    principal = Principal("feishu", "ou_verified")
+    destination = Destination("feishu", "oc_private", "private")
+    identities = IdentityStore(store.path)
+    identities.bind_private(owner=principal, destination=destination, local_admin=True)
+    service = WorkMonitorService(store, identities)
+    payload = {
+        "schema": "2.0",
+        "header": {
+            "event_type": "card.action.trigger",
+            "token": "verify",
+            "app_id": "app",
+        },
+        "event": {
+            "operator": {"open_id": principal.actor_id},
+            "context": {"open_chat_id": destination.destination_id},
+            "action": {"tag": "button", "value": {"callback_id": "missing"}},
+        },
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    security = FeishuCardSecurity(
+        encrypt_key="enc-test",
+        verification_token="verify",
+        expected_app_id="app",
+        store=store,
+    )
+    app = FastAPI()
+    register_feishu_card_router(
+        app,
+        create_feishu_card_router(service),
+        security=SecurityContract("verified_platform", security),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/feishu/card-action", content=body, headers=_headers(body)
+        )
+
+    result = response.json()
+    assert result["toast"] == {"type": "error", "content": "操作已过期或已使用"}
+    assert result["card"]["type"] == "raw"
+    assert result["card"]["data"]["elements"][0]["content"] == "操作已过期或已使用"
+
+
 def test_message_event_and_schema_extensions_are_rejected(tmp_path) -> None:
     payload = {"schema": "2.0", "header": {
         "event_type": "im.message.receive_v1", "token": "verify", "app_id": "app"}, "event": {}}
@@ -561,7 +664,9 @@ def test_encrypted_opaque_control_proposes_then_confirms_exactly_once(tmp_path) 
         first = client.post("/webhooks/feishu/card-action", content=body, headers=headers).json()
         with store.connect() as db:
             assert db.execute("SELECT COUNT(*) FROM commands").fetchone()[0] == 0
-        confirm = first["card"]["elements"][0]["actions"][0]["value"]["callback_id"]
+        confirm = first["card"]["data"]["elements"][0]["actions"][0]["value"][
+            "callback_id"
+        ]
         payloads["confirm"] = action(confirm)
         body, headers = envelope("confirm", "confirm")
         assert client.post("/webhooks/feishu/card-action", content=body,

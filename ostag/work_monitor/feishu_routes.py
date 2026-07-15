@@ -55,9 +55,15 @@ def create_feishu_card_router(
             control_action=control_action,
         )
 
+    def raw_card(card: dict[str, object]) -> dict[str, object]:
+        """Wrap card JSON for the current card.action.trigger response protocol."""
+        return {"type": "raw", "data": card}
+
     def failure_card(message: str) -> dict[str, object]:
         return {"toast": {"type": "error", "content": message},
-                "card": {"elements": [{"tag": "markdown", "content": message}]}}
+                "card": raw_card(
+                    {"elements": [{"tag": "markdown", "content": message}]}
+                )}
 
     @router.post("/webhooks/feishu/card-action")
     async def card_action(request: Request) -> dict[str, object]:
@@ -83,7 +89,7 @@ def create_feishu_card_router(
                     "toast": {"type": "success", "content": response.text}
                 }
                 if response.card is not None:
-                    result["card"] = response.card
+                    result["card"] = raw_card(response.card)
                 return result
             mapped = active().store.consume_control_callback(
                 value["callback_id"], principal_platform=verified.principal.platform,
@@ -118,10 +124,28 @@ def create_feishu_card_router(
                 verified.principal, destination, action="confirm",
                 task_id=receipt.action_id, control_action=action,
             )
-            return {"toast": {"type": "success", "content": "请再次确认"}, "card": {
-                "elements": [{"tag": "action", "actions": [{"tag": "button",
-                    "text": {"tag": "plain_text", "content": "确认"},
-                    "value": {"callback_id": confirm_id}}]}]}}
+            return {
+                "toast": {"type": "success", "content": "请再次确认"},
+                "card": raw_card(
+                    {
+                        "elements": [
+                            {
+                                "tag": "action",
+                                "actions": [
+                                    {
+                                        "tag": "button",
+                                        "text": {
+                                            "tag": "plain_text",
+                                            "content": "确认",
+                                        },
+                                        "value": {"callback_id": confirm_id},
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+            }
         except (IdentityError, PermissionError):
             return failure_card("没有权限")
         except (TaskNotFound, ValueError, SchemaError):
