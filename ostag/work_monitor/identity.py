@@ -333,6 +333,29 @@ class IdentityStore:
         if not changed:
             raise IdentityError("active instance binding not found")
 
+    def instance_bindings(self, *, actor_id: str | None = None) -> list[dict[str, str]]:
+        query = (
+            "SELECT principal_platform,actor_id,instance_id,display_name,bound_at "
+            "FROM monitor_instance_owners WHERE revoked=0"
+        )
+        parameters: tuple[str, ...] = ()
+        if actor_id:
+            query += " AND actor_id=?"
+            parameters = (actor_id,)
+        query += " ORDER BY principal_platform,actor_id,instance_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [
+            {
+                "platform": str(row["principal_platform"]),
+                "actor_id": str(row["actor_id"]),
+                "instance_id": str(row["instance_id"]),
+                "display_name": str(row["display_name"]),
+                "bound_at": str(row["bound_at"]),
+            }
+            for row in rows
+        ]
+
     def personal_instances(self, principal: Principal) -> frozenset[str]:
         with self._connect() as connection:
             rows = connection.execute(

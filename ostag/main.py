@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ostag.adapters.dingtalk import DingTalkAdapter
@@ -18,6 +19,7 @@ from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
 from ostag.core.event import NormalizedEvent
+from ostag.core.identity import Principal
 from ostag.core.followups import FollowUpService
 from ostag.core.permissions import LOCAL_ADMIN_ACTOR
 from ostag.core.receipts import ReceiptCommand
@@ -27,7 +29,7 @@ from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
 from ostag.workflows.auto_base import AutoBaseWorkflow
 from ostag.work_monitor.reporter import Reporter
-from ostag.work_monitor.identity import IdentityStore
+from ostag.work_monitor.identity import Destination, IdentityError, IdentityStore
 from ostag.work_monitor.service import WorkMonitorService
 from ostag.work_monitor.store import MonitorStore
 from ostag.work_monitor.executor import (
@@ -229,6 +231,27 @@ def build_parser() -> argparse.ArgumentParser:
         command = reporter_sub.add_parser(name)
         command.add_argument("--json", action="store_true")
         command.add_argument("--config")
+    access_parser = monitor_sub.add_parser(
+        "access", help="Manage Feishu member and osstack instance ownership."
+    )
+    access_sub = access_parser.add_subparsers(dest="access_command", required=True)
+    access_bind = access_sub.add_parser("bind-instance")
+    access_bind.add_argument("--platform", choices=["feishu"], required=True)
+    access_bind.add_argument("--actor", required=True)
+    access_bind.add_argument("--private-chat", required=True)
+    access_bind.add_argument("--instance", required=True)
+    access_bind.add_argument("--display-name", required=True)
+    access_bind.add_argument("--role", choices=["member", "owner", "admin"], required=True)
+    access_bind.add_argument("--json", action="store_true")
+    access_bind.add_argument("--config")
+    access_revoke = access_sub.add_parser("revoke-instance")
+    access_revoke.add_argument("--instance", required=True)
+    access_revoke.add_argument("--json", action="store_true")
+    access_revoke.add_argument("--config")
+    access_list = access_sub.add_parser("list")
+    access_list.add_argument("--actor")
+    access_list.add_argument("--json", action="store_true")
+    access_list.add_argument("--config")
 
     channel = subparsers.add_parser("channel", help="Per-channel policy management.")
     channel_sub = channel.add_subparsers(dest="channel_command", required=True)
@@ -435,8 +458,57 @@ def run_monitor_command(args: argparse.Namespace) -> int:
     import sys
 
     config = load_settings(getattr(args, "config", None))
-    reporter, executor = _reporter_from_config(config)
     as_json = getattr(args, "json", False)
+    if args.monitor_command == "access":
+        identities = IdentityStore(config.monitor_server_db)
+        now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        try:
+            if args.access_command == "bind-instance":
+                principal = Principal(args.platform, args.actor)
+                identities.bind_private(
+                    owner=principal,
+                    destination=Destination(args.platform, args.private_chat, "private"),
+                    local_admin=True,
+                    role=args.role,
+                )
+                identities.bind_instance(
+                    principal,
+                    args.instance,
+                    display_name=args.display_name,
+                    bound_at=now,
+                )
+                _emit(
+                    {
+                        "bound": True,
+                        "platform": args.platform,
+                        "actor_id": args.actor,
+                        "instance_id": args.instance,
+                        "display_name": args.display_name,
+                        "role": args.role,
+                    },
+                    as_json=as_json,
+                )
+                return 0
+            if args.access_command == "revoke-instance":
+                identities.revoke_instance(args.instance, revoked_at=now)
+                _emit(
+                    {"revoked": True, "instance_id": args.instance}, as_json=as_json
+                )
+                return 0
+            if args.access_command == "list":
+                _emit(
+                    {"bindings": identities.instance_bindings(actor_id=args.actor)},
+                    as_json=as_json,
+                )
+                return 0
+            raise AssertionError(args.access_command)
+        except (IdentityError, ValueError) as exc:
+            _emit(
+                {"error": {"code": "identity_binding_failed", "message": str(exc)}},
+                as_json=as_json,
+            )
+            return 1
+    reporter, executor = _reporter_from_config(config)
     if args.monitor_command == "ingest":
         raw = args.file.read_text(encoding="utf-8") if args.file else sys.stdin.read()
         try:
