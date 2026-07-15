@@ -198,6 +198,104 @@ def test_group_binding_cannot_be_stolen_by_another_owner(tmp_path: Path) -> None
     assert identities.binding(group) == Binding(second, group, role="admin", scope="project:other")
 
 
+def test_local_admin_binds_member_private_chat_and_exact_instances(tmp_path: Path) -> None:
+    identities = IdentityStore(tmp_path / "monitor.sqlite3")
+    member = Principal("feishu", "ou_employee")
+    private = Destination("feishu", "oc_employee_private", "private")
+
+    identities.bind_private(
+        owner=member,
+        destination=private,
+        local_admin=True,
+        role="member",
+    )
+    identities.bind_instance(
+        member,
+        "employee-mac",
+        display_name="员工 Mac mini",
+        bound_at="2026-07-15T00:00:00Z",
+    )
+
+    assert identities.binding(private) == Binding(member, private, role="member")
+    assert identities.personal_instances(member) == frozenset({"employee-mac"})
+    assert identities.instance_display_names({"employee-mac"}) == {
+        "employee-mac": "员工 Mac mini"
+    }
+    assert identities.allowed_instances(member) == frozenset({"employee-mac"})
+    assert not identities.is_global_owner(member)
+
+
+def test_member_private_binding_requires_local_admin(tmp_path: Path) -> None:
+    identities = IdentityStore(tmp_path / "monitor.sqlite3", enrollment_secret="join")
+    with pytest.raises(IdentityError, match="member.*local-admin"):
+        identities.bind_private(
+            owner=Principal("feishu", "member"),
+            destination=Destination("feishu", "private", "private"),
+            enrollment_secret="join",
+            role="member",
+        )
+
+
+def test_instance_has_one_active_owner_and_revoke_is_immediate(tmp_path: Path) -> None:
+    identities = IdentityStore(tmp_path / "monitor.sqlite3")
+    first = Principal("feishu", "first")
+    second = Principal("feishu", "second")
+    identities.bind_instance(
+        first,
+        "shared-mac",
+        display_name="Mac",
+        bound_at="2026-07-15T00:00:00Z",
+    )
+    with pytest.raises(IdentityError, match="already bound"):
+        identities.bind_instance(
+            second,
+            "shared-mac",
+            display_name="Mac",
+            bound_at="2026-07-15T00:01:00Z",
+        )
+    identities.revoke_instance(
+        "shared-mac", revoked_at="2026-07-15T00:02:00Z"
+    )
+    assert identities.personal_instances(first) == frozenset()
+    identities.bind_instance(
+        second,
+        "shared-mac",
+        display_name="Second Mac",
+        bound_at="2026-07-15T00:03:00Z",
+    )
+    assert identities.personal_instances(second) == frozenset({"shared-mac"})
+
+
+def test_existing_identity_database_migrates_instance_ownership_table(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "monitor.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE monitor_bindings (platform TEXT NOT NULL, "
+            "destination_id TEXT NOT NULL, chat_type TEXT NOT NULL, "
+            "owner_platform TEXT NOT NULL, owner_actor_id TEXT NOT NULL, "
+            "role TEXT NOT NULL, scope TEXT NOT NULL, revoked INTEGER NOT NULL, "
+            "PRIMARY KEY(platform,destination_id))"
+        )
+
+    identities = IdentityStore(database)
+    with identities._connect() as connection:
+        columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info(monitor_instance_owners)"
+            )
+        }
+    assert {
+        "instance_id",
+        "principal_platform",
+        "actor_id",
+        "display_name",
+        "revoked",
+    } <= columns
+
+
 def test_subscription_cursor_is_nonnegative_monotonic_and_atomically_advanced(tmp_path: Path) -> None:
     identities = IdentityStore(tmp_path / "monitor.sqlite3")
     owner = Principal("feishu", "owner")

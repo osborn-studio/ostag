@@ -42,8 +42,8 @@ class Binding:
     scope: str = ""
 
     def __post_init__(self) -> None:
-        if self.role not in {"owner", "admin"}:
-            raise ValueError("binding role must be owner or admin")
+        if self.role not in {"owner", "admin", "member"}:
+            raise ValueError("binding role must be owner, admin, or member")
         if self.destination.chat_type == "group" and not self.scope:
             raise ValueError("group binding scope is required")
         if self.destination.chat_type == "private" and self.scope:
@@ -85,6 +85,17 @@ class IdentityStore:
                 CREATE TABLE IF NOT EXISTS monitor_consumed_enrollment_secrets (
                     secret_digest TEXT PRIMARY KEY, consumed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS monitor_instance_owners (
+                    instance_id TEXT PRIMARY KEY,
+                    principal_platform TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    bound_at TEXT NOT NULL,
+                    revoked INTEGER NOT NULL DEFAULT 0,
+                    revoked_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS monitor_instance_owner_principal
+                ON monitor_instance_owners(principal_platform, actor_id, revoked);
                 """
             )
             binding_columns = {row[1] for row in connection.execute("PRAGMA table_info(monitor_bindings)")}
@@ -113,6 +124,7 @@ class IdentityStore:
         destination: Destination,
         enrollment_secret: str = "",
         local_admin: bool = False,
+        role: str = "",
     ) -> None:
         self._same_platform(owner, destination)
         if destination.chat_type != "private":
@@ -122,6 +134,11 @@ class IdentityStore:
         )
         if not local_admin and not valid_secret:
             raise IdentityError("local-admin or valid enrollment secret required")
+        resolved_role = role or ("admin" if local_admin else "owner")
+        if resolved_role == "member" and not local_admin:
+            raise IdentityError("member private binding requires local-admin")
+        if resolved_role not in {"owner", "admin", "member"}:
+            raise IdentityError("invalid private binding role")
         digest = hmac.digest(b"ostag-monitor-enrollment", enrollment_secret.encode(), "sha256").hex()
         try:
             with self._connect() as connection:
@@ -134,7 +151,7 @@ class IdentityStore:
                 self._upsert_binding(
                     owner,
                     destination,
-                    role="admin" if local_admin else "owner",
+                    role=resolved_role,
                     connection=connection,
                     local_admin=local_admin,
                 )
@@ -222,7 +239,8 @@ class IdentityStore:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT 1 FROM monitor_bindings WHERE platform=? AND destination_id=? "
-                "AND owner_platform=? AND owner_actor_id=? AND revoked=0",
+                "AND owner_platform=? AND owner_actor_id=? "
+                "AND role IN ('owner','admin') AND revoked=0",
                 (
                     destination.platform,
                     destination.destination_id,
@@ -256,7 +274,98 @@ class IdentityStore:
                 (principal.platform, principal.actor_id),
             ).fetchall()
         scopes = {str(row["scope"]) for row in rows}
-        return frozenset(scope.removeprefix("instance:") for scope in scopes if scope.startswith("instance:"))
+        granted = {
+            scope.removeprefix("instance:")
+            for scope in scopes
+            if scope.startswith("instance:")
+        }
+        return frozenset(granted | set(self.personal_instances(principal)))
+
+    def bind_instance(
+        self,
+        principal: Principal,
+        instance_id: str,
+        *,
+        display_name: str,
+        bound_at: str,
+    ) -> None:
+        instance_id = instance_id.strip()
+        if not instance_id or len(instance_id) > 128:
+            raise IdentityError("invalid instance id")
+        if len(display_name) > 80:
+            raise IdentityError("instance display name is too long")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT principal_platform,actor_id,revoked "
+                "FROM monitor_instance_owners WHERE instance_id=?",
+                (instance_id,),
+            ).fetchone()
+            if row is not None and not int(row["revoked"]) and (
+                str(row["principal_platform"]), str(row["actor_id"])
+            ) != (principal.platform, principal.actor_id):
+                connection.rollback()
+                raise IdentityError("instance is already bound")
+            connection.execute(
+                "INSERT INTO monitor_instance_owners("
+                "instance_id,principal_platform,actor_id,display_name,bound_at,revoked,revoked_at"
+                ") VALUES (?,?,?,?,?,0,'') ON CONFLICT(instance_id) DO UPDATE SET "
+                "principal_platform=excluded.principal_platform,actor_id=excluded.actor_id,"
+                "display_name=excluded.display_name,bound_at=excluded.bound_at,"
+                "revoked=0,revoked_at=''",
+                (
+                    instance_id,
+                    principal.platform,
+                    principal.actor_id,
+                    display_name.strip(),
+                    bound_at,
+                ),
+            )
+            connection.commit()
+
+    def revoke_instance(self, instance_id: str, *, revoked_at: str) -> None:
+        with self._connect() as connection:
+            changed = connection.execute(
+                "UPDATE monitor_instance_owners SET revoked=1,revoked_at=? "
+                "WHERE instance_id=? AND revoked=0",
+                (revoked_at, instance_id),
+            ).rowcount
+        if not changed:
+            raise IdentityError("active instance binding not found")
+
+    def personal_instances(self, principal: Principal) -> frozenset[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT instance_id FROM monitor_instance_owners "
+                "WHERE principal_platform=? AND actor_id=? AND revoked=0",
+                (principal.platform, principal.actor_id),
+            ).fetchall()
+        return frozenset(str(row["instance_id"]) for row in rows)
+
+    def team_instances(self) -> frozenset[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT instance_id FROM monitor_instance_owners WHERE revoked=0"
+            ).fetchall()
+        return frozenset(str(row["instance_id"]) for row in rows)
+
+    def instance_display_names(
+        self, instance_ids: set[str] | frozenset[str]
+    ) -> dict[str, str]:
+        if not instance_ids:
+            return {}
+        ordered = tuple(sorted(instance_ids))
+        placeholders = ",".join("?" for _ in ordered)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT instance_id,display_name FROM monitor_instance_owners "  # noqa: S608
+                f"WHERE revoked=0 AND instance_id IN ({placeholders})",
+                ordered,
+            ).fetchall()
+        return {
+            str(row["instance_id"]): str(row["display_name"] or row["instance_id"])
+            for row in rows
+        }
 
     def list_bindings(self, owner: Principal) -> tuple[Destination, ...]:
         with self._connect() as connection:
@@ -333,8 +442,11 @@ class IdentityStore:
             )
 
     def allows(self, principal: Principal, destination: Destination, capability: str) -> bool:
-        if self.is_owner(principal, destination):
-            return True
+        binding = self.binding(destination)
+        if binding is not None and binding.owner == principal:
+            if binding.role in {"owner", "admin"}:
+                return True
+            return capability == "read"
         accepted = {
             "read": ("read", "propose", "write", "admin"),
             "propose": ("propose", "write", "admin"),
