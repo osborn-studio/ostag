@@ -27,6 +27,7 @@ def _enabled_settings(**overrides) -> Settings:
 def test_daily_task_boards_are_disabled_by_default() -> None:
     assert Settings().daily_task_boards_enabled is False
     assert Settings().copilot_relay_enabled is False
+    assert Settings().copilot_status_board_enabled is False
 
 
 def test_copilot_relay_requires_complete_secure_configuration() -> None:
@@ -53,8 +54,10 @@ def test_copilot_relay_environment_profile(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("OSTAG_COPILOT_RELAY_SECRET", "secret")
     monkeypatch.setenv("OSTAG_COPILOT_RELAY_CENTRAL_URL", "https://relay.example")
     monkeypatch.setenv("OSTAG_COPILOT_RELAY_SPOOL_DB", str(tmp_path / "relay.db"))
+    monkeypatch.setenv("OSTAG_COPILOT_STATUS_BOARD_ENABLED", "true")
     settings = load_settings(None)
     assert settings.copilot_relay_enabled is True
+    assert settings.copilot_status_board_enabled is True
     assert settings.copilot_relay_spool_db == tmp_path / "relay.db"
 
 

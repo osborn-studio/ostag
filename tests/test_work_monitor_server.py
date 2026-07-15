@@ -530,6 +530,53 @@ def test_auto_feishu_owner_uses_central_service_and_database(
         assert service.identities.path == database
 
 
+def test_auto_feishu_owner_wires_scoped_status_board_from_central_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owners = []
+
+    class FeishuOwner:
+        def __init__(self, config: Settings, *, runner=None):
+            self.runner = runner
+            owners.append(self)
+
+        async def run(self, stop) -> None:
+            await stop.wait()
+
+    monkeypatch.setattr("ostag.adapters.feishu.FeishuAdapter", FeishuOwner)
+    database = tmp_path / "central.sqlite3"
+    identities = IdentityStore(database)
+    owner = Principal("feishu", "alice")
+    destination = Destination("feishu", "alice-chat", "private")
+    identities.bind_private(owner=owner, destination=destination, local_admin=True)
+    identities.bind_instance(
+        owner,
+        instance_id="macmini",
+        display_name="Mac mini",
+        bound_at="2026-07-15T00:00:00+00:00",
+    )
+    settings = Settings(
+        monitor_server_db=database,
+        monitor_human_credentials=(
+            ("human-secret", "feishu", "alice", "alice-chat", "private"),
+        ),
+        feishu_use_websocket=True,
+        feishu_app_id="cli_test_id",
+        feishu_app_secret="test-secret",
+        monitor_scheduler_enabled=False,
+        monitor_offline_seconds=321,
+        copilot_status_board_enabled=True,
+    )
+
+    with TestClient(create_app(settings=settings)):
+        controller = owners[0].runner.copilot_relay
+        assert controller.status_board_enabled is True
+        assert controller.status_service.store.monitor_store.path == database
+        assert controller.status_service.identities.path == database
+        assert controller.status_service.offline_seconds == 321
+        assert controller.service.policy.can_access(owner, "macmini") is True
+
+
 def test_lifespan_owns_daily_boards_on_the_central_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

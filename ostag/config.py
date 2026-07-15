@@ -188,6 +188,7 @@ class Settings:
     copilot_relay_enabled: bool = False
     copilot_relay_server_enabled: bool = True
     copilot_relay_write_enabled: bool = True
+    copilot_status_board_enabled: bool = False
     copilot_relay_canary_session_ids: tuple[str, ...] = ()
     copilot_relay_instance_id: str = "local"
     copilot_relay_secret: str = ""
@@ -464,6 +465,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
         copilot_relay_server_enabled=_bool("OSTAG_COPILOT_RELAY_SERVER_ENABLED", True),
         copilot_relay_write_enabled=_bool("OSTAG_COPILOT_RELAY_WRITE_ENABLED", True),
+        copilot_status_board_enabled=_bool("OSTAG_COPILOT_STATUS_BOARD_ENABLED", False),
         copilot_relay_canary_session_ids=_csv("OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS"),
         copilot_relay_instance_id=os.getenv("OSTAG_COPILOT_RELAY_INSTANCE_ID", "local"),
         copilot_relay_secret=os.getenv("OSTAG_COPILOT_RELAY_SECRET", ""),

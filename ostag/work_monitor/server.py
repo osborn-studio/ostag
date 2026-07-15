@@ -180,14 +180,29 @@ def create_app(
                 from ostag.copilot_relay.feishu_routes import CopilotFeishuController
                 from ostag.copilot_relay.policy import RelayPolicy
                 from ostag.copilot_relay.service import CopilotRelayService
+                from ostag.copilot_relay.status_board import OsstackStatusBoardService
                 from ostag.copilot_relay.store import RelayStore
 
+                relay_store = RelayStore(runtime.service.store)
                 runtime.copilot = CopilotFeishuController(
-                    CopilotRelayService(RelayStore(runtime.service.store), RelayPolicy(owner)),
+                    CopilotRelayService(
+                        relay_store,
+                        RelayPolicy(
+                            owner,
+                            scope_provider=runtime.service.identities.allowed_instances,
+                        ),
+                    ),
                     write_enabled=configured.copilot_relay_write_enabled,
                     canary_session_ids=frozenset(
                         configured.copilot_relay_canary_session_ids
                     ),
+                    status_service=OsstackStatusBoardService(
+                        relay_store,
+                        runtime.service.identities,
+                        owner=owner,
+                        offline_seconds=configured.monitor_offline_seconds,
+                    ),
+                    status_board_enabled=configured.copilot_status_board_enabled,
                 )
         if (
             feishu_ws is None
