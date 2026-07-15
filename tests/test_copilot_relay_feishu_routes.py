@@ -382,6 +382,13 @@ def test_status_refresh_callback_is_read_only(tmp_path) -> None:
         _event("现在 osstack 在干嘛", event_id="refresh-source")
     )
     callback_id = _button_callback(response.card, "刷新看板")
+    with store.monitor_store.connect() as connection:
+        issued = connection.execute(
+            "SELECT expires_at FROM relay_callbacks WHERE callback_id=?",
+            (callback_id,),
+        ).fetchone()
+    assert issued is not None
+    assert issued["expires_at"] == int(NOW.timestamp()) + 86_400
     before = _outbound_count(store)
 
     refreshed = controller.handle_callback(

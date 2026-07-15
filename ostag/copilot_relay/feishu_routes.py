@@ -29,6 +29,9 @@ from .status_board import (
 from .status_intent import classify_osstack_status_intent
 
 
+STATUS_CALLBACK_TTL_SECONDS = 86_400
+
+
 @dataclass(frozen=True)
 class FeishuRelayResponse:
     text: str
@@ -289,6 +292,7 @@ class CopilotFeishuController:
                 destination,
                 action=action,
                 reference=reference,
+                ttl_seconds=STATUS_CALLBACK_TTL_SECONDS,
             )
 
         card = render_osstack_status_card(
