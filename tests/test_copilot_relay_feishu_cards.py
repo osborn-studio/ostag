@@ -1,13 +1,19 @@
 import json
+from dataclasses import replace
 
 from ostag.copilot_relay.feishu_cards import (
     MAX_CARD_BYTES,
     render_current_task_card,
     render_decision_card,
+    render_osstack_status_card,
     render_task_proposal_card,
 )
 from ostag.copilot_relay.models import RelayEnvelope
 from ostag.copilot_relay.store import RelaySession
+from ostag.copilot_relay.status_board import (
+    OsstackStatusBoardView,
+    StatusSessionItem,
+)
 
 
 def _session() -> RelaySession:
@@ -137,3 +143,101 @@ def test_non_owner_cards_have_no_action_elements() -> None:
         ),
     )
     assert all(not any(item["tag"] == "action" for item in card["elements"]) for card in cards)
+
+
+def _status_view() -> OsstackStatusBoardView:
+    session = StatusSessionItem(
+        instance_id="ostag-local",
+        session_id="session-secret-native",
+        device_name="Mac mini",
+        agent_id="codex-cli",
+        title="OStag 状态看板",
+        state="idle",
+        latest_summary="上一轮发布验证已完成，当前等待新任务。",
+        updated_at="2026-07-14T23:17:00Z",
+        online=True,
+        waiting_decision=False,
+    )
+    return OsstackStatusBoardView(
+        scope="personal",
+        generated_at="2026-07-14T23:20:00Z",
+        device_count=1,
+        online_count=1,
+        running_count=0,
+        waiting_decision_count=0,
+        blocked_count=0,
+        completed_today_count=2,
+        current_session=session,
+        sessions=(session,),
+        attention=(),
+        stale=False,
+    )
+
+
+def test_osstack_status_card_is_mobile_first_and_shows_device_agent() -> None:
+    card = render_osstack_status_card(
+        _status_view(),
+        can_view_team=True,
+        callback_factory=lambda action, ref: f"opaque-{action}",
+    )
+    encoded = _encoded(card)
+
+    assert card["header"]["title"]["content"] == "OStag · osstack 实时进度看板"
+    assert card["config"]["wide_screen_mode"] is False
+    assert "我的设备" in encoded
+    visible = encoded.replace("\\", "")
+    assert "Mac mini" in visible and "ostag-local" in visible
+    assert "codex-cli" in visible
+    assert "运行中" in encoded and "等你决策" in encoded and "今日完成" in encoded
+    assert "北京时间" in encoded and "只读状态查询" in encoded
+    assert "团队总览" in encoded
+    assert "session-secret-native" not in encoded
+
+
+def test_member_status_card_has_no_team_scope_or_other_instance() -> None:
+    view = _status_view()
+    card = render_osstack_status_card(
+        view,
+        can_view_team=False,
+        callback_factory=lambda action, ref: f"opaque-{action}",
+    )
+    encoded = _encoded(card)
+
+    assert "团队总览" not in encoded
+    assert "employee-other" not in encoded
+    assert "刷新看板" in encoded and "切换任务" in encoded
+
+
+def test_status_card_handles_unbound_offline_and_untrusted_text() -> None:
+    base = _status_view()
+    empty = replace(
+        base,
+        device_count=0,
+        online_count=0,
+        current_session=None,
+        sessions=(),
+    )
+    empty_encoded = _encoded(render_osstack_status_card(empty, can_view_team=False))
+    assert "尚未绑定 osstack" in empty_encoded
+
+    unsafe = replace(
+        base.current_session,
+        title="<script>*boom*</script>",
+        latest_summary="[bad](javascript:alert(1))",
+        online=False,
+    )
+    offline = replace(
+        base,
+        online_count=0,
+        current_session=unsafe,
+        sessions=(unsafe,),
+        stale=True,
+    )
+    offline_card = render_osstack_status_card(offline, can_view_team=False)
+    offline_encoded = _encoded(offline_card)
+
+    assert "数据可能已过期" in offline_encoded
+    assert "<script>" not in offline_encoded and "&lt;script&gt;" in offline_encoded
+    assert "javascript:alert" in offline_encoded
+    assert len(offline_card["elements"]) <= 20
+    assert len(offline_encoded.encode()) < MAX_CARD_BYTES

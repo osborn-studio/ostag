@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .models import RelayEnvelope
 from .redaction import sanitize_assistant_text
+from .status_board import OsstackStatusBoardView, StatusSessionItem
 from .store import RelaySession
 
 
@@ -228,3 +229,157 @@ def render_receipt_card(session: RelaySession, envelope: RelayEnvelope) -> dict[
         },
     ]
     return _card("OStag Copilot · 指令回执", elements)
+
+
+def _status_label(item: StatusSessionItem) -> str:
+    if item.waiting_decision:
+        return "等待决策"
+    return {
+        "running": "运行中",
+        "blocked": "阻塞",
+        "idle": "空闲",
+        "completed": "已完成",
+        "failed": "失败",
+    }.get(item.state, item.state)
+
+
+def render_osstack_status_card(
+    view: OsstackStatusBoardView,
+    *,
+    can_view_team: bool,
+    callback_factory: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
+    """Render the identity-scoped, read-only osstack status dashboard."""
+    scope = "团队总览" if view.scope == "team" else "我的设备"
+    health = (
+        "需要处理"
+        if view.blocked_count or view.waiting_decision_count
+        else "正在运行"
+        if view.running_count
+        else "当前空闲"
+    )
+    metrics = (
+        ("运行中", view.running_count),
+        ("等你决策", view.waiting_decision_count),
+        ("阻塞", view.blocked_count),
+        ("今日完成", view.completed_today_count),
+    )
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "markdown",
+            "content": (
+                f"**{scope}**　在线 **{view.online_count}/{view.device_count}**　{health}"
+            ),
+        },
+        {
+            "tag": "column_set",
+            "flex_mode": "none",
+            "background_style": "grey",
+            "columns": [
+                {
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "elements": [
+                        {"tag": "markdown", "content": f"{label}\n**{value}**"}
+                    ],
+                }
+                for label, value in metrics
+            ],
+        },
+        {"tag": "markdown", "content": "**当前协作会话**"},
+    ]
+    current = view.current_session
+    if current is None:
+        message = (
+            "尚未绑定 osstack，请联系管理员绑定设备。"
+            if view.device_count == 0
+            else "当前没有 osstack 会话。"
+        )
+        elements.append(
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": message}]}
+        )
+    else:
+        online = "在线" if current.online else "离线"
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": (
+                    f"**{_safe(current.title, 240)}**　`{_safe(_status_label(current), 32)}`\n"
+                    f"**设备**　{_safe(current.device_name, 80)} · "
+                    f"`{_safe(current.instance_id, 128)}` · {online}\n"
+                    f"**Agent**　{_safe(current.agent_id, 64)}\n"
+                    f"**最近进展**　{_safe(current.latest_summary, 600)}\n"
+                    f"最近更新 {_beijing_time(current.updated_at)}"
+                ),
+            }
+        )
+
+    elements.append({"tag": "markdown", "content": "**需要你处理**"})
+    if view.attention:
+        elements.extend(
+            {
+                "tag": "markdown",
+                "content": (
+                    f"• **{_safe(item.title, 160)}**\n"
+                    f"{_safe(item.device_name, 80)} · {_safe(item.agent_id, 64)} · "
+                    f"{_safe(_status_label(item), 32)}"
+                ),
+            }
+            for item in view.attention[:3]
+        )
+    else:
+        elements.append(
+            {
+                "tag": "note",
+                "elements": [
+                    {"tag": "plain_text", "content": "当前没有等待决策或阻塞事项。"}
+                ],
+            }
+        )
+
+    recommendation = (
+        "优先处理等待决策和阻塞事项。"
+        if view.attention
+        else "当前无阻塞，可以下发新方向或切换到其他会话。"
+    )
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {"tag": "plain_text", "content": f"OStag 建议：{recommendation}"}
+            ],
+        }
+    )
+
+    if callback_factory is not None:
+        actions: list[tuple[str, str, str]] = [
+            ("status_refresh", "刷新看板", view.scope),
+            ("current", "当前会话", "current"),
+            ("switch_picker", "切换任务", "current"),
+        ]
+        if can_view_team:
+            actions.append(
+                (
+                    "status_personal" if view.scope == "team" else "status_team",
+                    "我的设备" if view.scope == "team" else "团队总览",
+                    "personal" if view.scope == "team" else "team",
+                )
+            )
+        elements.append(_action(callback_factory, tuple(actions)))
+
+    freshness = " · 数据可能已过期" if view.stale else ""
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": (
+                        f"只读状态查询 · {_beijing_time(view.generated_at)}{freshness}"
+                    ),
+                }
+            ],
+        }
+    )
+    return _card("OStag · osstack 实时进度看板", elements)
