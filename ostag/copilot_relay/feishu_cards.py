@@ -34,7 +34,10 @@ def safe_plain_text(value: object, limit: int = 500) -> str:
 
 
 def _beijing_time(value: str) -> str:
-    timestamp = datetime.fromisoformat(value.removesuffix("Z") + "+00:00")
+    raw = value.removesuffix("Z")
+    timestamp = datetime.fromisoformat(raw + ("+00:00" if value.endswith("Z") else ""))
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
     return timestamp.astimezone(_BEIJING).strftime("%Y-%m-%d %H:%M 北京时间")
 
 
@@ -313,6 +316,27 @@ def render_osstack_status_card(
                     f"最近更新 {_beijing_time(current.updated_at)}"
                 ),
             }
+        )
+
+    other_sessions = tuple(
+        item
+        for item in view.sessions
+        if current is None
+        or (item.instance_id, item.session_id)
+        != (current.instance_id, current.session_id)
+    )
+    if other_sessions:
+        elements.append({"tag": "markdown", "content": "**其他活跃会话**"})
+        elements.extend(
+            {
+                "tag": "markdown",
+                "content": (
+                    f"• **{_safe(item.title, 160)}**\n"
+                    f"{_safe(item.device_name, 80)} · `{_safe(item.instance_id, 128)}` · "
+                    f"{_safe(item.agent_id, 64)} · {_safe(_status_label(item), 32)}"
+                ),
+            }
+            for item in other_sessions[:3]
         )
 
     elements.append({"tag": "markdown", "content": "**需要你处理**"})

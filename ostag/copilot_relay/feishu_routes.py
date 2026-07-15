@@ -16,10 +16,17 @@ from ostag.work_monitor.identity import Destination
 from .feishu_cards import (
     MAX_CARD_BYTES,
     render_current_task_card,
+    render_osstack_status_card,
     render_task_proposal_card,
     safe_plain_text,
 )
 from .service import CopilotRelayService, RelayResult, RelayRoutingError
+from .status_board import (
+    BoardScope,
+    OsstackStatusBoardService,
+    format_osstack_status_text,
+)
+from .status_intent import classify_osstack_status_intent
 
 
 @dataclass(frozen=True)
@@ -39,12 +46,16 @@ class CopilotFeishuController:
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         write_enabled: bool = True,
         canary_session_ids: frozenset[str] = frozenset(),
+        status_service: OsstackStatusBoardService | None = None,
+        status_board_enabled: bool = False,
     ) -> None:
         self.service = service
         self.store = service.store
         self.clock = clock
         self.write_enabled = write_enabled
         self.canary_session_ids = canary_session_ids
+        self.status_service = status_service
+        self.status_board_enabled = status_board_enabled
 
     @staticmethod
     def callback_value(callback_id: str) -> dict[str, str]:
@@ -98,6 +109,18 @@ class CopilotFeishuController:
             if is_command or text:
                 return FeishuRelayResponse("Copilot 写操作仅支持已绑定的负责人私聊。")
             return None
+        status_intent = classify_osstack_status_intent(text)
+        if (
+            self.status_board_enabled
+            and self.status_service is not None
+            and status_intent in {"status_query", "mixed"}
+        ):
+            return self._status_board(
+                principal,
+                destination,
+                scope="personal",
+                mixed=status_intent == "mixed",
+            )
         if not self.write_enabled and text not in {"/任务", "任务", "/切换任务", "切换任务"}:
             return FeishuRelayResponse("Copilot Relay 当前处于只读灰度，远程写入尚未启用。")
         if text not in {"/任务", "任务", "/切换任务", "切换任务"}:
@@ -150,8 +173,6 @@ class CopilotFeishuController:
         principal: Principal,
         destination: Destination,
     ) -> FeishuRelayResponse:
-        if not self.write_enabled:
-            return FeishuRelayResponse("Copilot Relay 当前处于只读灰度，远程写入尚未启用。")
         mapped = self.store.consume_callback(
             callback_id,
             platform=principal.platform,
@@ -166,6 +187,31 @@ class CopilotFeishuController:
             return FeishuRelayResponse("操作已过期或已使用。")
         action, reference = mapped["action"], mapped["reference_id"]
         try:
+            if action in {"status_refresh", "status_personal", "status_team"}:
+                scope: BoardScope = (
+                    "team"
+                    if action == "status_team"
+                    or (action == "status_refresh" and reference == "team")
+                    else "personal"
+                )
+                return self._status_board(
+                    principal, destination, scope=scope, mixed=False
+                )
+            if action == "current":
+                current = self.store.current_session(
+                    principal.platform, principal.actor_id
+                )
+                if current is None:
+                    return self._picker(principal, destination)
+                return FeishuRelayResponse(
+                    "当前会话", self._current_card(current, principal, destination)
+                )
+            if action == "switch_picker":
+                return self._picker(principal, destination)
+            if not self.write_enabled:
+                return FeishuRelayResponse(
+                    "Copilot Relay 当前处于只读灰度，远程写入尚未启用。"
+                )
             if action == "switch":
                 instance_id, session_id = reference.split("\0", 1)
                 session = self.service.select_session(
@@ -215,6 +261,39 @@ class CopilotFeishuController:
         except (PermissionError, RelayRoutingError, StopIteration, ValueError):
             return FeishuRelayResponse("操作目标已变化，请刷新当前任务。")
         return FeishuRelayResponse("操作无效。")
+
+    def _status_board(
+        self,
+        principal: Principal,
+        destination: Destination,
+        *,
+        scope: BoardScope,
+        mixed: bool,
+    ) -> FeishuRelayResponse:
+        if self.status_service is None:
+            return FeishuRelayResponse("osstack 状态服务当前不可用，请稍后重试。")
+        try:
+            view = self.status_service.build(principal, scope=scope)
+        except PermissionError:
+            return FeishuRelayResponse("没有权限查看团队 osstack 状态。")
+
+        def factory(action: str, reference: str) -> str:
+            return self.issue_callback(
+                principal,
+                destination,
+                action=action,
+                reference=reference,
+            )
+
+        card = render_osstack_status_card(
+            view,
+            can_view_team=principal == self.service.policy.owner,
+            callback_factory=factory,
+        )
+        fallback = "osstack 实时状态\n" + format_osstack_status_text(view)
+        if mixed:
+            fallback += "\n请把修改指令单独发送；本次未下发任何指令。"
+        return FeishuRelayResponse(fallback, card)
 
     def _result(
         self,

@@ -1,13 +1,15 @@
+import json
 from datetime import UTC, datetime
 
 from ostag.copilot_relay.feishu_routes import CopilotFeishuController
 from ostag.copilot_relay.models import RelayEnvelope
 from ostag.copilot_relay.policy import RelayPolicy
 from ostag.copilot_relay.service import CopilotRelayService
+from ostag.copilot_relay.status_board import OsstackStatusBoardService
 from ostag.copilot_relay.store import RelayStore
 from ostag.core.event import NormalizedEvent
 from ostag.core.identity import Principal
-from ostag.work_monitor.identity import Destination
+from ostag.work_monitor.identity import Destination, IdentityStore
 from ostag.work_monitor.store import MonitorStore
 
 
@@ -21,6 +23,7 @@ def _envelope(
     message_id: str,
     *,
     session_id: str = "session-1",
+    instance_id: str = "macmini",
     kind: str = "session.upsert",
     version: int = 1,
 ) -> RelayEnvelope:
@@ -39,7 +42,7 @@ def _envelope(
         {
             "schema_version": 1, "message_id": message_id,
             "binding": {
-                "instance_id": "macmini", "task_id": f"task-{session_id}",
+                "instance_id": instance_id, "task_id": f"task-{session_id}",
                 "run_id": f"run-{session_id}", "session_id": session_id,
                 "turn_id": f"turn-{version}", "session_version": version,
             },
@@ -58,6 +61,101 @@ def _controller(tmp_path):
     service = CopilotRelayService(store, RelayPolicy(OWNER), clock=lambda: NOW)
     service.select_session(OWNER, "macmini", "session-1", selected_at="2026-07-14T01:00:00Z")
     return CopilotFeishuController(service, clock=lambda: NOW), store
+
+
+def _outbound_count(store: RelayStore) -> int:
+    with store.monitor_store.connect() as connection:
+        return int(
+            connection.execute(
+                "SELECT COUNT(*) FROM relay_messages WHERE direction='outbound'"
+            ).fetchone()[0]
+        )
+
+
+def _button_callback(card: dict, label: str) -> str:
+    return next(
+        action["value"]["callback_id"]
+        for element in card["elements"]
+        if element["tag"] == "action"
+        for action in element["actions"]
+        if action["text"]["content"] == label
+    )
+
+
+def _status_controllers(tmp_path):
+    monitor = MonitorStore(tmp_path / "status-monitor.db")
+    store = RelayStore(monitor)
+    store.upsert_session(_envelope("owner-session", session_id="session-1"))
+    store.upsert_session(
+        _envelope(
+            "employee-session",
+            session_id="employee-session",
+            instance_id="employee-mac",
+        )
+    )
+    identities = IdentityStore(monitor.path)
+    identities.bind_private(owner=OWNER, destination=PRIVATE, local_admin=True)
+    identities.bind_instance(
+        OWNER,
+        "macmini",
+        display_name="Mac mini",
+        bound_at=NOW.isoformat(),
+    )
+    member = Principal("feishu", "member")
+    member_private = Destination("feishu", "member-chat", "private")
+    identities.bind_private(
+        owner=member,
+        destination=member_private,
+        local_admin=True,
+        role="member",
+    )
+    identities.bind_instance(
+        member,
+        "employee-mac",
+        display_name="员工 Mac",
+        bound_at=NOW.isoformat(),
+    )
+    with monitor.transaction() as connection:
+        connection.executemany(
+            "INSERT INTO instances(instance_id,last_sequence,last_seen_at) VALUES (?,?,?)",
+            (
+                ("macmini", 1, NOW.isoformat()),
+                ("employee-mac", 1, NOW.isoformat()),
+            ),
+        )
+    policy = RelayPolicy(OWNER, scope_provider=identities.allowed_instances)
+    service = CopilotRelayService(store, policy, clock=lambda: NOW)
+    service.select_session(
+        OWNER,
+        "macmini",
+        "session-1",
+        selected_at=NOW.isoformat(),
+    )
+    service.select_session(
+        member,
+        "employee-mac",
+        "employee-session",
+        selected_at=NOW.isoformat(),
+    )
+    status = OsstackStatusBoardService(
+        store,
+        identities,
+        owner=OWNER,
+        clock=lambda: NOW,
+    )
+    owner_controller = CopilotFeishuController(
+        service,
+        clock=lambda: NOW,
+        status_service=status,
+        status_board_enabled=True,
+    )
+    member_controller = CopilotFeishuController(
+        service,
+        clock=lambda: NOW,
+        status_service=status,
+        status_board_enabled=True,
+    )
+    return owner_controller, member_controller, store, member, member_private
 
 
 def _event(
@@ -192,3 +290,97 @@ def test_canary_rollout_only_allows_writes_for_the_explicit_session(tmp_path) ->
         now="2026-07-14T01:10:00Z",
         lease_until="2026-07-14T01:11:00Z",
     ) == ()
+
+
+def test_natural_language_status_returns_card_without_queueing(tmp_path) -> None:
+    controller, _, store, _, _ = _status_controllers(tmp_path)
+    before = _outbound_count(store)
+
+    response = controller.handle_event(
+        _event("现在 osstack 在干嘛", event_id="status")
+    )
+
+    assert response is not None and response.card is not None
+    assert response.text.startswith("osstack 实时状态")
+    assert _outbound_count(store) == before
+    assert store.envelope_for_message("relay_status") is None
+    visible = json.dumps(response.card, ensure_ascii=False).replace("\\", "")
+    assert "Mac mini" in visible and "codex-cli" in visible
+    assert "employee-mac" not in visible
+
+
+def test_mixed_status_and_write_returns_board_but_does_not_execute(tmp_path) -> None:
+    controller, _, store, _, _ = _status_controllers(tmp_path)
+
+    response = controller.handle_event(
+        _event("告诉我现在进展，然后换成方案 B", event_id="mixed")
+    )
+
+    assert response is not None and response.card is not None
+    assert "请把修改指令单独发送" in response.text
+    assert store.envelope_for_message("relay_mixed") is None
+    instruction = controller.handle_event(_event("继续开发", event_id="write"))
+    assert instruction is not None and instruction.text.startswith("指令已排队")
+    assert store.envelope_for_message("relay_write").kind == "instruction.send"
+
+
+def test_member_status_is_scoped_and_owner_can_switch_to_team(tmp_path) -> None:
+    owner_controller, member_controller, store, member, member_private = (
+        _status_controllers(tmp_path)
+    )
+    member_response = member_controller.handle_event(
+        _event(
+            "现在 osstack 在干嘛",
+            event_id="member-status",
+            sender="member",
+            destination="member-chat",
+        )
+    )
+    member_encoded = json.dumps(member_response.card, ensure_ascii=False).replace(
+        "\\", ""
+    )
+    assert "employee-mac" in member_encoded
+    assert "macmini" not in member_encoded
+    assert "团队总览" not in member_encoded
+
+    owner_response = owner_controller.handle_event(
+        _event("现在 osstack 在干嘛", event_id="owner-status")
+    )
+    owner_encoded = json.dumps(owner_response.card, ensure_ascii=False).replace(
+        "\\", ""
+    )
+    assert "macmini" in owner_encoded and "employee-mac" not in owner_encoded
+    team_callback = _button_callback(owner_response.card, "团队总览")
+    replayed = member_controller.handle_callback(
+        team_callback,
+        principal=member,
+        destination=member_private,
+    )
+    assert replayed.text == "没有权限或操作目标不匹配。"
+
+    team = owner_controller.handle_callback(
+        team_callback,
+        principal=OWNER,
+        destination=PRIVATE,
+    )
+    team_encoded = json.dumps(team.card, ensure_ascii=False).replace("\\", "")
+    assert "macmini" in team_encoded and "employee-mac" in team_encoded
+    assert _outbound_count(store) == 0
+
+
+def test_status_refresh_callback_is_read_only(tmp_path) -> None:
+    controller, _, store, _, _ = _status_controllers(tmp_path)
+    response = controller.handle_event(
+        _event("现在 osstack 在干嘛", event_id="refresh-source")
+    )
+    callback_id = _button_callback(response.card, "刷新看板")
+    before = _outbound_count(store)
+
+    refreshed = controller.handle_callback(
+        callback_id,
+        principal=OWNER,
+        destination=PRIVATE,
+    )
+
+    assert refreshed.card is not None
+    assert _outbound_count(store) == before

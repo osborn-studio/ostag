@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import unicodedata
 
@@ -20,12 +21,19 @@ class RelayPolicy:
         owner: Principal,
         *,
         instance_scopes: dict[Principal, frozenset[str]] | None = None,
+        scope_provider: Callable[[Principal], frozenset[str] | None] | None = None,
     ) -> None:
         self.owner = owner
         self.instance_scopes = instance_scopes or {}
+        self.scope_provider = scope_provider
 
     def can_access(self, principal: Principal, instance_id: str) -> bool:
-        return principal == self.owner or instance_id in self.instance_scopes.get(principal, ())
+        if principal == self.owner:
+            return True
+        if self.scope_provider is not None:
+            scopes = self.scope_provider(principal)
+            return scopes is None or instance_id in scopes
+        return instance_id in self.instance_scopes.get(principal, ())
 
     def classify(self, text: str) -> PolicyDecision:
         normalized = unicodedata.normalize("NFKC", text).translate(
