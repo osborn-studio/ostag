@@ -208,6 +208,54 @@ launchctl unload ~/Library/LaunchAgents/ai.ostag.feishu.plist
 OSTAG_DRY_RUN=true python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
 ```
 
+## Feishu osstack status dashboards
+
+The private-chat status dashboard is opt-in. Enable it on the central work-monitor
+server only after the verified Feishu owner and each device have been bound:
+
+```dotenv
+OSTAG_COPILOT_STATUS_BOARD_ENABLED=true
+```
+
+Bind the global owner (or an administrator) from the trusted local CLI:
+
+```bash
+uv run ostag monitor access bind-instance \
+  --platform feishu \
+  --actor '<verified-open-id>' \
+  --private-chat '<verified-private-chat-id>' \
+  --instance 'ostag-local' \
+  --display-name 'Mac mini' \
+  --role admin \
+  --json
+```
+
+Bind each employee only to that employee's own osstack instance by using the same
+command with their verified identifiers and `--role member`. Never copy actor or
+chat identifiers from message text; obtain them from authenticated Feishu events.
+
+Inspect or revoke active ownership without exposing credentials:
+
+```bash
+uv run ostag monitor access list --json
+uv run ostag monitor access list --actor '<verified-open-id>' --json
+uv run ostag monitor access revoke-instance --instance '<instance-id>' --json
+```
+
+`现在 osstack 在干嘛` and equivalent read-only queries return the personal status
+dashboard directly and never create a relay inbox/outbox message. A member sees
+only explicitly bound devices. The verified global owner may switch to the team
+dashboard; that authorization is checked again on every card callback. Device and
+agent names, freshness, and all displayed times come from the central projection;
+times are rendered in `Asia/Shanghai` and labeled `北京时间`.
+
+Before enabling or upgrading this feature, make an online SQLite backup and verify
+`PRAGMA integrity_check` (the production commands below use
+`scripts/backup_work_monitor.sh`). Also back up the protected `.env` with mode
+`0600`. Retain the previous immutable image tag. To roll back, restore that image
+tag and disable `OSTAG_COPILOT_STATUS_BOARD_ENABLED`; restore the database only if
+an incompatible migration requires it.
+
 ## Production Notes
 
 - Start with `OSTAG_BACKEND=mock`, then switch to Codex/OpenAI after message
