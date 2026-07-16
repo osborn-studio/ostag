@@ -37,6 +37,7 @@ def test_launchd_template_is_bounded_absolute_and_keeps_secrets_outside_plist() 
         "/Users/Shared/OStag/"
     )
     assert plist["EnvironmentVariables"]["OSSTACK_SOCKET"].endswith("/daemon.sock")
+    assert plist["EnvironmentVariables"]["PATH"] == "__OSTAG_RUNTIME_PATH__"
     encoded = path.read_text()
     assert "SECRET" not in encoded and "TOKEN" not in encoded
 
@@ -89,6 +90,7 @@ def test_installer_preserves_only_non_secret_osstack_runtime_settings() -> None:
     assert 'RUNNER="$DATA_DIR/run-copilot-relay.sh"' in installer
     assert "printf 'OSTAG_COPILOT_RELAY_SPOOL_DB=%q" in installer
     assert "PRESERVED_OSSTACK_BIN//" in installer
+    assert 'NODE_BIN="$(command -v node || true)"' in installer
     assert "RELAY_SECRET|TOKEN|PRIVATE_KEY" not in installer
 
 

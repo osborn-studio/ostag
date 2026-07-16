@@ -60,6 +60,9 @@ if [[ -e "$ENV_FILE" ]]; then
   MODE="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
   [[ "$MODE" == "600" ]] || { echo "existing config must already use mode 0600" >&2; exit 77; }
 fi
+NODE_BIN="$(command -v node || true)"
+[[ "$NODE_BIN" == /* ]] || { echo "node runtime is required" >&2; exit 66; }
+RUNTIME_PATH="$(dirname "$NODE_BIN"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 PRESERVED_OSSTACK_BIN=""
 PRESERVED_DEFAULT_REPO=""
 PRESERVED_POLL_INTERVAL=""
@@ -104,6 +107,7 @@ if [[ ! -e "$ENV_FILE" || -n "$PAIRING_CODE" || -n "$CENTRAL_URL" ]]; then
 fi
 
 sed -e "s#/opt/ostag#$REPO#g" -e "s#/Users/Shared/OStag#$DATA_DIR#g" \
+  -e "s#__OSTAG_RUNTIME_PATH__#$RUNTIME_PATH#g" \
   "$REPO/deploy/copilot-relay/ai.ostag.copilot-relay.plist" > "$PLIST"
 sed -e "s#/opt/ostag#$REPO#g" -e "s#/Users/Shared/OStag#$DATA_DIR#g" \
   "$REPO/deploy/copilot-relay/run-worker.sh" > "$RUNNER"
