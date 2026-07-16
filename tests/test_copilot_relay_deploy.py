@@ -78,6 +78,12 @@ def test_install_refuses_weak_existing_config_permissions(tmp_path) -> None:
     assert "0600" in result.stderr
 
 
+def test_installer_preserves_only_non_secret_osstack_runtime_settings() -> None:
+    installer = Path("deploy/copilot-relay/install-launchd.sh").read_text()
+    assert "OSSTACK_BIN|DEFAULT_REPO|POLL_INTERVAL_SECONDS" in installer
+    assert "RELAY_SECRET|TOKEN|PRIVATE_KEY" not in installer
+
+
 def test_worker_launcher_quotes_standard_macos_paths_with_spaces() -> None:
     launcher = Path("deploy/copilot-relay/run-worker.sh").read_text(encoding="utf-8")
 

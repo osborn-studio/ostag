@@ -59,6 +59,10 @@ if [[ -e "$ENV_FILE" ]]; then
   MODE="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
   [[ "$MODE" == "600" ]] || { echo "existing config must already use mode 0600" >&2; exit 77; }
 fi
+PRESERVED_CONFIG=""
+if [[ -f "$ENV_FILE" ]]; then
+  PRESERVED_CONFIG="$(grep -E '^OSTAG_COPILOT_RELAY_(OSSTACK_BIN|DEFAULT_REPO|POLL_INTERVAL_SECONDS)=' "$ENV_FILE" || true)"
+fi
 
 if [[ -n "$PAIRING_CODE" ]]; then
   OSTAG_DEVICE_IDENTITY_FILE="$IDENTITY_FILE" \
@@ -80,6 +84,7 @@ if [[ ! -e "$ENV_FILE" || -n "$PAIRING_CODE" ]]; then
     echo "OSTAG_COPILOT_RELAY_SPOOL_DB=$DATA_DIR/copilot-relay.sqlite3"
     echo "OSTAG_DEVICE_IDENTITY_FILE=$IDENTITY_FILE"
     echo "OSTAG_DEVICE_DISPLAY_NAME=$DISPLAY_NAME"
+    [[ -z "$PRESERVED_CONFIG" ]] || printf '%s\n' "$PRESERVED_CONFIG"
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi
