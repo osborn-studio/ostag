@@ -9,6 +9,7 @@ import pytest
 
 from ostag.copilot_relay.models import RelayEnvelope
 from ostag.copilot_relay.osstack_port import OsstackSession
+from ostag.copilot_relay.osstack_port import OsstackPortError
 from ostag.copilot_relay.reporter import CopilotReporter
 from ostag.work_monitor.reporter import TransportResponse
 
@@ -361,6 +362,32 @@ async def test_device_heartbeat_is_bounded_and_sent_no_more_than_every_five_seco
     assert headers["X-OStag-Device"] == "device_macbook"
     current[0] += timedelta(seconds=5)
     assert await reporter.heartbeat_once() == 1
+
+
+@pytest.mark.asyncio
+async def test_device_heartbeat_survives_temporary_osstack_inventory_failure(tmp_path) -> None:
+    class UnavailablePort(FakePort):
+        def runtime_inventory(self):
+            raise OsstackPortError("osstack is temporarily unavailable")
+
+    class Identity:
+        device_id = "device_macbook"
+
+        @staticmethod
+        def sign(body: bytes) -> str:
+            return "signed"
+
+    transport = FakeTransport([TransportResponse(200, b'{"accepted":true}')])
+    reporter = CopilotReporter(
+        instance_id="device_macbook", secret="", central_url="https://relay.example",
+        spool_path=tmp_path / "relay.sqlite3", port=UnavailablePort(),
+        transport=transport, clock=lambda: NOW,
+        device_identity=Identity(),  # type: ignore[arg-type]
+    )
+
+    assert await reporter.heartbeat_once() == 1
+    assert json.loads(transport.requests[0][2])["runtimes"] == []
+    assert await reporter.heartbeat_once() == 0
 
 
 @pytest.mark.asyncio

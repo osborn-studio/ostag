@@ -20,7 +20,7 @@ from ostag.work_monitor.reporter import (
 )
 
 from .models import RelayEnvelope, SessionBinding
-from .osstack_port import OsstackSession, OsstackSessionPort
+from .osstack_port import OsstackPortError, OsstackSession, OsstackSessionPort
 
 
 class SigningIdentity(Protocol):
@@ -311,7 +311,10 @@ class CopilotReporter:
             previous = datetime.fromisoformat(last.replace("Z", "+00:00"))
             if (self.clock() - previous).total_seconds() < self.heartbeat_interval_seconds:
                 return 0
-        runtimes = self.port.runtime_inventory()
+        try:
+            runtimes = self.port.runtime_inventory()
+        except OsstackPortError:
+            runtimes = ()
         if len(runtimes) > 100:
             raise ValueError("runtime inventory exceeds heartbeat limit")
         body = self._dump(

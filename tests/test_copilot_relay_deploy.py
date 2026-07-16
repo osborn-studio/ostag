@@ -84,6 +84,7 @@ def test_installer_preserves_only_non_secret_osstack_runtime_settings() -> None:
     assert 'OSTAG_MONITOR_SERVER_DB="$DATA_DIR/device-admin.sqlite3"' in installer
     assert 'RUNNER="$DATA_DIR/run-copilot-relay.sh"' in installer
     assert "printf 'OSTAG_COPILOT_RELAY_SPOOL_DB=%q" in installer
+    assert "PRESERVED_OSSTACK_BIN//" in installer
     assert "RELAY_SECRET|TOKEN|PRIVATE_KEY" not in installer
 
 

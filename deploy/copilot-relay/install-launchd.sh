@@ -67,6 +67,12 @@ if [[ -f "$ENV_FILE" ]]; then
   PRESERVED_OSSTACK_BIN="$(grep '^OSTAG_COPILOT_RELAY_OSSTACK_BIN=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
   PRESERVED_DEFAULT_REPO="$(grep '^OSTAG_COPILOT_RELAY_DEFAULT_REPO=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
   PRESERVED_POLL_INTERVAL="$(grep '^OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+  while [[ "$PRESERVED_OSSTACK_BIN" == *'\ '* ]]; do
+    PRESERVED_OSSTACK_BIN="${PRESERVED_OSSTACK_BIN//\\ / }"
+  done
+  while [[ "$PRESERVED_DEFAULT_REPO" == *'\ '* ]]; do
+    PRESERVED_DEFAULT_REPO="${PRESERVED_DEFAULT_REPO//\\ / }"
+  done
 fi
 
 if [[ -n "$PAIRING_CODE" ]]; then
