@@ -54,12 +54,13 @@ def _service(tmp_path: Path):
             ),
         )
         connection.executemany(
-            "INSERT INTO relay_sessions(instance_id,session_id,task_id,run_id,agent_id,"
+            "INSERT INTO relay_sessions(instance_id,runtime_id,session_id,task_id,run_id,agent_id,"
             "title,state,session_version,last_turn_id,latest_summary,updated_at) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 (
                     "owner-mac",
+                    "legacy",
                     "owner-session",
                     "owner-task",
                     "owner-run",
@@ -73,6 +74,7 @@ def _service(tmp_path: Path):
                 ),
                 (
                     "employee-mac",
+                    "legacy",
                     "decision-session",
                     "decision-task",
                     "decision-run",
@@ -86,6 +88,7 @@ def _service(tmp_path: Path):
                 ),
                 (
                     "employee-mac",
+                    "legacy",
                     "blocked-session",
                     "blocked-task",
                     "blocked-run",
@@ -100,9 +103,9 @@ def _service(tmp_path: Path):
             ),
         )
         connection.execute(
-            "INSERT INTO relay_decisions(decision_id,instance_id,session_id,turn_id,"
+                "INSERT INTO relay_decisions(decision_id,instance_id,runtime_id,session_id,turn_id,"
             "session_version,question,choices_json,state,expires_at) "
-            "VALUES ('decision-1','employee-mac','decision-session','turn-decision',3,"
+                "VALUES ('decision-1','employee-mac','legacy','decision-session','turn-decision',3,"
             "'选择方案','[]','pending',?)",
             ((NOW + timedelta(hours=1)).isoformat(),),
         )

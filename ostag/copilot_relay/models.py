@@ -30,7 +30,10 @@ SESSION_STATES = frozenset(
     {"starting", "running", "awaiting_decision", "idle", "completed", "failed", "cancelled"}
 )
 DELIVERY_STATES = frozenset(
-    {"queued", "delivered", "accepted", "applied", "rejected", "expired", "indeterminate"}
+    {
+        "queued", "delivered", "accepted", "applied", "rejected", "expired",
+        "indeterminate", "stale",
+    }
 )
 
 _UTC_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$")

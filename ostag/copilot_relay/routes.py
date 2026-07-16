@@ -33,6 +33,7 @@ def _strict_object(body: bytes, keys: frozenset[str]) -> dict[str, Any]:
 def _session_dict(session: RelaySession) -> dict[str, object]:
     return {
         "instance_id": session.instance_id,
+        "runtime_id": session.runtime_id,
         "session_id": session.session_id,
         "task_id": session.task_id,
         "run_id": session.run_id,

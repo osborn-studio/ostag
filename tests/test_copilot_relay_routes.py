@@ -226,7 +226,9 @@ def test_owner_pairs_device_without_issuing_a_shared_secret_and_v2_auth_works(
         assert devices.json()["devices"][0]["connection_state"] == "online"
         assert devices.json()["devices"][0]["runtimes"][0]["runtime_id"] == "codex-cli"
 
-    assert RelayStore(store).get_session("device_macbook", "session-1") is not None
+    assert RelayStore(store).get_session(
+        "device_macbook", "session-1", "codex-cli"
+    ) is not None
 
 
 def test_events_are_strict_ordered_projected_and_idempotent(tmp_path: Path) -> None:

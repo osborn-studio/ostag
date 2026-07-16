@@ -8,6 +8,7 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
@@ -78,9 +79,9 @@ class CopilotReporter:
                 """
                 CREATE TABLE IF NOT EXISTS relay_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS relay_local_sessions(
-                    session_id TEXT PRIMARY KEY,payload TEXT NOT NULL,
+                    runtime_id TEXT NOT NULL,session_id TEXT NOT NULL,payload TEXT NOT NULL,
                     exported_version INTEGER NOT NULL DEFAULT 0,snapshot_hash TEXT NOT NULL DEFAULT '',
-                    exported_decision_id TEXT NOT NULL DEFAULT '');
+                    exported_decision_id TEXT NOT NULL DEFAULT '',PRIMARY KEY(runtime_id,session_id));
                 CREATE TABLE IF NOT EXISTS relay_outbound(
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,message_id TEXT NOT NULL UNIQUE,
                     payload TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,
@@ -104,6 +105,15 @@ class CopilotReporter:
                     "ALTER TABLE relay_local_sessions ADD COLUMN "
                     "exported_decision_id TEXT NOT NULL DEFAULT ''"
                 )
+                session_columns.add("exported_decision_id")
+            if "runtime_id" not in session_columns:
+                db.executescript(
+                    "ALTER TABLE relay_local_sessions RENAME TO relay_local_sessions_v1;"
+                    "CREATE TABLE relay_local_sessions(runtime_id TEXT NOT NULL,session_id TEXT NOT NULL,payload TEXT NOT NULL,exported_version INTEGER NOT NULL DEFAULT 0,snapshot_hash TEXT NOT NULL DEFAULT '',exported_decision_id TEXT NOT NULL DEFAULT '',PRIMARY KEY(runtime_id,session_id));"
+                    "INSERT INTO relay_local_sessions(runtime_id,session_id,payload,exported_version,snapshot_hash,exported_decision_id) SELECT 'legacy',session_id,payload,exported_version,snapshot_hash,exported_decision_id FROM relay_local_sessions_v1;"
+                    "DROP TABLE relay_local_sessions_v1;"
+                )
+                session_columns.add("runtime_id")
 
     @staticmethod
     def _dump(value: object) -> str:
@@ -132,19 +142,19 @@ class CopilotReporter:
             for session in self.port.list_sessions():
                 payload = self._dump(session.__dict__)
                 row = db.execute(
-                    "SELECT payload FROM relay_local_sessions WHERE session_id=?",
-                    (session.session_id,),
+                    "SELECT payload FROM relay_local_sessions WHERE runtime_id=? AND session_id=?",
+                    (session.runtime_id, session.session_id),
                 ).fetchone()
                 if row is None:
                     db.execute(
-                        "INSERT INTO relay_local_sessions(session_id,payload) VALUES(?,?)",
-                        (session.session_id, payload),
+                        "INSERT INTO relay_local_sessions(runtime_id,session_id,payload) VALUES(?,?,?)",
+                        (session.runtime_id, session.session_id, payload),
                     )
                     found += 1
                 elif row["payload"] != payload:
                     db.execute(
-                        "UPDATE relay_local_sessions SET payload=? WHERE session_id=?",
-                        (payload, session.session_id),
+                        "UPDATE relay_local_sessions SET payload=? WHERE runtime_id=? AND session_id=?",
+                        (payload, session.runtime_id, session.session_id),
                     )
         return found
 
@@ -255,8 +265,8 @@ class CopilotReporter:
                     created += int(self._insert_outbound(db, request))
                 db.execute(
                     "UPDATE relay_local_sessions SET exported_version=?,snapshot_hash=?,"
-                    "exported_decision_id=? WHERE session_id=?",
-                    (local.version, snapshot_hash, decision_id, local.session_id),
+                    "exported_decision_id=? WHERE runtime_id=? AND session_id=?",
+                    (local.version, snapshot_hash, decision_id, local.runtime_id, local.session_id),
                 )
         return created
 
@@ -416,7 +426,10 @@ class CopilotReporter:
         return added
 
     async def apply_inbound_once(self) -> int:
-        sessions = {session.session_id: session for session in self.port.list_sessions()}
+        sessions = {
+            (session.runtime_id, session.session_id): session
+            for session in self.port.list_sessions()
+        }
         with self._connect() as db:
             rows = db.execute(
                 "SELECT * FROM relay_inbound WHERE state='pending' ORDER BY rowid"
@@ -428,8 +441,23 @@ class CopilotReporter:
             if self.clock() >= expires:
                 self._finish_inbound(message, "expired", "instruction expired before local apply")
                 continue
-            session = sessions.get(message.binding.session_id)
+            session = sessions.get((message.binding.runtime_id, message.binding.session_id))
+            if message.binding.runtime_id == "legacy":
+                candidates = [
+                    candidate
+                    for (runtime_id, session_id), candidate in sessions.items()
+                    if session_id == message.binding.session_id and runtime_id != "legacy"
+                ]
+                if len(candidates) == 1:
+                    session = candidates[0]
+                    message = replace(
+                        message,
+                        binding=replace(message.binding, runtime_id=session.runtime_id),
+                    )
             if session is None or session.version != message.binding.session_version:
+                self._finish_inbound(
+                    message, "stale", "exact runtime session is unavailable"
+                )
                 continue
             if message.kind in {"instruction.send", "decision.answer"}:
                 result = self.port.send(message)
@@ -539,7 +567,7 @@ class CopilotReporter:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT message_id,payload FROM relay_inbound "
-                "WHERE state IN ('applied','expired') AND acked_at='' ORDER BY rowid LIMIT 100"
+                "WHERE state IN ('applied','expired','stale') AND acked_at='' ORDER BY rowid LIMIT 100"
             ).fetchall()
         if not rows:
             return 0

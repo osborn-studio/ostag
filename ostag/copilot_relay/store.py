@@ -24,6 +24,7 @@ class MessageConflictError(ValueError):
 @dataclass(frozen=True)
 class RelaySession:
     instance_id: str
+    runtime_id: str
     session_id: str
     task_id: str
     run_id: str
@@ -154,6 +155,7 @@ class RelayStore:
         lease_until: str,
         limit: int = 100,
         instance_id: str | None = None,
+        runtime_id: str | None = None,
         session_ids: frozenset[str] | None = None,
     ) -> tuple[LeasedMessage, ...]:
         if direction not in {"inbound", "outbound"}:
@@ -167,6 +169,11 @@ class RelayStore:
             parameters: tuple[object, ...] = (direction, now, now)
             if instance_id:
                 parameters += (instance_id,)
+            runtime_clause = (
+                " AND json_extract(binding_json,'$.runtime_id')=?" if runtime_id else ""
+            )
+            if runtime_id:
+                parameters += (runtime_id,)
             session_clause = ""
             if session_ids:
                 placeholders = ",".join("?" for _ in session_ids)
@@ -180,6 +187,7 @@ class RelayStore:
                 "AND state IN ('pending','leased') AND next_attempt_at<=? "
                 "AND (state='pending' OR lease_until<=?)"
                 + instance_clause
+                + runtime_clause
                 + session_clause
                 + " ORDER BY created_at,message_id LIMIT ?",
                 parameters,
@@ -236,15 +244,15 @@ class RelayStore:
         )
         with self.monitor_store.transaction() as connection:
             current = connection.execute(
-                "SELECT * FROM relay_sessions WHERE instance_id=? AND session_id=?",
-                (binding.instance_id, binding.session_id),
+                "SELECT * FROM relay_sessions WHERE instance_id=? AND runtime_id=? AND session_id=?",
+                (binding.instance_id, binding.runtime_id, binding.session_id),
             ).fetchone()
             if current is None:
                 connection.execute(
-                    "INSERT INTO relay_sessions(instance_id,session_id,task_id,run_id,agent_id,"
+                    "INSERT INTO relay_sessions(instance_id,runtime_id,session_id,task_id,run_id,agent_id,"
                     "title,state,session_version,last_turn_id,latest_summary,updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                    (binding.instance_id, binding.session_id, *values),
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (binding.instance_id, binding.runtime_id, binding.session_id, *values),
                 )
                 return True
             current_version = int(current["session_version"])
@@ -268,25 +276,27 @@ class RelayStore:
             result = connection.execute(
                 "UPDATE relay_sessions SET task_id=?,run_id=?,agent_id=?,title=?,state=?,"
                 "session_version=?,last_turn_id=?,latest_summary=?,updated_at=? "
-                "WHERE instance_id=? AND session_id=? AND session_version=?",
-                (*values, binding.instance_id, binding.session_id, current_version),
+                "WHERE instance_id=? AND runtime_id=? AND session_id=? AND session_version=?",
+                (*values, binding.instance_id, binding.runtime_id, binding.session_id, current_version),
             )
             if result.rowcount != 1:
                 raise StaleSessionError("session changed concurrently")
         return True
 
-    def get_session(self, instance_id: str, session_id: str) -> RelaySession | None:
+    def get_session(
+        self, instance_id: str, session_id: str, runtime_id: str = "legacy"
+    ) -> RelaySession | None:
         with self.monitor_store.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM relay_sessions WHERE instance_id=? AND session_id=?",
-                (instance_id, session_id),
+                "SELECT * FROM relay_sessions WHERE instance_id=? AND runtime_id=? AND session_id=?",
+                (instance_id, runtime_id, session_id),
             ).fetchone()
         return None if row is None else RelaySession(**dict(row))
 
     def list_sessions(self, instance_ids: frozenset[str] | None = None) -> tuple[RelaySession, ...]:
         with self.monitor_store.connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM relay_sessions ORDER BY updated_at DESC,instance_id,session_id"
+                "SELECT * FROM relay_sessions ORDER BY updated_at DESC,instance_id,runtime_id,session_id"
             ).fetchall()
         sessions = tuple(RelaySession(**dict(row)) for row in rows)
         return sessions if instance_ids is None else tuple(
@@ -461,25 +471,27 @@ class RelayStore:
         actor_id: str,
         instance_id: str,
         session_id: str,
+        runtime_id: str = "legacy",
         *,
         selected_at: str,
     ) -> None:
-        if self.get_session(instance_id, session_id) is None:
+        if self.get_session(instance_id, session_id, runtime_id) is None:
             raise ValueError("cannot select an unknown relay session")
         with self.monitor_store.transaction() as connection:
             connection.execute(
-                "INSERT INTO relay_current_tasks(platform,actor_id,instance_id,session_id,selected_at) "
-                "VALUES (?,?,?,?,?) ON CONFLICT(platform,actor_id) DO UPDATE SET "
-                "instance_id=excluded.instance_id,session_id=excluded.session_id,"
+                "INSERT INTO relay_current_tasks(platform,actor_id,instance_id,runtime_id,session_id,selected_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(platform,actor_id) DO UPDATE SET "
+                "instance_id=excluded.instance_id,runtime_id=excluded.runtime_id,session_id=excluded.session_id,"
                 "selected_at=excluded.selected_at",
-                (platform, actor_id, instance_id, session_id, selected_at),
+                (platform, actor_id, instance_id, runtime_id, session_id, selected_at),
             )
 
     def current_session(self, platform: str, actor_id: str) -> RelaySession | None:
         with self.monitor_store.connect() as connection:
             row = connection.execute(
                 "SELECT s.* FROM relay_current_tasks c JOIN relay_sessions s "
-                "ON s.instance_id=c.instance_id AND s.session_id=c.session_id "
+                "ON s.instance_id=c.instance_id AND s.runtime_id=c.runtime_id "
+                "AND s.session_id=c.session_id "
                 "WHERE c.platform=? AND c.actor_id=?",
                 (platform, actor_id),
             ).fetchone()
@@ -492,11 +504,12 @@ class RelayStore:
         binding = envelope.binding
         with self.monitor_store.transaction() as connection:
             result = connection.execute(
-                "INSERT OR IGNORE INTO relay_decisions(decision_id,instance_id,session_id,turn_id,"
-                "session_version,question,choices_json,state,expires_at) VALUES (?,?,?,?,?,?,?,'pending',?)",
+                "INSERT OR IGNORE INTO relay_decisions(decision_id,instance_id,runtime_id,session_id,turn_id,"
+                "session_version,question,choices_json,state,expires_at) VALUES (?,?,?,?,?,?,?,?,'pending',?)",
                 (
                     payload["decision_id"],
                     binding.instance_id,
+                    binding.runtime_id,
                     binding.session_id,
                     binding.turn_id,
                     binding.session_version,
@@ -514,12 +527,13 @@ class RelayStore:
         with self.monitor_store.transaction() as connection:
             result = connection.execute(
                 "UPDATE relay_decisions SET state='answered',answered_at=? WHERE decision_id=? "
-                "AND instance_id=? AND session_id=? AND turn_id=? AND session_version=? "
+                "AND instance_id=? AND runtime_id=? AND session_id=? AND turn_id=? AND session_version=? "
                 "AND state='pending' AND expires_at>?",
                 (
                     answered_at,
                     envelope.payload["decision_id"],
                     binding.instance_id,
+                    binding.runtime_id,
                     binding.session_id,
                     binding.turn_id,
                     binding.session_version,
@@ -538,12 +552,13 @@ class RelayStore:
         with self.monitor_store.transaction() as connection:
             result = connection.execute(
                 "UPDATE relay_decisions SET state='answered',answered_at=? WHERE decision_id=? "
-                "AND instance_id=? AND session_id=? AND turn_id=? AND session_version=? "
+                "AND instance_id=? AND runtime_id=? AND session_id=? AND turn_id=? AND session_version=? "
                 "AND state='pending' AND expires_at>?",
                 (
                     answered_at,
                     envelope.payload["decision_id"],
                     binding.instance_id,
+                    binding.runtime_id,
                     binding.session_id,
                     binding.turn_id,
                     binding.session_version,

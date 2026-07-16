@@ -202,6 +202,23 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS monitor_device_runtimes (device_id TEXT NOT NULL,runtime_id TEXT NOT NULL,agent_type TEXT NOT NULL,state TEXT NOT NULL,session_count INTEGER NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(device_id,runtime_id),FOREIGN KEY(device_id) REFERENCES monitor_devices(device_id))",
         )
     ),
+    Migration(
+        statements=(
+            "ALTER TABLE relay_sessions RENAME TO relay_sessions_v1",
+            "CREATE TABLE relay_sessions (instance_id TEXT NOT NULL,runtime_id TEXT NOT NULL,session_id TEXT NOT NULL,task_id TEXT NOT NULL,run_id TEXT NOT NULL,agent_id TEXT NOT NULL,title TEXT NOT NULL,state TEXT NOT NULL,session_version INTEGER NOT NULL,last_turn_id TEXT NOT NULL,latest_summary TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(instance_id,runtime_id,session_id))",
+            "INSERT INTO relay_sessions(instance_id,runtime_id,session_id,task_id,run_id,agent_id,title,state,session_version,last_turn_id,latest_summary,updated_at) SELECT instance_id,'legacy',session_id,task_id,run_id,agent_id,title,state,session_version,last_turn_id,latest_summary,updated_at FROM relay_sessions_v1",
+            "DROP TABLE relay_sessions_v1",
+            "ALTER TABLE relay_decisions RENAME TO relay_decisions_v1",
+            "CREATE TABLE relay_decisions (decision_id TEXT PRIMARY KEY,instance_id TEXT NOT NULL,runtime_id TEXT NOT NULL,session_id TEXT NOT NULL,turn_id TEXT NOT NULL,session_version INTEGER NOT NULL,question TEXT NOT NULL,choices_json TEXT NOT NULL,state TEXT NOT NULL,expires_at TEXT NOT NULL,answered_at TEXT NOT NULL DEFAULT '')",
+            "INSERT INTO relay_decisions(decision_id,instance_id,runtime_id,session_id,turn_id,session_version,question,choices_json,state,expires_at,answered_at) SELECT decision_id,instance_id,'legacy',session_id,turn_id,session_version,question,choices_json,state,expires_at,answered_at FROM relay_decisions_v1",
+            "DROP TABLE relay_decisions_v1",
+            "ALTER TABLE relay_current_tasks RENAME TO relay_current_tasks_v1",
+            "CREATE TABLE relay_current_tasks (platform TEXT NOT NULL,actor_id TEXT NOT NULL,instance_id TEXT NOT NULL,runtime_id TEXT NOT NULL,session_id TEXT NOT NULL,selected_at TEXT NOT NULL,PRIMARY KEY(platform,actor_id))",
+            "INSERT INTO relay_current_tasks(platform,actor_id,instance_id,runtime_id,session_id,selected_at) SELECT platform,actor_id,instance_id,'legacy',session_id,selected_at FROM relay_current_tasks_v1",
+            "DROP TABLE relay_current_tasks_v1",
+            "CREATE INDEX relay_sessions_device_runtime ON relay_sessions(instance_id,runtime_id,updated_at)",
+        )
+    ),
 )
 
 
@@ -236,7 +253,7 @@ class MonitorStore:
                 connection.execute("BEGIN IMMEDIATE")
                 try:
                     for statement in migration.statements:
-                        if statement.startswith("ALTER TABLE"):
+                        if statement.startswith("ALTER TABLE") and "ADD COLUMN" in statement:
                             table = statement.split()[2]
                             column_name = statement.split("ADD COLUMN", 1)[1].strip().split()[0]
                             columns = {

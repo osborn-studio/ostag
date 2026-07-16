@@ -18,7 +18,7 @@ from ostag.copilot_relay.status_board import (
 
 def _session() -> RelaySession:
     return RelaySession(
-        "macmini", "sess-secret-native", "task-1", "run-secret", "codex-cli",
+        "macmini", "legacy", "sess-secret-native", "task-1", "run-secret", "codex-cli",
         "修复 <登录> **回归**", "awaiting_decision", 3, "turn-secret",
         "已完成分析，等待选择", "2026-07-14T01:00:00Z",
     )

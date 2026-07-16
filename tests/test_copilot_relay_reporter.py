@@ -74,9 +74,10 @@ def _instruction(
 ):
     return RelayEnvelope.from_dict(
         {
-            "schema_version": 1, "message_id": message_id,
+            "schema_version": 2, "message_id": message_id,
             "binding": {
                 "instance_id": "macmini", "task_id": "task_1", "run_id": "run_1",
+                "runtime_id": "codex-cli",
                 "session_id": "sess_1", "turn_id": "turn_4", "session_version": version,
             },
             "sequence": 1, "created_at": created, "expires_at": expires,

@@ -14,6 +14,8 @@ def _envelope(
     session_id: str = "sess_1",
     version: int = 1,
     turn_id: str = "turn_1",
+    instance_id: str = "macmini",
+    runtime_id: str = "legacy",
 ) -> RelayEnvelope:
     payloads: dict[str, dict[str, object]] = {
         "session.upsert": {
@@ -50,10 +52,11 @@ def _envelope(
     }
     return RelayEnvelope.from_dict(
         {
-            "schema_version": 1,
+            "schema_version": 1 if runtime_id == "legacy" else 2,
             "message_id": message_id,
             "binding": {
-                "instance_id": "macmini",
+                "instance_id": instance_id,
+                **({} if runtime_id == "legacy" else {"runtime_id": runtime_id}),
                 "task_id": f"task_{session_id}",
                 "run_id": f"run_{session_id}",
                 "session_id": session_id,
@@ -147,6 +150,49 @@ def test_session_upsert_uses_monotonic_compare_and_swap(tmp_path) -> None:
     with pytest.raises(StaleSessionError):
         relay.upsert_session(_envelope("session.upsert", "msg_s6", version=6))
     assert relay.get_session("macmini", "sess_1").session_version == 7
+
+
+def test_same_session_id_is_isolated_by_device_and_runtime(tmp_path) -> None:
+    relay = RelayStore(MonitorStore(tmp_path / "monitor.db"))
+    macbook = _envelope(
+        "session.upsert", "msg_macbook", instance_id="device_macbook",
+        runtime_id="codex-cli",
+    )
+    macmini = _envelope(
+        "session.upsert", "msg_macmini", instance_id="device_macmini",
+        runtime_id="claude-code",
+    )
+
+    assert relay.upsert_session(macbook) is True
+    assert relay.upsert_session(macmini) is True
+    sessions = relay.list_sessions()
+    assert {(item.instance_id, item.runtime_id, item.session_id) for item in sessions} == {
+        ("device_macbook", "codex-cli", "sess_1"),
+        ("device_macmini", "claude-code", "sess_1"),
+    }
+
+
+def test_message_lease_requires_exact_device_runtime_target(tmp_path) -> None:
+    relay = RelayStore(MonitorStore(tmp_path / "monitor.db"))
+    relay.enqueue(
+        _envelope(
+            "instruction.send", "msg_target", instance_id="device_macmini",
+            runtime_id="claude-code",
+        ),
+        direction="outbound",
+    )
+
+    assert relay.claim_messages(
+        direction="outbound", owner="macbook", instance_id="device_macbook",
+        runtime_id="codex-cli", now="2026-07-14T01:00:00Z",
+        lease_until="2026-07-14T01:00:30Z",
+    ) == ()
+    claimed = relay.claim_messages(
+        direction="outbound", owner="macmini", instance_id="device_macmini",
+        runtime_id="claude-code", now="2026-07-14T01:00:00Z",
+        lease_until="2026-07-14T01:00:30Z",
+    )
+    assert [item.message_id for item in claimed] == ["msg_target"]
 
 
 def test_current_task_switch_and_registry_survive_restart(tmp_path) -> None:

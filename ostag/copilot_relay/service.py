@@ -39,16 +39,17 @@ class CopilotRelayService:
         self.clock = clock
 
     def select_session(
-        self, principal: Principal, instance_id: str, session_id: str, *, selected_at: str
+        self, principal: Principal, instance_id: str, session_id: str, *,
+        selected_at: str, runtime_id: str = "legacy"
     ) -> RelaySession:
         if not self.policy.can_access(principal, instance_id):
             raise PermissionError("principal cannot access this instance")
-        session = self.store.get_session(instance_id, session_id)
+        session = self.store.get_session(instance_id, session_id, runtime_id)
         if session is None:
             raise RelayRoutingError("unknown session")
         self.store.select_current_task(
             principal.platform, principal.actor_id, instance_id, session_id,
-            selected_at=selected_at,
+            selected_at=selected_at, runtime_id=runtime_id,
         )
         return session
 
@@ -72,7 +73,9 @@ class CopilotRelayService:
         if quote_message_id and source is None:
             raise RelayRoutingError("quoted relay message was not found")
         current = (
-            self.store.get_session(source.binding.instance_id, source.binding.session_id)
+            self.store.get_session(
+                source.binding.instance_id, source.binding.session_id, source.binding.runtime_id
+            )
             if source is not None
             else self.store.current_session(principal.platform, principal.actor_id)
         )
@@ -184,7 +187,7 @@ class CopilotRelayService:
     def _binding(session: RelaySession, turn_id: str) -> SessionBinding:
         return SessionBinding(
             session.instance_id, session.task_id, session.run_id, session.session_id,
-            turn_id, session.session_version,
+            turn_id, session.session_version, session.runtime_id,
         )
 
     def _envelope(
@@ -197,11 +200,12 @@ class CopilotRelayService:
     ) -> RelayEnvelope:
         now = self.clock().astimezone(timezone.utc).replace(microsecond=0)
         expires = now + timedelta(minutes=10)
+        schema_version = 1 if binding.runtime_id == "legacy" else 2
         return RelayEnvelope.from_dict(
             {
-                "schema_version": 1,
+                "schema_version": schema_version,
                 "message_id": f"relay_{event_id or uuid4().hex}",
-                "binding": binding.to_dict(),
+                "binding": binding.to_dict(schema_version=schema_version),
                 "sequence": 1,
                 "created_at": now.isoformat().replace("+00:00", "Z"),
                 "expires_at": expires.isoformat().replace("+00:00", "Z"),
