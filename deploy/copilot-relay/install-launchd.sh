@@ -113,6 +113,10 @@ rm -f "$PLIST.bak"
 chmod 600 "$PLIST"
 
 launchctl bootout "gui/$(id -u)/ai.ostag.copilot-relay" 2>/dev/null || true
+for _ in $(seq 1 20); do
+  launchctl print "gui/$(id -u)/ai.ostag.copilot-relay" >/dev/null 2>&1 || break
+  sleep 0.2
+done
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 launchctl kickstart -k "gui/$(id -u)/ai.ostag.copilot-relay"
 sleep 2

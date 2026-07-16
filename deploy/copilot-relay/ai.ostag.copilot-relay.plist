@@ -17,6 +17,10 @@
     <string>/Users/Shared/OStag/copilot-relay.env</string>
     <key>OSTAG_COPILOT_RELAY_SPOOL_DB</key>
     <string>/Users/Shared/OStag/copilot-relay.sqlite3</string>
+    <key>OSSTACK_HOME</key>
+    <string>/Users/Shared/OStag/osstack-copilot</string>
+    <key>OSSTACK_SOCKET</key>
+    <string>/Users/Shared/OStag/osstack-copilot/daemon.sock</string>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
   </dict>

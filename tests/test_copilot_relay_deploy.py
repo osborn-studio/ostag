@@ -33,6 +33,10 @@ def test_launchd_template_is_bounded_absolute_and_keeps_secrets_outside_plist() 
     assert plist["EnvironmentVariables"]["OSTAG_COPILOT_RELAY_SPOOL_DB"].startswith(
         "/Users/Shared/OStag/"
     )
+    assert plist["EnvironmentVariables"]["OSSTACK_HOME"].startswith(
+        "/Users/Shared/OStag/"
+    )
+    assert plist["EnvironmentVariables"]["OSSTACK_SOCKET"].endswith("/daemon.sock")
     encoded = path.read_text()
     assert "SECRET" not in encoded and "TOKEN" not in encoded
 
