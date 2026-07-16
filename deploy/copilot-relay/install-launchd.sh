@@ -40,6 +40,7 @@ LAUNCH_DIR="$HOME/Library/LaunchAgents"
 PLIST="$LAUNCH_DIR/ai.ostag.copilot-relay.plist"
 ENV_FILE="$DATA_DIR/copilot-relay.env"
 IDENTITY_FILE="$DATA_DIR/device-identity.json"
+RUNNER="$DATA_DIR/run-copilot-relay.sh"
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "would validate virtualenv and render ai.ostag.copilot-relay.plist from $REPO"
@@ -92,6 +93,11 @@ fi
 
 sed -e "s#/opt/ostag#$REPO#g" -e "s#/Users/Shared/OStag#$DATA_DIR#g" \
   "$REPO/deploy/copilot-relay/ai.ostag.copilot-relay.plist" > "$PLIST"
+sed -e "s#/opt/ostag#$REPO#g" -e "s#/Users/Shared/OStag#$DATA_DIR#g" \
+  "$REPO/deploy/copilot-relay/run-worker.sh" > "$RUNNER"
+chmod 700 "$RUNNER"
+sed -i.bak "s#$REPO/deploy/copilot-relay/run-worker.sh#$RUNNER#g" "$PLIST"
+rm -f "$PLIST.bak"
 chmod 600 "$PLIST"
 
 launchctl bootout "gui/$(id -u)/ai.ostag.copilot-relay" 2>/dev/null || true
