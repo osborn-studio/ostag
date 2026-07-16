@@ -60,9 +60,13 @@ if [[ -e "$ENV_FILE" ]]; then
   MODE="$(stat -f '%Lp' "$ENV_FILE" 2>/dev/null || stat -c '%a' "$ENV_FILE")"
   [[ "$MODE" == "600" ]] || { echo "existing config must already use mode 0600" >&2; exit 77; }
 fi
-PRESERVED_CONFIG=""
+PRESERVED_OSSTACK_BIN=""
+PRESERVED_DEFAULT_REPO=""
+PRESERVED_POLL_INTERVAL=""
 if [[ -f "$ENV_FILE" ]]; then
-  PRESERVED_CONFIG="$(grep -E '^OSTAG_COPILOT_RELAY_(OSSTACK_BIN|DEFAULT_REPO|POLL_INTERVAL_SECONDS)=' "$ENV_FILE" || true)"
+  PRESERVED_OSSTACK_BIN="$(grep '^OSTAG_COPILOT_RELAY_OSSTACK_BIN=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+  PRESERVED_DEFAULT_REPO="$(grep '^OSTAG_COPILOT_RELAY_DEFAULT_REPO=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
+  PRESERVED_POLL_INTERVAL="$(grep '^OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS=' "$ENV_FILE" | head -1 | cut -d= -f2- || true)"
 fi
 
 if [[ -n "$PAIRING_CODE" ]]; then
@@ -77,16 +81,18 @@ fi
 MODE="$(stat -f '%Lp' "$IDENTITY_FILE" 2>/dev/null || stat -c '%a' "$IDENTITY_FILE")"
 [[ "$MODE" == "600" ]] || { echo "device identity metadata must use mode 0600" >&2; exit 77; }
 
-if [[ ! -e "$ENV_FILE" || -n "$PAIRING_CODE" ]]; then
+if [[ ! -e "$ENV_FILE" || -n "$PAIRING_CODE" || -n "$CENTRAL_URL" ]]; then
   umask 077
   {
     echo "OSTAG_COPILOT_RELAY_ENABLED=true"
     echo "OSTAG_COPILOT_RELAY_WRITE_ENABLED=true"
-    echo "OSTAG_COPILOT_RELAY_CENTRAL_URL=$CENTRAL_URL"
-    echo "OSTAG_COPILOT_RELAY_SPOOL_DB=$DATA_DIR/copilot-relay.sqlite3"
-    echo "OSTAG_DEVICE_IDENTITY_FILE=$IDENTITY_FILE"
-    echo "OSTAG_DEVICE_DISPLAY_NAME=$DISPLAY_NAME"
-    [[ -z "$PRESERVED_CONFIG" ]] || printf '%s\n' "$PRESERVED_CONFIG"
+    printf 'OSTAG_COPILOT_RELAY_CENTRAL_URL=%q\n' "$CENTRAL_URL"
+    printf 'OSTAG_COPILOT_RELAY_SPOOL_DB=%q\n' "$DATA_DIR/copilot-relay.sqlite3"
+    printf 'OSTAG_DEVICE_IDENTITY_FILE=%q\n' "$IDENTITY_FILE"
+    printf 'OSTAG_DEVICE_DISPLAY_NAME=%q\n' "$DISPLAY_NAME"
+    [[ -z "$PRESERVED_OSSTACK_BIN" ]] || printf 'OSTAG_COPILOT_RELAY_OSSTACK_BIN=%q\n' "$PRESERVED_OSSTACK_BIN"
+    [[ -z "$PRESERVED_DEFAULT_REPO" ]] || printf 'OSTAG_COPILOT_RELAY_DEFAULT_REPO=%q\n' "$PRESERVED_DEFAULT_REPO"
+    [[ -z "$PRESERVED_POLL_INTERVAL" ]] || printf 'OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS=%q\n' "$PRESERVED_POLL_INTERVAL"
   } > "$ENV_FILE"
   chmod 600 "$ENV_FILE"
 fi
