@@ -333,3 +333,24 @@ Gateway 只能拉取自身 `device_id` 的命令。Agent adapter 在执行前再
 ## 15. 成功定义
 
 用户在飞书私聊 OStag 查询状态时，能在一张设备优先看板中准确看到 MacBook Pro/Codex 与 Mac mini/Claude Code 的在线状态、当前会话、最新回复和等待决策；关键变化 10 秒内可见，飞书回复始终进入明确标注的目标会话，并且断网、重启和迁移不会造成状态丢失或跨会话串线。
+
+## 16. 实施锁定项
+
+真实设备接入验证后，以下细节作为兼容性约束锁定：
+
+- v2 事件消息 ID 必须包含签名设备身份命名空间；不能与旧
+  `ostag-local` 的稳定消息 ID 共用全局空间。
+- 签名设备使用独立 `device-relay.sqlite3`，旧实例 spool 仅作为迁移来源，
+  不能继续双写。
+- Gateway 必须绑定 OStag 专用 osstack daemon/socket；运行时安装同时包含
+  CLI 构建产物和 `@osstack/core/dist`，否则 runtime inventory 不可信。
+- macOS LaunchAgent 运行器必须复制到 Application Support，以避开受保护源码
+  目录的 TCC 访问差异；路径和环境值必须按 shell 规则转义。
+- 私钥只保存在 Keychain。Keychain 返回兼容编码时可在内存中解码，但不得把
+  私钥回写到环境文件、plist、日志或证据。
+- Agent 探测失败不能阻断设备心跳；看板连接状态始终依据中心收到心跳的时间，
+  30 秒内在线、30 秒至 2 分钟连接不稳、2 分钟后离线。
+- `ostag-local` 只在签名替代设备完成真实写入灰度后迁移为只读；迁移保留全部
+  历史会话、消息、回执和审计数据。
+
+生产操作、验收和回滚命令统一见 `docs/operations/copilot-relay.md`。
