@@ -137,6 +137,36 @@ async def test_discovery_snapshot_spools_in_order_and_survives_restart(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_v2_message_ids_are_stable_and_namespaced_per_device(tmp_path) -> None:
+    class Identity:
+        def __init__(self, device_id: str):
+            self.device_id = device_id
+
+        @staticmethod
+        def sign(body: bytes) -> str:
+            return "signed"
+
+    reporters = tuple(
+        CopilotReporter(
+            instance_id=device_id, secret="", central_url="https://relay.example",
+            spool_path=tmp_path / f"{device_id}.sqlite3", port=FakePort(),
+            device_identity=Identity(device_id),  # type: ignore[arg-type]
+            clock=lambda: NOW,
+        )
+        for device_id in ("device_macbook", "device_macmini")
+    )
+    for reporter in reporters:
+        await reporter.discover_sessions_once()
+        await reporter.capture_changed_snapshots_once()
+
+    first = [item.message_id for item in reporters[0].pending_outbound()]
+    second = [item.message_id for item in reporters[1].pending_outbound()]
+    assert first != second
+    assert first == [item.message_id for item in reporters[0].pending_outbound()]
+    assert all("device_macbook" not in item for item in first)
+
+
+@pytest.mark.asyncio
 async def test_awaiting_decision_snapshot_spools_a_real_decision_request(tmp_path) -> None:
     class DecisionPort(FakePort):
         def snapshot(self, session_id):

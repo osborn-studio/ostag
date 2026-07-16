@@ -178,10 +178,14 @@ class CopilotReporter:
     ) -> RelayEnvelope:
         now = self.clock()
         schema_version = 2 if self._device_identity is not None else 1
+        stable_message_id = message_id
+        if schema_version == 2:
+            device_namespace = hashlib.sha256(self.instance_id.encode()).hexdigest()[:12]
+            stable_message_id = f"d{device_namespace}_{message_id}"
         return RelayEnvelope.from_dict(
             {
                 "schema_version": schema_version,
-                "message_id": message_id,
+                "message_id": stable_message_id,
                 "binding": binding.to_dict(schema_version=schema_version),
                 "sequence": self._next_sequence(db),
                 "created_at": self._utc(now),
