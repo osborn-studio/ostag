@@ -5,13 +5,19 @@ from ostag.copilot_relay.feishu_cards import (
     MAX_CARD_BYTES,
     render_current_task_card,
     render_decision_card,
+    render_device_detail_card,
+    render_device_overview_card,
+    render_expired_status_recovery_card,
     render_osstack_status_card,
+    render_targeted_decision_card,
     render_task_proposal_card,
 )
 from ostag.copilot_relay.models import RelayEnvelope
 from ostag.copilot_relay.store import RelaySession
 from ostag.copilot_relay.status_board import (
+    DeviceStatusItem,
     OsstackStatusBoardView,
+    RuntimeStatusItem,
     StatusSessionItem,
 )
 
@@ -157,20 +163,61 @@ def _status_view() -> OsstackStatusBoardView:
         updated_at="2026-07-14T23:17:00Z",
         online=True,
         waiting_decision=False,
+        runtime_id="codex-runtime-secret",
+    )
+    second = StatusSessionItem(
+        instance_id="macbook-secret",
+        session_id="second-session-secret",
+        device_name="MacBook Pro",
+        agent_id="claude-code",
+        title="数据同步部署",
+        state="running",
+        latest_summary="正在执行发布前测试。",
+        updated_at="2026-07-14T23:18:00Z",
+        online=True,
+        waiting_decision=False,
+        runtime_id="claude-runtime-secret",
+    )
+    devices = (
+        DeviceStatusItem(
+            device_id="ostag-local",
+            display_name="Mac mini",
+            connection_state="online",
+            last_seen_at="2026-07-14T23:19:55Z",
+            runtimes=(RuntimeStatusItem(
+                "codex-runtime-secret", "codex", "online", 1,
+                "2026-07-14T23:19:55Z",
+            ),),
+            sessions=(session,),
+            attention_count=0,
+        ),
+        DeviceStatusItem(
+            device_id="macbook-secret",
+            display_name="MacBook Pro",
+            connection_state="online",
+            last_seen_at="2026-07-14T23:19:50Z",
+            runtimes=(RuntimeStatusItem(
+                "claude-runtime-secret", "claude-code", "online", 1,
+                "2026-07-14T23:19:50Z",
+            ),),
+            sessions=(second,),
+            attention_count=0,
+        ),
     )
     return OsstackStatusBoardView(
         scope="personal",
         generated_at="2026-07-14T23:20:00Z",
         device_count=1,
         online_count=1,
-        running_count=0,
+        running_count=1,
         waiting_decision_count=0,
         blocked_count=0,
         completed_today_count=2,
         current_session=session,
-        sessions=(session,),
+        sessions=(second, session),
         attention=(),
         stale=False,
+        devices=devices,
     )
 
 
@@ -186,8 +233,9 @@ def test_osstack_status_card_is_mobile_first_and_shows_device_agent() -> None:
     assert card["config"]["wide_screen_mode"] is False
     assert "我的设备" in encoded
     visible = encoded.replace("\\", "")
-    assert "Mac mini" in visible and "ostag-local" in visible
-    assert "codex-cli" in visible
+    assert "Mac mini" in visible and "MacBook Pro" in visible
+    assert "Codex" in visible and "Claude Code" in visible
+    assert "ostag-local" not in visible and "macbook-secret" not in visible
     assert "运行中" in encoded and "等你决策" in encoded and "今日完成" in encoded
     assert "北京时间" in encoded and "只读状态查询" in encoded
     assert "团队总览" in encoded
@@ -216,6 +264,7 @@ def test_status_card_handles_unbound_offline_and_untrusted_text() -> None:
         online_count=0,
         current_session=None,
         sessions=(),
+        devices=(),
     )
     empty_encoded = _encoded(render_osstack_status_card(empty, can_view_team=False))
     assert "尚未绑定 osstack" in empty_encoded
@@ -232,6 +281,13 @@ def test_status_card_handles_unbound_offline_and_untrusted_text() -> None:
         current_session=unsafe,
         sessions=(unsafe,),
         stale=True,
+        devices=(
+            replace(
+                base.devices[0],
+                connection_state="offline",
+                sessions=(unsafe,),
+            ),
+        ),
     )
     offline_card = render_osstack_status_card(offline, can_view_team=False)
     offline_encoded = _encoded(offline_card)
@@ -241,3 +297,52 @@ def test_status_card_handles_unbound_offline_and_untrusted_text() -> None:
     assert "javascript:alert" in offline_encoded
     assert len(offline_card["elements"]) <= 20
     assert len(offline_encoded.encode()) < MAX_CARD_BYTES
+
+
+def test_device_first_cards_have_context_actions_without_native_ids() -> None:
+    view = _status_view()
+    overview = render_device_overview_card(
+        view,
+        can_view_team=True,
+        callback_factory=lambda action, ref: f"opaque-{action}",
+    )
+    detail = render_device_detail_card(
+        view.devices[1],
+        callback_factory=lambda action, ref: f"opaque-{action}",
+    )
+    encoded = _encoded(overview) + _encoded(detail)
+
+    assert "Mac mini" in encoded and "MacBook Pro" in encoded
+    assert "在线" in encoded and "Claude Code" in encoded
+    assert "数据同步部署" in encoded and "查看设备" in encoded
+    assert "继续会话" in encoded
+    for secret in (
+        "ostag-local", "macbook-secret", "codex-runtime-secret",
+        "claude-runtime-secret", "session-secret-native", "second-session-secret",
+    ):
+        assert secret not in encoded
+
+
+def test_targeted_decision_and_expired_recovery_are_explicit_and_fresh() -> None:
+    session = replace(
+        _status_view().sessions[0],
+        device_name="Mac mini",
+        agent_id="claude-code",
+        title="数据同步部署",
+    )
+    targeted = render_targeted_decision_card(
+        session,
+        _envelope("decision.request"),
+        callback_factory=lambda action, ref: f"opaque-{action}-{ref}",
+    )
+    recovery = render_expired_status_recovery_card(
+        callback_factory=lambda action, ref: f"fresh-{action}-{ref}",
+    )
+    targeted_encoded = _encoded(targeted)
+    recovery_encoded = _encoded(recovery)
+
+    assert "本次回复将发送到：Mac mini · Claude Code · 数据同步部署" in targeted_encoded
+    assert "decision_answer" in targeted_encoded
+    assert "操作已过期" in recovery_encoded and "获取最新看板" in recovery_encoded
+    assert "fresh-status_recover-personal" in recovery_encoded
+    assert "session-secret-native" not in targeted_encoded + recovery_encoded

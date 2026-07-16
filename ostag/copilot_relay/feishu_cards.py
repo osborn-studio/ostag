@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from .models import RelayEnvelope
 from .redaction import sanitize_assistant_text
-from .status_board import OsstackStatusBoardView, StatusSessionItem
+from .status_board import DeviceStatusItem, OsstackStatusBoardView, StatusSessionItem
 from .store import RelaySession
 
 
@@ -246,6 +246,211 @@ def _status_label(item: StatusSessionItem) -> str:
     }.get(item.state, item.state)
 
 
+def _agent_label(value: str) -> str:
+    return {
+        "codex": "Codex",
+        "codex-cli": "Codex",
+        "claude-code": "Claude Code",
+        "other": "其他 Agent",
+    }.get(value.casefold(), value)
+
+
+def _connection_label(value: str) -> str:
+    return {
+        "online": "🟢 在线",
+        "degraded": "🟠 连接不稳",
+        "offline": "⚪ 离线",
+    }.get(value, "⚪ 状态未知")
+
+
+def render_device_overview_card(
+    view: OsstackStatusBoardView,
+    *,
+    can_view_team: bool,
+    callback_factory: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
+    """Render a bounded device-first status overview without native identifiers."""
+    scope = "团队总览" if view.scope == "team" else "我的设备"
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "markdown",
+            "content": (
+                f"**{scope}**　在线 **{view.online_count}/{view.device_count}**\n"
+                f"运行中 **{view.running_count}**　等你决策 **{view.waiting_decision_count}**　"
+                f"阻塞 **{view.blocked_count}**　今日完成 **{view.completed_today_count}**"
+            ),
+        }
+    ]
+    if not view.devices:
+        message = (
+            "尚未绑定 osstack，请联系管理员绑定设备。"
+            if view.device_count == 0
+            else "当前没有可显示的设备状态。"
+        )
+        elements.append(
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": message}]}
+        )
+    for device in view.devices[:4]:
+        session = device.sessions[0] if device.sessions else None
+        runtime = device.runtimes[0] if device.runtimes else None
+        lines = [
+            f"**{_safe(device.display_name, 80)}**　{_connection_label(device.connection_state)}"
+        ]
+        if runtime is not None:
+            lines.append(f"**Agent**　{_safe(_agent_label(runtime.agent_type), 64)}")
+        if session is not None:
+            lines.extend(
+                (
+                    f"**当前会话**　{_safe(session.title, 180)} · {_safe(_status_label(session), 32)}",
+                    f"**最近进展**　{_safe(session.latest_summary, 420)}",
+                    f"最近更新 {_beijing_time(session.updated_at)}",
+                )
+            )
+        else:
+            lines.append("**当前会话**　暂无活跃会话")
+        elements.append({"tag": "markdown", "content": "\n".join(lines)})
+        if callback_factory is not None:
+            label = "处理决策" if device.attention_count else "查看设备"
+            elements.append(
+                _action(
+                    callback_factory,
+                    (("device_detail", label, device.device_id),),
+                )
+            )
+    if callback_factory is not None:
+        actions: list[tuple[str, str, str]] = [
+            ("status_refresh", "刷新看板", view.scope),
+            ("switch_picker", "切换任务", "current"),
+        ]
+        if can_view_team:
+            actions.append(
+                (
+                    "status_personal" if view.scope == "team" else "status_team",
+                    "我的设备" if view.scope == "team" else "团队总览",
+                    "personal" if view.scope == "team" else "team",
+                )
+            )
+        elements.append(_action(callback_factory, tuple(actions)))
+    freshness = " · 数据可能已过期" if view.stale else ""
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": f"只读状态查询 · {_beijing_time(view.generated_at)}{freshness}",
+                }
+            ],
+        }
+    )
+    return _card("OStag · osstack 实时进度看板", elements)
+
+
+def render_device_detail_card(
+    device: DeviceStatusItem,
+    *,
+    callback_factory: Callable[[str, str], str] | None = None,
+) -> dict[str, Any]:
+    """Render one authorized device and its bounded runtime/session inventory."""
+    elements: list[dict[str, Any]] = [
+        {
+            "tag": "markdown",
+            "content": f"**{_safe(device.display_name, 80)}**　{_connection_label(device.connection_state)}",
+        }
+    ]
+    for runtime in device.runtimes[:4]:
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": (
+                    f"**Agent**　{_safe(_agent_label(runtime.agent_type), 64)}\n"
+                    f"状态 {_safe(_connection_label(runtime.state), 32)} · "
+                    f"会话 {runtime.session_count}"
+                ),
+            }
+        )
+    if not device.sessions:
+        elements.append(
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": "暂无活跃会话"}]}
+        )
+    for session in device.sessions[:4]:
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": (
+                    f"**{_safe(session.title, 180)}**　{_safe(_status_label(session), 32)}\n"
+                    f"{_safe(_agent_label(session.agent_id), 64)} · "
+                    f"最近更新 {_beijing_time(session.updated_at)}\n"
+                    f"{_safe(session.latest_summary, 420)}"
+                ),
+            }
+        )
+        if callback_factory is not None:
+            elements.append(
+                _action(
+                    callback_factory,
+                    (("device_continue", "继续会话", session.session_id),),
+                )
+            )
+    if callback_factory is not None:
+        elements.append(
+            _action(
+                callback_factory,
+                (("status_recover", "返回最新看板", "personal"),),
+            )
+        )
+    return _card("OStag · 设备详情", elements)
+
+
+def render_targeted_decision_card(
+    session: StatusSessionItem,
+    envelope: RelayEnvelope,
+    *,
+    callback_factory: Callable[[str, str], str],
+) -> dict[str, Any]:
+    if envelope.kind != "decision.request":
+        raise ValueError("decision card requires decision.request")
+    payload = envelope.payload
+    target = (
+        f"本次回复将发送到：{safe_plain_text(session.device_name, 80)} · "
+        f"{safe_plain_text(_agent_label(session.agent_id), 64)} · "
+        f"{safe_plain_text(session.title, 180)}"
+    )
+    lines = [f"**需要你的决策**\n{_safe(payload['question'], 1_000)}"]
+    recommended = payload["recommended_choice_id"]
+    for choice in payload["choices"]:
+        marker = "（AI 推荐）" if choice["choice_id"] == recommended else ""
+        lines.append(f"• {_safe(choice['label'], 160)} {marker}")
+    elements: list[dict[str, Any]] = [
+        {"tag": "note", "elements": [{"tag": "plain_text", "content": target}]},
+        {"tag": "markdown", "content": "\n".join(lines)},
+        _action(
+            callback_factory,
+            tuple(
+                ("decision_answer", str(choice["label"]), str(choice["choice_id"]))
+                for choice in payload["choices"]
+            ),
+        ),
+    ]
+    return _card("OStag · 等待决策", elements)
+
+
+def render_expired_status_recovery_card(
+    *, callback_factory: Callable[[str, str], str]
+) -> dict[str, Any]:
+    elements = [
+        {
+            "tag": "markdown",
+            "content": "原看板操作已过期。获取最新状态后再继续操作。",
+        },
+        _action(
+            callback_factory,
+            (("status_recover", "获取最新看板", "personal"),),
+        ),
+    ]
+    return _card("OStag · 操作已过期", elements)
+
+
 def render_osstack_status_card(
     view: OsstackStatusBoardView,
     *,
@@ -253,6 +458,12 @@ def render_osstack_status_card(
     callback_factory: Callable[[str, str], str] | None = None,
 ) -> dict[str, Any]:
     """Render the identity-scoped, read-only osstack status dashboard."""
+    if view.devices:
+        return render_device_overview_card(
+            view,
+            can_view_team=can_view_team,
+            callback_factory=callback_factory,
+        )
     scope = "团队总览" if view.scope == "team" else "我的设备"
     health = (
         "需要处理"
