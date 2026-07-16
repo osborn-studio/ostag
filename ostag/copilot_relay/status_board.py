@@ -30,6 +30,27 @@ class StatusSessionItem:
     updated_at: str
     online: bool
     waiting_decision: bool
+    runtime_id: str = "legacy"
+
+
+@dataclass(frozen=True)
+class RuntimeStatusItem:
+    runtime_id: str
+    agent_type: str
+    state: str
+    session_count: int
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class DeviceStatusItem:
+    device_id: str
+    display_name: str
+    connection_state: str
+    last_seen_at: str
+    runtimes: tuple[RuntimeStatusItem, ...]
+    sessions: tuple[StatusSessionItem, ...]
+    attention_count: int
 
 
 @dataclass(frozen=True)
@@ -46,6 +67,7 @@ class OsstackStatusBoardView:
     sessions: tuple[StatusSessionItem, ...]
     attention: tuple[StatusSessionItem, ...]
     stale: bool
+    devices: tuple[DeviceStatusItem, ...] = ()
 
 
 def _parse_timestamp(value: str) -> datetime:
@@ -68,6 +90,34 @@ def _rank(item: StatusSessionItem) -> tuple[int, float]:
         )
     )
     return priority, -_parse_timestamp(item.updated_at).timestamp()
+
+
+def _connection_state(last_seen_at: str, now: datetime) -> str:
+    if not last_seen_at:
+        return "offline"
+    age = max(0.0, (now - _parse_timestamp(last_seen_at)).total_seconds())
+    if age < 30:
+        return "online"
+    if age < 120:
+        return "degraded"
+    return "offline"
+
+
+def _device_rank(item: DeviceStatusItem) -> tuple[int, float, str]:
+    if any(session.waiting_decision for session in item.sessions):
+        priority = 0
+    elif any(session.state == "blocked" for session in item.sessions):
+        priority = 1
+    elif item.connection_state == "degraded":
+        priority = 2
+    elif any(session.state == "running" for session in item.sessions):
+        priority = 3
+    elif item.connection_state == "online":
+        priority = 4
+    else:
+        priority = 5
+    seen = _parse_timestamp(item.last_seen_at).timestamp() if item.last_seen_at else 0.0
+    return priority, -seen, item.device_id
 
 
 class OsstackStatusBoardService:
@@ -94,10 +144,21 @@ class OsstackStatusBoardService:
         if scope == "team":
             if principal != self.owner or not self.identities.is_global_owner(principal):
                 raise PermissionError("team status requires global owner")
-            return self.identities.team_instances()
-        if scope != "personal":
+            legacy = self.identities.team_instances()
+            query = "SELECT device_id FROM monitor_devices WHERE revoked_at=''"
+            parameters: tuple[str, ...] = ()
+        elif scope == "personal":
+            legacy = self.identities.personal_instances(principal)
+            query = (
+                "SELECT device_id FROM monitor_devices WHERE principal_platform=? "
+                "AND actor_id=? AND revoked_at=''"
+            )
+            parameters = (principal.platform, principal.actor_id)
+        else:
             raise ValueError("status board scope must be personal or team")
-        return self.identities.personal_instances(principal)
+        with self.store.monitor_store.connect() as connection:
+            registered = connection.execute(query, parameters).fetchall()
+        return frozenset(legacy | {str(row["device_id"]) for row in registered})
 
     def build(
         self, principal: Principal, *, scope: BoardScope = "personal"
@@ -118,6 +179,7 @@ class OsstackStatusBoardService:
                 sessions=(),
                 attention=(),
                 stale=False,
+                devices=(),
             )
 
         ids = tuple(sorted(allowed))
@@ -138,6 +200,16 @@ class OsstackStatusBoardService:
                 f"WHERE instance_id IN ({placeholders})",
                 ids,
             ).fetchall()
+            device_rows = connection.execute(
+                f"SELECT device_id,display_name,last_seen_at FROM monitor_devices "  # noqa: S608
+                f"WHERE revoked_at='' AND device_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+            runtime_rows = connection.execute(
+                f"SELECT device_id,runtime_id,agent_type,state,session_count,updated_at "  # noqa: S608
+                f"FROM monitor_device_runtimes WHERE device_id IN ({placeholders})",
+                ids,
+            ).fetchall()
             task_rows = connection.execute(
                 f"SELECT status,occurred_at FROM tasks "  # noqa: S608
                 f"WHERE instance_id IN ({placeholders})",
@@ -148,17 +220,28 @@ class OsstackStatusBoardService:
             (str(row["instance_id"]), str(row["session_id"]))
             for row in decision_rows
         }
-        last_seen = {
+        legacy_last_seen = {
             str(row["instance_id"]): str(row["last_seen_at"] or "")
             for row in instance_rows
         }
+        registered = {str(row["device_id"]): row for row in device_rows}
+        last_seen = {
+            device_id: str(registered[device_id]["last_seen_at"] or "")
+            if device_id in registered
+            else legacy_last_seen.get(device_id, "")
+            for device_id in ids
+        }
         names = self.identities.instance_display_names(frozenset(ids))
-
-        def online(instance_id: str) -> bool:
-            value = last_seen.get(instance_id, "")
-            return bool(value) and (
-                now - _parse_timestamp(value)
-            ).total_seconds() < self.offline_seconds
+        names.update(
+            {
+                str(row["device_id"]): str(row["display_name"] or row["device_id"])
+                for row in device_rows
+            }
+        )
+        states = {
+            device_id: _connection_state(last_seen[device_id], now)
+            for device_id in ids
+        }
 
         projected = tuple(
             StatusSessionItem(
@@ -172,11 +255,12 @@ class OsstackStatusBoardService:
                 state=str(row["state"]),
                 latest_summary=str(row["latest_summary"]),
                 updated_at=str(row["updated_at"]),
-                online=online(str(row["instance_id"])),
+                online=states[str(row["instance_id"])] == "online",
                 waiting_decision=(
                     str(row["instance_id"]), str(row["session_id"])
                 )
                 in pending,
+                runtime_id=str(row["runtime_id"]),
             )
             for row in session_rows
         )
@@ -188,6 +272,7 @@ class OsstackStatusBoardService:
                 for item in ordered
                 if selected is not None
                 and item.instance_id == selected.instance_id
+                and item.runtime_id == selected.runtime_id
                 and item.session_id == selected.session_id
             ),
             ordered[0] if ordered else None,
@@ -204,11 +289,55 @@ class OsstackStatusBoardService:
             for item in ordered
             if item.waiting_decision or item.state == "blocked"
         )[:3]
+        runtimes_by_device: dict[str, list[RuntimeStatusItem]] = {
+            device_id: [] for device_id in ids
+        }
+        for row in runtime_rows:
+            runtimes_by_device[str(row["device_id"])].append(
+                RuntimeStatusItem(
+                    runtime_id=str(row["runtime_id"]),
+                    agent_type=str(row["agent_type"]),
+                    state=str(row["state"]),
+                    session_count=int(row["session_count"]),
+                    updated_at=str(row["updated_at"]),
+                )
+            )
+        sessions_by_device = {
+            device_id: tuple(
+                item for item in ordered if item.instance_id == device_id
+            )[:10]
+            for device_id in ids
+        }
+        devices = tuple(
+            sorted(
+                (
+                    DeviceStatusItem(
+                        device_id=device_id,
+                        display_name=names.get(device_id, device_id),
+                        connection_state=states[device_id],
+                        last_seen_at=last_seen[device_id],
+                        runtimes=tuple(
+                            sorted(
+                                runtimes_by_device[device_id],
+                                key=lambda runtime: runtime.runtime_id,
+                            )
+                        )[:10],
+                        sessions=sessions_by_device[device_id],
+                        attention_count=sum(
+                            session.waiting_decision or session.state == "blocked"
+                            for session in sessions_by_device[device_id]
+                        ),
+                    )
+                    for device_id in ids
+                ),
+                key=_device_rank,
+            )
+        )[:20]
         return OsstackStatusBoardView(
             scope=scope,
             generated_at=now.isoformat(),
             device_count=len(ids),
-            online_count=sum(online(instance_id) for instance_id in ids),
+            online_count=sum(state == "online" for state in states.values()),
             running_count=sum(item.state == "running" for item in ordered),
             waiting_decision_count=sum(item.waiting_decision for item in ordered),
             blocked_count=sum(item.state == "blocked" for item in ordered),
@@ -216,7 +345,8 @@ class OsstackStatusBoardService:
             current_session=current,
             sessions=ordered[:4],
             attention=attention,
-            stale=not all(online(instance_id) for instance_id in ids),
+            stale=not all(state == "online" for state in states.values()),
+            devices=devices,
         )
 
 
@@ -231,16 +361,21 @@ def format_osstack_status_text(view: OsstackStatusBoardView) -> str:
     ]
     if view.device_count == 0:
         lines.append("尚未绑定 osstack，请联系管理员绑定设备。")
-    for item in view.sessions:
-        health = "在线" if item.online else "离线"
-        state = "等待决策" if item.waiting_decision else item.state
-        lines.append(
-            f"- {item.title}｜设备 {item.device_name} ({item.instance_id})｜"
-            f"Agent {item.agent_id}｜{state}｜{health}｜"
-            f"{_beijing_time(item.updated_at)}"
-        )
-        if item.latest_summary:
-            lines.append(f"  最近进展：{item.latest_summary[:600]}")
+    state_labels = {"online": "在线", "degraded": "连接不稳", "offline": "离线"}
+    for device in view.devices:
+        device_state = state_labels.get(device.connection_state, "未知")
+        if not device.sessions:
+            lines.append(f"- {device.display_name}｜{device_state}｜暂无活跃会话")
+            continue
+        lines.append(f"- {device.display_name}｜{device_state}")
+        for item in device.sessions[:4]:
+            state = "等待决策" if item.waiting_decision else item.state
+            lines.append(
+                f"  {item.title}｜Agent {item.agent_id}｜{state}｜"
+                f"{_beijing_time(item.updated_at)}"
+            )
+            if item.latest_summary:
+                lines.append(f"  最近进展：{item.latest_summary[:600]}")
     lines.append(f"只读状态查询｜生成于 {_beijing_time(view.generated_at)}")
     if view.stale:
         lines.append("数据可能已过期。")
