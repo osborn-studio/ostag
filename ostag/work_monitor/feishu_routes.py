@@ -85,8 +85,11 @@ def create_feishu_card_router(
                     principal=verified.principal,
                     destination=verified.destination,
                 )
+                toast_type = (
+                    "warning" if "过期" in response.text else "success"
+                )
                 result: dict[str, object] = {
-                    "toast": {"type": "success", "content": response.text}
+                    "toast": {"type": toast_type, "content": response.text}
                 }
                 if response.card is not None:
                     result["card"] = raw_card(response.card)

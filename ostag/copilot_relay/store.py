@@ -407,7 +407,11 @@ class RelayStore:
             ):
                 return {"error": "identity_mismatch"}
             if row["consumed_at"] is not None or int(row["expires_at"]) < now:
-                return {"error": "expired"}
+                return {
+                    "error": "expired",
+                    "action": str(row["action"]),
+                    "reference_id": str(row["reference_id"]),
+                }
             result = connection.execute(
                 "UPDATE relay_callbacks SET consumed_at=? WHERE callback_id=? AND consumed_at IS NULL",
                 (now, callback_id),

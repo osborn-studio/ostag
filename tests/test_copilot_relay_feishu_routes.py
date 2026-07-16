@@ -117,6 +117,22 @@ def _status_controllers(tmp_path):
     )
     with monitor.transaction() as connection:
         connection.executemany(
+            "INSERT INTO monitor_devices(device_id,principal_platform,actor_id,display_name,public_key,"
+            "gateway_version,paired_at,last_seen_at) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                ("macmini", "feishu", "owner", "Mac mini", "test-key", "2.0", NOW.isoformat(), NOW.isoformat()),
+                ("employee-mac", "feishu", "member", "员工 Mac", "test-key", "2.0", NOW.isoformat(), NOW.isoformat()),
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO monitor_device_runtimes(device_id,runtime_id,agent_type,state,session_count,updated_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                ("macmini", "legacy", "codex", "online", 1, NOW.isoformat()),
+                ("employee-mac", "legacy", "codex", "online", 1, NOW.isoformat()),
+            ),
+        )
+        connection.executemany(
             "INSERT INTO instances(instance_id,last_sequence,last_seen_at) VALUES (?,?,?)",
             (
                 ("macmini", 1, NOW.isoformat()),
@@ -305,7 +321,7 @@ def test_natural_language_status_returns_card_without_queueing(tmp_path) -> None
     assert _outbound_count(store) == before
     assert store.envelope_for_message("relay_status") is None
     visible = json.dumps(response.card, ensure_ascii=False).replace("\\", "")
-    assert "Mac mini" in visible and "codex-cli" in visible
+    assert "Mac mini" in visible and "Codex" in visible
     assert "employee-mac" not in visible
 
 
@@ -339,8 +355,8 @@ def test_member_status_is_scoped_and_owner_can_switch_to_team(tmp_path) -> None:
     member_encoded = json.dumps(member_response.card, ensure_ascii=False).replace(
         "\\", ""
     )
-    assert "employee-mac" in member_encoded
-    assert "macmini" not in member_encoded
+    assert "员工 Mac" in member_encoded
+    assert "Mac mini" not in member_encoded
     assert "团队总览" not in member_encoded
 
     owner_response = owner_controller.handle_event(
@@ -349,7 +365,7 @@ def test_member_status_is_scoped_and_owner_can_switch_to_team(tmp_path) -> None:
     owner_encoded = json.dumps(owner_response.card, ensure_ascii=False).replace(
         "\\", ""
     )
-    assert "macmini" in owner_encoded and "employee-mac" not in owner_encoded
+    assert "Mac mini" in owner_encoded and "员工 Mac" not in owner_encoded
     team_callback = _button_callback(owner_response.card, "团队总览")
     replayed = member_controller.handle_callback(
         team_callback,
@@ -365,7 +381,7 @@ def test_member_status_is_scoped_and_owner_can_switch_to_team(tmp_path) -> None:
     )
     assert team.text == "已切换到团队总览"
     team_encoded = json.dumps(team.card, ensure_ascii=False).replace("\\", "")
-    assert "macmini" in team_encoded and "employee-mac" in team_encoded
+    assert "Mac mini" in team_encoded and "员工 Mac" in team_encoded
     personal_callback = _button_callback(team.card, "我的设备")
     personal = owner_controller.handle_callback(
         personal_callback,
@@ -400,3 +416,97 @@ def test_status_refresh_callback_is_read_only(tmp_path) -> None:
     assert refreshed.card is not None
     assert refreshed.text == "看板已刷新"
     assert _outbound_count(store) == before
+
+
+def test_device_overview_opens_detail_and_selects_exact_runtime_session(tmp_path) -> None:
+    controller, _, store, _, _ = _status_controllers(tmp_path)
+    overview = controller.handle_event(_event("现在 osstack 在干嘛", event_id="devices"))
+    detail_callback = _button_callback(overview.card, "查看设备")
+
+    detail = controller.handle_callback(
+        detail_callback, principal=OWNER, destination=PRIVATE
+    )
+    assert detail.card is not None and "设备详情" in str(detail.card)
+    continue_callback = _button_callback(detail.card, "继续会话")
+    continued = controller.handle_callback(
+        continue_callback, principal=OWNER, destination=PRIVATE
+    )
+
+    assert continued.card is not None
+    selected = store.current_session("feishu", "owner")
+    assert selected is not None
+    assert (selected.instance_id, selected.runtime_id, selected.session_id) == (
+        "macmini", "legacy", "session-1"
+    )
+
+
+def test_expired_status_action_returns_fresh_recovery_card(tmp_path) -> None:
+    controller, _, _, _, _ = _status_controllers(tmp_path)
+    overview = controller.handle_event(_event("现在 osstack 在干嘛", event_id="expiry"))
+    refresh = _button_callback(overview.card, "刷新看板")
+    first = controller.handle_callback(refresh, principal=OWNER, destination=PRIVATE)
+    assert first.card is not None
+
+    expired = controller.handle_callback(refresh, principal=OWNER, destination=PRIVATE)
+    assert expired.card is not None
+    assert "操作已过期" in str(expired.card)
+    recover = _button_callback(expired.card, "获取最新看板")
+    recovered = controller.handle_callback(recover, principal=OWNER, destination=PRIVATE)
+    assert recovered.card is not None and recovered.text == "已获取最新看板"
+
+
+def test_text_auto_routes_one_candidate_but_requires_picker_for_many(tmp_path) -> None:
+    controller, store = _controller(tmp_path)
+    with store.monitor_store.transaction() as connection:
+        connection.execute("DELETE FROM relay_current_tasks")
+    picker = controller.handle_event(_event("继续开发", event_id="many"))
+    assert picker.card is not None and "请选择任务" in picker.text
+    assert store.envelope_for_message("relay_many") is None
+
+    with store.monitor_store.transaction() as connection:
+        connection.execute("DELETE FROM relay_sessions WHERE session_id='session-2'")
+    routed = controller.handle_event(_event("继续开发", event_id="one"))
+    assert routed.text.startswith("指令已排队")
+    assert store.envelope_for_message("relay_one").binding.session_id == "session-1"
+
+
+def test_decision_callback_revalidates_exact_runtime_turn_and_version(tmp_path) -> None:
+    controller, store = _controller(tmp_path)
+    decision = _envelope("exact-decision", kind="decision.request")
+    store.enqueue(decision, direction="inbound")
+    store.record_decision(decision)
+    target = {
+        "message_id": decision.message_id,
+        "instance_id": decision.binding.instance_id,
+        "runtime_id": decision.binding.runtime_id,
+        "session_id": decision.binding.session_id,
+        "turn_id": decision.binding.turn_id,
+        "session_version": decision.binding.session_version,
+        "choice_id": "a",
+    }
+    callback = controller.issue_callback(
+        OWNER,
+        PRIVATE,
+        action="decision_answer",
+        reference=json.dumps(target, separators=(",", ":")),
+    )
+
+    answered = controller.handle_callback(
+        callback, principal=OWNER, destination=PRIVATE
+    )
+    assert answered.text.startswith("回答已排队")
+    outbound = store.envelope_for_message(f"relay_callback_{callback}")
+    assert outbound is not None
+    assert outbound.binding.runtime_id == "legacy"
+
+    stale_target = {**target, "session_version": 999}
+    stale = controller.issue_callback(
+        OWNER,
+        PRIVATE,
+        action="decision_answer",
+        reference=json.dumps(stale_target, separators=(",", ":")),
+    )
+    rejected = controller.handle_callback(
+        stale, principal=OWNER, destination=PRIVATE
+    )
+    assert rejected.text == "操作目标已变化，请刷新当前任务。"
