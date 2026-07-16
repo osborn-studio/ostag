@@ -51,6 +51,16 @@ class DeviceIdentity:
         return self.canonical_sign(body)
 
 
+@dataclass(frozen=True)
+class PendingDeviceKeyRotation:
+    device_id: str
+    public_key: str
+    _commit: Callable[[], DeviceIdentity] = field(repr=False, compare=False)
+
+    def commit(self) -> DeviceIdentity:
+        return self._commit()
+
+
 class DeviceIdentityStore:
     def __init__(self, path: Path, *, runner: Runner | None = None) -> None:
         self._path = path.expanduser()
@@ -71,12 +81,52 @@ class DeviceIdentityStore:
             _signer=lambda body: self._sign(device_id, public_key, body),
         )
 
+    def prepare_rotation(self, identity: DeviceIdentity) -> PendingDeviceKeyRotation:
+        if identity.device_id != self.load_or_create(
+            display_name=identity.display_name
+        ).device_id:
+            raise DeviceIdentityError("rotation identity does not match persisted device")
+        old_private = self._load_private_pem(identity.device_id, identity.public_key)
+        new_private = ECC.generate(curve="Ed25519")
+        new_private_pem = new_private.export_key(format="PEM")
+        new_public_pem = new_private.public_key().export_key(format="PEM")
+
+        def commit() -> DeviceIdentity:
+            self._store_private_pem(identity.device_id, new_private_pem)
+            payload = {
+                "device_id": identity.device_id,
+                "display_name": identity.display_name,
+                "public_key": new_public_pem,
+            }
+            try:
+                self._write_metadata(payload)
+            except BaseException:
+                self._store_private_pem(identity.device_id, old_private)
+                raise
+            return self.load_or_create(display_name=identity.display_name)
+
+        return PendingDeviceKeyRotation(
+            device_id=identity.device_id,
+            public_key=new_public_pem,
+            _commit=commit,
+        )
+
     def _create_metadata(self, display_name: str) -> dict[str, str]:
         name = self._validate_display_name(display_name)
         device_id = f"device_{uuid.uuid4().hex}"
         private_key = ECC.generate(curve="Ed25519")
         private_pem = private_key.export_key(format="PEM")
         public_pem = private_key.public_key().export_key(format="PEM")
+        self._store_private_pem(device_id, private_pem)
+        payload = {
+            "device_id": device_id,
+            "display_name": name,
+            "public_key": public_pem,
+        }
+        self._write_metadata(payload)
+        return payload
+
+    def _store_private_pem(self, device_id: str, private_pem: str) -> None:
         result = self._runner([
             "/usr/bin/security",
             "add-generic-password",
@@ -90,13 +140,6 @@ class DeviceIdentityStore:
         ])
         if result.returncode != 0:
             raise DeviceIdentityError("could not store device key in macOS Keychain")
-        payload = {
-            "device_id": device_id,
-            "display_name": name,
-            "public_key": public_pem,
-        }
-        self._write_metadata(payload)
-        return payload
 
     def _read_metadata(self) -> object:
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
@@ -168,6 +211,12 @@ class DeviceIdentityStore:
         return value.strip()
 
     def _sign(self, device_id: str, public_pem: str, body: bytes) -> str:
+        private_pem = self._load_private_pem(device_id, public_pem)
+        private_key = ECC.import_key(private_pem)
+        signature = eddsa.new(private_key, mode="rfc8032").sign(body)
+        return base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+
+    def _load_private_pem(self, device_id: str, public_pem: str) -> str:
         metadata = self._runner([
             "/usr/bin/security",
             "find-generic-password",
@@ -200,5 +249,4 @@ class DeviceIdentityStore:
             raise DeviceIdentityError("macOS Keychain device key must be private Ed25519 material")
         if private_key.public_key().export_key(format="PEM") != public_pem:
             raise DeviceIdentityError("macOS Keychain key does not match device metadata")
-        signature = eddsa.new(private_key, mode="rfc8032").sign(body)
-        return base64.urlsafe_b64encode(signature).decode("ascii").rstrip("=")
+        return secret.stdout.strip()

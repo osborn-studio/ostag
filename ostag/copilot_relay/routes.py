@@ -10,6 +10,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ostag.work_monitor.device_registry import DeviceRegistry, DeviceRegistryError
+
 from .models import RelayEnvelope
 from .store import MessageConflictError, RelaySession, RelayStore, StaleSessionError
 
@@ -56,15 +58,100 @@ def create_copilot_router(
     """Create mixed instance/HMAC and human/Bearer relay routes."""
     router = APIRouter(prefix="/v1/copilot")
 
-    def stores() -> tuple[Any, Any, RelayStore]:
+    def stores() -> tuple[Any, Any, RelayStore, DeviceRegistry]:
         service, auth = dependencies()
-        return service, auth, RelayStore(service.store)
+        return service, auth, RelayStore(service.store), DeviceRegistry(service.store)
+
+    def owner(request: Request) -> tuple[Any, Any, DeviceRegistry]:
+        service, auth, _, devices = stores()
+        principal, destination = auth.human(request)
+        if destination.chat_type != "private" or not service.identities.is_global_owner(principal):
+            raise HTTPException(403, "private owner credentials required")
+        return principal, destination, devices
+
+    def gateway(request: Request, body: bytes) -> str:
+        service, auth, _, devices = stores()
+        device_id = request.headers.get("X-OStag-Device", "")
+        if not device_id:
+            return auth.instance(request, body, service.store)
+        try:
+            device = devices.authenticate(
+                device_id=device_id,
+                timestamp=request.headers.get("X-OStag-Timestamp", ""),
+                nonce=request.headers.get("X-OStag-Nonce", ""),
+                signature=request.headers.get("X-OStag-Signature", ""),
+                method=request.method,
+                path=request.url.path,
+                body=body,
+            )
+        except DeviceRegistryError as exc:
+            raise HTTPException(401, "invalid device credentials") from exc
+        return device.device_id
+
+    @router.post("/devices/pairing-code")
+    async def pairing_code(request: Request) -> dict[str, object]:
+        principal, _, devices = owner(request)
+        body = await bounded_body(request)
+        if body not in (b"", b"{}"):
+            raise HTTPException(422, "pairing-code body must be empty")
+        return {"pairing_code": devices.create_pairing_code(principal), "expires_in": 600}
+
+    @router.post("/devices/pair")
+    async def pair_device(request: Request) -> dict[str, object]:
+        _, _, _, devices = stores()
+        root = _strict_object(
+            await bounded_body(request),
+            frozenset({"pairing_code", "device_id", "display_name", "public_key"}),
+        )
+        if not all(isinstance(value, str) for value in root.values()):
+            raise HTTPException(422, "pairing fields must be strings")
+        try:
+            device = devices.pair_device(
+                pairing_code=root["pairing_code"],
+                device_id=root["device_id"],
+                display_name=root["display_name"],
+                public_key=root["public_key"],
+            )
+        except DeviceRegistryError as exc:
+            status = 409 if "pairing code" in str(exc) or "already paired" in str(exc) else 422
+            raise HTTPException(status, str(exc)) from exc
+        return {"paired": True, "device_id": device.device_id}
+
+    @router.get("/devices")
+    async def list_devices(request: Request) -> dict[str, object]:
+        principal, _, devices = owner(request)
+        return {"devices": [item.public_dict() for item in devices.list_devices(principal)]}
+
+    @router.post("/devices/{device_id}/revoke")
+    async def revoke_device(request: Request, device_id: str) -> dict[str, object]:
+        principal, _, devices = owner(request)
+        try:
+            devices.revoke_device(principal, device_id)
+        except DeviceRegistryError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"revoked": True, "device_id": device_id}
+
+    @router.post("/devices/{device_id}/rotate-key")
+    async def rotate_device_key(request: Request, device_id: str) -> dict[str, object]:
+        body = await bounded_body(request)
+        authenticated = gateway(request, body)
+        if authenticated != device_id:
+            raise HTTPException(403, "device route does not match authenticated device")
+        root = _strict_object(body, frozenset({"public_key"}))
+        if not isinstance(root["public_key"], str):
+            raise HTTPException(422, "public_key must be a string")
+        _, _, _, devices = stores()
+        try:
+            devices.rotate_key(device_id, new_public_key=root["public_key"])
+        except DeviceRegistryError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"rotated": True, "device_id": device_id}
 
     @router.post("/events")
     async def events(request: Request) -> dict[str, int]:
-        service, auth, relay = stores()
+        service, _, relay, _ = stores()
         body = await bounded_body(request)
-        instance_id = auth.instance(request, body, service.store)
+        instance_id = gateway(request, body)
         root = _strict_object(body, frozenset({"events"}))
         raw_events = root["events"]
         if not isinstance(raw_events, list) or not 1 <= len(raw_events) <= 100:
@@ -106,9 +193,9 @@ def create_copilot_router(
 
     @router.post("/messages/poll")
     async def poll(request: Request) -> dict[str, list[dict[str, object]]]:
-        service, auth, relay = stores()
+        _, _, relay, _ = stores()
         body = await bounded_body(request)
-        instance_id = auth.instance(request, body, service.store)
+        instance_id = gateway(request, body)
         if body not in (b"", b"{}"):
             raise HTTPException(422, "poll body must be empty")
         if not write_enabled:
@@ -137,9 +224,9 @@ def create_copilot_router(
 
     @router.post("/messages/ack")
     async def acknowledge(request: Request) -> dict[str, list[str]]:
-        service, auth, relay = stores()
+        _, _, relay, _ = stores()
         body = await bounded_body(request)
-        instance_id = auth.instance(request, body, service.store)
+        instance_id = gateway(request, body)
         root = _strict_object(body, frozenset({"acks"}))
         raw = root["acks"]
         if not isinstance(raw, list) or not 1 <= len(raw) <= 100:
@@ -166,14 +253,14 @@ def create_copilot_router(
 
     @router.get("/sessions")
     async def sessions(request: Request) -> dict[str, list[dict[str, object]]]:
-        service, auth, relay = stores()
+        service, auth, relay, _ = stores()
         principal, _ = auth.human(request)
         scopes = service.identities.allowed_instances(principal)
         return {"sessions": [_session_dict(item) for item in relay.list_sessions(scopes)]}
 
     @router.get("/sessions/{instance_id}/{session_id}/snapshot")
     async def snapshot(request: Request, instance_id: str, session_id: str) -> dict[str, object]:
-        service, auth, relay = stores()
+        service, auth, relay, _ = stores()
         principal, _ = auth.human(request)
         scopes = service.identities.allowed_instances(principal)
         if scopes is not None and instance_id not in scopes:

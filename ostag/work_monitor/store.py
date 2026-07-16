@@ -190,6 +190,13 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS relay_callbacks (callback_id TEXT PRIMARY KEY,action TEXT NOT NULL,reference_id TEXT NOT NULL,platform TEXT NOT NULL,actor_id TEXT NOT NULL,destination_id TEXT NOT NULL,chat_type TEXT NOT NULL,expires_at INTEGER NOT NULL,consumed_at INTEGER)",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS monitor_devices (device_id TEXT PRIMARY KEY,principal_platform TEXT NOT NULL,actor_id TEXT NOT NULL,display_name TEXT NOT NULL,public_key TEXT NOT NULL,gateway_version TEXT NOT NULL DEFAULT '',capabilities_json TEXT NOT NULL DEFAULT '[]',paired_at TEXT NOT NULL,last_seen_at TEXT NOT NULL DEFAULT '',revoked_at TEXT NOT NULL DEFAULT '')",
+            "CREATE INDEX IF NOT EXISTS monitor_devices_owner ON monitor_devices(principal_platform,actor_id,revoked_at)",
+            "CREATE TABLE IF NOT EXISTS monitor_device_pairing_codes (code_digest TEXT PRIMARY KEY,principal_platform TEXT NOT NULL,actor_id TEXT NOT NULL,expires_at INTEGER NOT NULL,consumed_at INTEGER)",
+        )
+    ),
 )
 
 

@@ -253,6 +253,38 @@ def build_parser() -> argparse.ArgumentParser:
     access_list.add_argument("--json", action="store_true")
     access_list.add_argument("--config")
 
+    copilot = subparsers.add_parser("copilot", help="Manage the OStag Copilot device gateway.")
+    copilot_sub = copilot.add_subparsers(dest="copilot_command", required=True)
+    device = copilot_sub.add_parser("device", help="Pair and manage signed devices.")
+    device_sub = device.add_subparsers(dest="device_command", required=True)
+    pairing = device_sub.add_parser("pairing-code")
+    pairing.add_argument("--platform")
+    pairing.add_argument("--actor")
+    pairing.add_argument("--json", action="store_true")
+    pairing.add_argument("--config")
+    pair = device_sub.add_parser("pair")
+    pair.add_argument("--code", required=True)
+    pair.add_argument("--display-name", required=True)
+    pair.add_argument("--central-url", required=True)
+    pair.add_argument("--json", action="store_true")
+    pair.add_argument("--config")
+    device_list = device_sub.add_parser("list")
+    device_list.add_argument("--platform")
+    device_list.add_argument("--actor")
+    device_list.add_argument("--json", action="store_true")
+    device_list.add_argument("--config")
+    rotate = device_sub.add_parser("rotate-key")
+    rotate.add_argument("--device", required=True)
+    rotate.add_argument("--central-url")
+    rotate.add_argument("--json", action="store_true")
+    rotate.add_argument("--config")
+    revoke = device_sub.add_parser("revoke")
+    revoke.add_argument("--device", required=True)
+    revoke.add_argument("--platform")
+    revoke.add_argument("--actor")
+    revoke.add_argument("--json", action="store_true")
+    revoke.add_argument("--config")
+
     channel = subparsers.add_parser("channel", help="Per-channel policy management.")
     channel_sub = channel.add_subparsers(dest="channel_command", required=True)
     channel_policy = channel_sub.add_parser("policy", help="Show or set channel policy.")
@@ -352,6 +384,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return run_budget_command(args)
     if args.command == "monitor":
         return run_monitor_command(args)
+    if args.command == "copilot":
+        return run_copilot_device_command(args)
 
     overrides = {}
     if args.platform:
@@ -581,6 +615,136 @@ def run_monitor_command(args: argparse.Namespace) -> int:
         reporter.start(executor.execute)
         return 0
     raise AssertionError(args.reporter_command)
+
+
+def run_copilot_device_command(args: argparse.Namespace) -> int:
+    import hashlib
+    import secrets
+    import time
+    import urllib.error
+    import urllib.request
+
+    from ostag.copilot_relay.device_identity import DeviceIdentityError, DeviceIdentityStore
+    from ostag.work_monitor.device_registry import DeviceRegistry, DeviceRegistryError
+
+    config = load_settings(getattr(args, "config", None))
+    as_json = getattr(args, "json", False)
+    monitor_store = MonitorStore(config.monitor_server_db)
+    registry = DeviceRegistry(monitor_store)
+
+    def resolve_owner() -> Principal:
+        platform = getattr(args, "platform", None)
+        actor = getattr(args, "actor", None)
+        if bool(platform) != bool(actor):
+            raise DeviceRegistryError("--platform and --actor must be provided together")
+        if platform and actor:
+            principal = Principal(platform, actor)
+            identities = IdentityStore(config.monitor_server_db)
+            if not identities.is_global_owner(principal):
+                raise DeviceRegistryError("principal is not a private owner")
+            return principal
+        with monitor_store.connect() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT owner_platform,owner_actor_id FROM monitor_bindings "
+                "WHERE chat_type='private' AND role IN ('owner','admin') AND revoked=0"
+            ).fetchall()
+        if len(rows) != 1:
+            raise DeviceRegistryError("exactly one private owner is required; specify --platform and --actor")
+        return Principal(str(rows[0]["owner_platform"]), str(rows[0]["owner_actor_id"]))
+
+    def central_url(explicit: str | None = None) -> str:
+        value = (explicit or config.copilot_relay_central_url).rstrip("/")
+        local = value.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
+        if not value or (not value.startswith("https://") and not local):
+            raise DeviceRegistryError("central URL must use HTTPS outside localhost")
+        return value
+
+    def post(url: str, body: bytes, headers: dict[str, str] | None = None) -> dict[str, object]:
+        request = urllib.request.Request(
+            url,
+            data=body,
+            headers={"content-type": "application/json", **(headers or {})},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
+                payload = json.loads(response.read())
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise DeviceRegistryError("central device request failed") from exc
+        if not isinstance(payload, dict):
+            raise DeviceRegistryError("central device response is invalid")
+        return payload
+
+    try:
+        if args.device_command == "pairing-code":
+            code = registry.create_pairing_code(resolve_owner())
+            _emit({"pairing_code": code, "expires_in": 600}, as_json=as_json)
+            return 0
+        if args.device_command == "list":
+            devices = [item.public_dict() for item in registry.list_devices(resolve_owner())]
+            _emit({"devices": devices}, as_json=as_json)
+            return 0
+        if args.device_command == "revoke":
+            registry.revoke_device(resolve_owner(), args.device)
+            _emit({"revoked": True, "device_id": args.device}, as_json=as_json)
+            return 0
+        identity_store = DeviceIdentityStore(config.device_identity_file)
+        if args.device_command == "pair":
+            identity = identity_store.load_or_create(display_name=args.display_name)
+            body = json.dumps(
+                {
+                    "pairing_code": args.code,
+                    "device_id": identity.device_id,
+                    "display_name": identity.display_name,
+                    "public_key": identity.public_key,
+                },
+                separators=(",", ":"),
+            ).encode()
+            result = post(central_url(args.central_url) + "/v1/copilot/devices/pair", body)
+            _emit(result, as_json=as_json)
+            return 0 if result.get("paired") is True else 1
+        if args.device_command == "rotate-key":
+            identity = identity_store.load_or_create(display_name=config.device_display_name)
+            if identity.device_id != args.device:
+                raise DeviceRegistryError("--device does not match local device identity")
+            pending = identity_store.prepare_rotation(identity)
+            path = f"/v1/copilot/devices/{identity.device_id}/rotate-key"
+            body = json.dumps({"public_key": pending.public_key}, separators=(",", ":")).encode()
+            timestamp = str(int(time.time()))
+            nonce = secrets.token_urlsafe(18)
+            canonical = "\n".join(
+                (
+                    "v2",
+                    "POST",
+                    path,
+                    identity.device_id,
+                    timestamp,
+                    nonce,
+                    hashlib.sha256(body).hexdigest(),
+                )
+            ).encode()
+            result = post(
+                central_url(args.central_url) + path,
+                body,
+                {
+                    "X-OStag-Device": identity.device_id,
+                    "X-OStag-Timestamp": timestamp,
+                    "X-OStag-Nonce": nonce,
+                    "X-OStag-Signature": identity.sign(canonical),
+                },
+            )
+            if result.get("rotated") is not True:
+                raise DeviceRegistryError("central key rotation was not confirmed")
+            pending.commit()
+            _emit(result, as_json=as_json)
+            return 0
+        raise AssertionError(args.device_command)
+    except (DeviceRegistryError, DeviceIdentityError, ValueError) as exc:
+        _emit(
+            {"error": {"code": "device_operation_failed", "message": str(exc)}},
+            as_json=as_json,
+        )
+        return 1
 
 
 def run_inspection_command(args: argparse.Namespace) -> int:

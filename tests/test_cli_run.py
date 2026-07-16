@@ -195,3 +195,34 @@ async def test_monitor_access_rejects_duplicate_active_instance_owner(
     assert await main_async(common + ["--actor", "ou_other"]) == 1
     error = json.loads(capsys.readouterr().out)["error"]
     assert error["code"] == "identity_binding_failed"
+
+
+async def test_copilot_device_cli_creates_lists_and_revokes_for_private_owner(
+    monitor_access_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert await main_async(
+        [
+            "monitor", "access", "bind-instance",
+            "--platform", "feishu",
+            "--actor", "ou_owner",
+            "--private-chat", "oc_owner",
+            "--instance", "legacy-instance",
+            "--display-name", "Legacy",
+            "--role", "owner",
+            "--json",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert await main_async(["copilot", "device", "pairing-code", "--json"]) == 0
+    pairing = json.loads(capsys.readouterr().out)
+    assert pairing["expires_in"] == 600
+    assert pairing["pairing_code"].count("-") == 2
+
+    assert await main_async(["copilot", "device", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"devices": []}
+
+    assert await main_async(
+        ["copilot", "device", "revoke", "--device", "device_missing", "--json"]
+    ) == 1
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "device_operation_failed"

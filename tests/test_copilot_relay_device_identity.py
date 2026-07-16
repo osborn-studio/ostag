@@ -72,6 +72,22 @@ def test_keychain_account_must_match_persisted_device(tmp_path: Path) -> None:
         identity.sign(b"request")
 
 
+def test_key_rotation_does_not_replace_local_key_until_commit(tmp_path: Path) -> None:
+    path = tmp_path / "device-identity.json"
+    runner = FakeSecurityRunner()
+    store = DeviceIdentityStore(path, runner=runner)
+    identity = store.load_or_create(display_name="Mac mini")
+
+    pending = store.prepare_rotation(identity)
+
+    assert store.load_or_create(display_name="Mac mini").public_key == identity.public_key
+    assert pending.public_key != identity.public_key
+    rotated = pending.commit()
+    assert rotated.device_id == identity.device_id
+    assert rotated.public_key == pending.public_key
+    assert rotated.sign(b"after-rotation")
+
+
 def test_settings_expose_device_identity_path_and_display_name(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

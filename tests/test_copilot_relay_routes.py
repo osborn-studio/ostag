@@ -4,10 +4,13 @@ import hashlib
 import hmac
 import json
 import sqlite3
+import base64
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from Crypto.PublicKey import ECC
+from Crypto.Signature import eddsa
 
 from ostag.config import Settings
 from ostag.copilot_relay.models import RelayEnvelope
@@ -123,6 +126,79 @@ def _signed(
 def _post(client: TestClient, path: str, payload: object, *, nonce: str = "nonce-1"):
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
     return client.post(path, content=body, headers=_signed(body, path, nonce=nonce))
+
+
+def _device_headers(
+    private: object,
+    body: bytes,
+    path: str,
+    *,
+    device_id: str = "device_macbook",
+    nonce: str = "device-nonce-1",
+) -> dict[str, str]:
+    stamp = str(int(datetime.now(UTC).timestamp()))
+    canonical = "\n".join(
+        ("v2", "POST", path, device_id, stamp, nonce, hashlib.sha256(body).hexdigest())
+    ).encode()
+    signature = eddsa.new(private, mode="rfc8032").sign(canonical)
+    return {
+        "X-OStag-Device": device_id,
+        "X-OStag-Timestamp": stamp,
+        "X-OStag-Nonce": nonce,
+        "X-OStag-Signature": base64.urlsafe_b64encode(signature).decode().rstrip("="),
+        "content-type": "application/json",
+    }
+
+
+def test_owner_pairs_device_without_issuing_a_shared_secret_and_v2_auth_works(
+    tmp_path: Path,
+) -> None:
+    app, store = _app(tmp_path)
+    private = ECC.generate(curve="Ed25519")
+    public = private.public_key().export_key(format="PEM")
+    human = {"Authorization": "Bearer human-secret"}
+
+    with TestClient(app) as client:
+        created = client.post("/v1/copilot/devices/pairing-code", content=b"{}", headers=human)
+        assert created.status_code == 200
+        code = created.json()["pairing_code"]
+        paired = client.post(
+            "/v1/copilot/devices/pair",
+            json={
+                "pairing_code": code,
+                "device_id": "device_macbook",
+                "display_name": "MacBook Pro",
+                "public_key": public,
+            },
+        )
+        assert paired.status_code == 200
+        assert paired.json() == {"paired": True, "device_id": "device_macbook"}
+        assert "secret" not in json.dumps(paired.json()).casefold()
+        replay = client.post(
+            "/v1/copilot/devices/pair",
+            json={
+                "pairing_code": code,
+                "device_id": "device_replay",
+                "display_name": "Replay",
+                "public_key": public,
+            },
+        )
+        assert replay.status_code == 409
+
+        envelope = _envelope(1, instance_id="device_macbook")
+        envelope["schema_version"] = 2
+        envelope["binding"]["runtime_id"] = "codex-cli"
+        path = "/v1/copilot/events"
+        body = json.dumps({"events": [envelope]}, separators=(",", ":")).encode()
+        posted = client.post(path, content=body, headers=_device_headers(private, body, path))
+        assert posted.status_code == 200
+        assert posted.json() == {"ack_sequence": 1}
+
+        devices = client.get("/v1/copilot/devices", headers=human)
+        assert devices.status_code == 200
+        assert devices.json()["devices"][0]["device_id"] == "device_macbook"
+
+    assert RelayStore(store).get_session("device_macbook", "session-1") is not None
 
 
 def test_events_are_strict_ordered_projected_and_idempotent(tmp_path: Path) -> None:
