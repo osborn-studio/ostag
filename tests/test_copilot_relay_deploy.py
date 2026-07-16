@@ -81,6 +81,7 @@ def test_install_refuses_weak_existing_config_permissions(tmp_path) -> None:
 def test_installer_preserves_only_non_secret_osstack_runtime_settings() -> None:
     installer = Path("deploy/copilot-relay/install-launchd.sh").read_text()
     assert "OSSTACK_BIN|DEFAULT_REPO|POLL_INTERVAL_SECONDS" in installer
+    assert 'OSTAG_MONITOR_SERVER_DB="$DATA_DIR/device-admin.sqlite3"' in installer
     assert "RELAY_SECRET|TOKEN|PRIVATE_KEY" not in installer
 
 

@@ -67,6 +67,7 @@ fi
 if [[ -n "$PAIRING_CODE" ]]; then
   OSTAG_DEVICE_IDENTITY_FILE="$IDENTITY_FILE" \
   OSTAG_DEVICE_DISPLAY_NAME="$DISPLAY_NAME" \
+  OSTAG_MONITOR_SERVER_DB="$DATA_DIR/device-admin.sqlite3" \
     "$REPO/.venv/bin/python" -m ostag.main copilot device pair \
       --code "$PAIRING_CODE" --display-name "$DISPLAY_NAME" \
       --central-url "$CENTRAL_URL" --json >/dev/null
