@@ -198,6 +198,10 @@ class Settings:
     copilot_relay_default_repo: str = ""
     copilot_relay_poll_interval_seconds: int = 5
     copilot_relay_max_text_chars: int = 4_000
+    device_identity_file: Path = (
+        Path.home() / "Library/Application Support/OStag/device-identity.json"
+    )
+    device_display_name: str = "OStag Device"
     daily_task_boards_enabled: bool = False
     daily_task_board_poll_seconds: int = 30
     daily_task_board_morning_hour: int = 9
@@ -477,6 +481,13 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         copilot_relay_default_repo=os.getenv("OSTAG_COPILOT_RELAY_DEFAULT_REPO", ""),
         copilot_relay_poll_interval_seconds=_int("OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS", 5),
         copilot_relay_max_text_chars=_int("OSTAG_COPILOT_RELAY_MAX_TEXT_CHARS", 4_000),
+        device_identity_file=Path(
+            os.getenv(
+                "OSTAG_DEVICE_IDENTITY_FILE",
+                "~/Library/Application Support/OStag/device-identity.json",
+            )
+        ).expanduser(),
+        device_display_name=os.getenv("OSTAG_DEVICE_DISPLAY_NAME", "OStag Device").strip(),
         daily_task_boards_enabled=_bool("OSTAG_DAILY_TASK_BOARDS_ENABLED", False),
         daily_task_board_poll_seconds=_int("OSTAG_DAILY_TASK_BOARD_POLL_SECONDS", 30),
         daily_task_board_morning_hour=_int("OSTAG_DAILY_TASK_BOARD_MORNING_HOUR", 9),
