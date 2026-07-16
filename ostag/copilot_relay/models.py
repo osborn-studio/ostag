@@ -126,9 +126,19 @@ class SessionBinding:
     session_id: str
     turn_id: str
     session_version: int
+    runtime_id: str = "legacy"
 
-    _KEYS: ClassVar[tuple[str, ...]] = (
+    _V1_KEYS: ClassVar[tuple[str, ...]] = (
         "instance_id",
+        "task_id",
+        "run_id",
+        "session_id",
+        "turn_id",
+        "session_version",
+    )
+    _V2_KEYS: ClassVar[tuple[str, ...]] = (
+        "instance_id",
+        "runtime_id",
         "task_id",
         "run_id",
         "session_id",
@@ -137,18 +147,36 @@ class SessionBinding:
     )
 
     def __post_init__(self) -> None:
-        for field in ("instance_id", "task_id", "run_id", "session_id", "turn_id"):
+        for field in (
+            "instance_id",
+            "runtime_id",
+            "task_id",
+            "run_id",
+            "session_id",
+            "turn_id",
+        ):
             _require_string(getattr(self, field), field)
         _require_positive_int(self.session_version, "session_version")
 
     @classmethod
-    def from_dict(cls, payload: object) -> SessionBinding:
-        _validate_keys(payload, required=cls._KEYS, model_name=cls.__name__)
+    def from_dict(
+        cls, payload: object, *, schema_version: int | None = None
+    ) -> SessionBinding:
+        if schema_version is None:
+            schema_version = 2 if isinstance(payload, Mapping) and "runtime_id" in payload else 1
+        keys = cls._V2_KEYS if schema_version == 2 else cls._V1_KEYS
+        _validate_keys(payload, required=keys, model_name=cls.__name__)
         assert isinstance(payload, Mapping)
-        return cls(**{key: payload[key] for key in cls._KEYS})
+        values = {key: payload[key] for key in keys}
+        if schema_version == 1:
+            values["runtime_id"] = "legacy"
+        return cls(**values)
 
-    def to_dict(self) -> dict[str, str | int]:
-        return {key: getattr(self, key) for key in self._KEYS}
+    def to_dict(self, *, schema_version: int | None = None) -> dict[str, str | int]:
+        if schema_version is None:
+            schema_version = 1 if self.runtime_id == "legacy" else 2
+        keys = self._V2_KEYS if schema_version == 2 else self._V1_KEYS
+        return {key: getattr(self, key) for key in keys}
 
 
 def _validate_choice(choice: object) -> tuple[str, str]:
@@ -278,6 +306,8 @@ class RelayEnvelope:
 
     def __post_init__(self) -> None:
         _require_positive_int(self.schema_version, "schema_version")
+        if self.schema_version not in {1, 2}:
+            raise ValueError("schema_version must be 1 or 2")
         _require_string(self.message_id, "message_id")
         if not isinstance(self.binding, SessionBinding):
             raise ValueError("binding must be a SessionBinding")
@@ -302,10 +332,16 @@ class RelayEnvelope:
         kind = payload["kind"]
         if kind not in RELAY_KINDS:
             raise ValueError(f"kind must be one of {sorted(RELAY_KINDS)}")
+        schema_version = payload["schema_version"]
+        _require_positive_int(schema_version, "schema_version")
+        if schema_version not in {1, 2}:
+            raise ValueError("schema_version must be 1 or 2")
         return cls(
-            schema_version=payload["schema_version"],
+            schema_version=schema_version,
             message_id=payload["message_id"],
-            binding=SessionBinding.from_dict(payload["binding"]),
+            binding=SessionBinding.from_dict(
+                payload["binding"], schema_version=schema_version
+            ),
             sequence=payload["sequence"],
             created_at=payload["created_at"],
             expires_at=payload["expires_at"],
@@ -320,7 +356,7 @@ class RelayEnvelope:
         return {
             "schema_version": self.schema_version,
             "message_id": self.message_id,
-            "binding": self.binding.to_dict(),
+            "binding": self.binding.to_dict(schema_version=self.schema_version),
             "sequence": self.sequence,
             "created_at": self.created_at,
             "expires_at": self.expires_at,

@@ -81,6 +81,22 @@ def _envelope(kind: str = "instruction.send", **overrides: object) -> dict[str, 
     return value
 
 
+def _v2_envelope(kind: str = "instruction.send", **overrides: object) -> dict[str, object]:
+    value = _envelope(kind)
+    value["schema_version"] = 2
+    value["binding"] = {
+        "instance_id": "device_macbook",
+        "runtime_id": "codex-cli",
+        "task_id": "task_board",
+        "run_id": "run_board",
+        "session_id": "session_board",
+        "turn_id": "turn_7",
+        "session_version": 7,
+    }
+    value.update(overrides)
+    return value
+
+
 @pytest.mark.parametrize("kind", sorted(RELAY_KINDS))
 def test_each_relay_kind_round_trips_with_exact_contract(kind: str) -> None:
     envelope = RelayEnvelope.from_dict(_envelope(kind))
@@ -97,6 +113,56 @@ def test_each_relay_kind_round_trips_with_exact_contract(kind: str) -> None:
     assert envelope.to_dict() == _envelope(kind)
     with pytest.raises(FrozenInstanceError):
         envelope.sequence = 10  # type: ignore[misc]
+
+
+def test_v1_binding_derives_legacy_runtime_without_changing_wire_shape() -> None:
+    envelope = RelayEnvelope.from_dict(_envelope())
+
+    assert envelope.binding.runtime_id == "legacy"
+    assert "runtime_id" not in envelope.to_dict()["binding"]
+
+
+def test_v2_binding_round_trips_runtime_id_with_exact_wire_shape() -> None:
+    envelope = RelayEnvelope.from_dict(_v2_envelope())
+
+    assert envelope.binding == SessionBinding(
+        instance_id="device_macbook",
+        runtime_id="codex-cli",
+        task_id="task_board",
+        run_id="run_board",
+        session_id="session_board",
+        turn_id="turn_7",
+        session_version=7,
+    )
+    assert envelope.to_dict() == _v2_envelope()
+
+
+@pytest.mark.parametrize("runtime_id", ["", True, "x" * 257])
+def test_v2_binding_rejects_invalid_runtime_id(runtime_id: object) -> None:
+    raw = _v2_envelope()
+    raw["binding"] = dict(raw["binding"], runtime_id=runtime_id)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="runtime_id"):
+        RelayEnvelope.from_dict(raw)
+
+
+def test_v2_binding_requires_runtime_id_and_rejects_unknown_fields() -> None:
+    raw = _v2_envelope()
+    binding = dict(raw["binding"])  # type: ignore[arg-type]
+    binding.pop("runtime_id")
+    raw["binding"] = binding
+    with pytest.raises(ValueError, match="missing keys.*runtime_id"):
+        RelayEnvelope.from_dict(raw)
+
+    raw = _v2_envelope()
+    raw["binding"] = dict(raw["binding"], process_id="unsafe")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="unknown keys.*process_id"):
+        RelayEnvelope.from_dict(raw)
+
+
+def test_relay_envelope_rejects_unsupported_schema_version() -> None:
+    with pytest.raises(ValueError, match="schema_version"):
+        RelayEnvelope.from_dict(_envelope(schema_version=3))
 
 
 def test_envelope_binding_sender_and_payload_reject_unknown_keys() -> None:
