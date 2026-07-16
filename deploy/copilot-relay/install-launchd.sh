@@ -121,7 +121,16 @@ for _ in $(seq 1 20); do
   launchctl print "gui/$(id -u)/ai.ostag.copilot-relay" >/dev/null 2>&1 || break
   sleep 0.2
 done
-launchctl bootstrap "gui/$(id -u)" "$PLIST"
+for attempt in $(seq 1 5); do
+  if launchctl bootstrap "gui/$(id -u)" "$PLIST"; then
+    break
+  fi
+  if [[ "$attempt" == "5" ]]; then
+    echo "failed to bootstrap ai.ostag.copilot-relay after 5 attempts" >&2
+    exit 1
+  fi
+  sleep 0.5
+done
 launchctl kickstart -k "gui/$(id -u)/ai.ostag.copilot-relay"
 sleep 2
 launchctl print "gui/$(id -u)/ai.ostag.copilot-relay" >/dev/null

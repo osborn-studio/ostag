@@ -94,6 +94,9 @@ def test_installer_preserves_only_non_secret_osstack_runtime_settings() -> None:
     assert "printf 'OSTAG_COPILOT_RELAY_SPOOL_DB=%q" in installer
     assert "PRESERVED_OSSTACK_BIN//" in installer
     assert 'NODE_BIN="$(command -v node || true)"' in installer
+    assert 'for attempt in $(seq 1 5)' in installer
+    assert 'launchctl bootstrap "gui/$(id -u)" "$PLIST"' in installer
+    assert 'if [[ "$attempt" == "5" ]]' in installer
     assert "RELAY_SECRET|TOKEN|PRIVATE_KEY" not in installer
 
 
