@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from ostag.config import Settings, load_settings
@@ -36,6 +38,7 @@ def test_copilot_relay_requires_complete_secure_configuration() -> None:
         "copilot_relay_instance_id": "macmini",
         "copilot_relay_secret": "secret",
         "copilot_relay_central_url": "https://relay.example",
+        "device_identity_file": Path("/nonexistent/ostag-device-identity.json"),
     }
     Settings(**base).validate()
     Settings(**(base | {"copilot_relay_central_url": "http://127.0.0.1:8000"})).validate()
@@ -46,6 +49,18 @@ def test_copilot_relay_requires_complete_secure_configuration() -> None:
         Settings(**(base | {"copilot_relay_central_url": "http://relay.example"})).validate()
     with pytest.raises(ValueError, match="production.*HTTPS"):
         Settings(**(base | {"env": "production", "copilot_relay_central_url": "http://localhost:8000"})).validate()
+
+
+def test_copilot_relay_device_identity_replaces_legacy_shared_secret(tmp_path) -> None:
+    identity = tmp_path / "device-identity.json"
+    identity.write_text("{}")
+    Settings(
+        copilot_relay_enabled=True,
+        copilot_relay_instance_id="legacy-not-used",
+        copilot_relay_secret="",
+        copilot_relay_central_url="https://relay.example",
+        device_identity_file=identity,
+    ).validate()
 
 
 def test_copilot_relay_environment_profile(monkeypatch, tmp_path) -> None:

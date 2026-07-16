@@ -258,13 +258,16 @@ class Settings:
         if self.copilot_relay_enabled:
             required = {
                 "copilot_relay_instance_id": self.copilot_relay_instance_id,
-                "copilot_relay_secret": self.copilot_relay_secret,
                 "copilot_relay_central_url": self.copilot_relay_central_url,
                 "copilot_relay_osstack_bin": self.copilot_relay_osstack_bin,
             }
             missing = next((name for name, value in required.items() if not value), "")
             if missing:
                 raise ValueError(f"copilot relay requires {missing}")
+            if not self.copilot_relay_secret and not self.device_identity_file.is_file():
+                raise ValueError(
+                    "copilot relay requires copilot_relay_secret or device identity"
+                )
             if self.copilot_relay_default_repo and not Path(self.copilot_relay_default_repo).is_absolute():
                 raise ValueError("copilot relay default repository must be absolute")
             url = self.copilot_relay_central_url
