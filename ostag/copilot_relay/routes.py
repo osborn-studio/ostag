@@ -120,7 +120,16 @@ def create_copilot_router(
     @router.get("/devices")
     async def list_devices(request: Request) -> dict[str, object]:
         principal, _, devices = owner(request)
-        return {"devices": [item.public_dict() for item in devices.list_devices(principal)]}
+        return {
+            "devices": [
+                item.public_dict()
+                | {
+                    "connection_state": devices.connection_state(item.device_id),
+                    "runtimes": list(devices.list_runtimes(item.device_id)),
+                }
+                for item in devices.list_devices(principal)
+            ]
+        }
 
     @router.post("/devices/{device_id}/revoke")
     async def revoke_device(request: Request, device_id: str) -> dict[str, object]:
@@ -146,6 +155,28 @@ def create_copilot_router(
         except DeviceRegistryError as exc:
             raise HTTPException(422, str(exc)) from exc
         return {"rotated": True, "device_id": device_id}
+
+    @router.post("/device/heartbeat")
+    async def heartbeat(request: Request) -> dict[str, object]:
+        body = await bounded_body(request)
+        authenticated = gateway(request, body)
+        root = _strict_object(
+            body, frozenset({"device_id", "gateway_version", "runtimes"})
+        )
+        if root["device_id"] != authenticated:
+            raise HTTPException(403, "heartbeat device does not match authenticated device")
+        if not isinstance(root["gateway_version"], str) or not isinstance(root["runtimes"], list):
+            raise HTTPException(422, "heartbeat fields are invalid")
+        _, _, _, devices = stores()
+        try:
+            devices.record_heartbeat(
+                authenticated,
+                gateway_version=root["gateway_version"],
+                runtimes=tuple(root["runtimes"]),
+            )
+        except DeviceRegistryError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"accepted": True}
 
     @router.post("/events")
     async def events(request: Request) -> dict[str, int]:

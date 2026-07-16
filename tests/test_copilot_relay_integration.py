@@ -30,7 +30,8 @@ class LocalSessionPort:
     def __init__(self) -> None:
         self.sessions = (
             OsstackSession(
-                "session-1", "task-1", "run-1", "codex-cli", "idle", True, True, 4, 1.0
+                "session-1", "task-1", "run-1", "codex-cli", "idle", True, True, 4, 1.0,
+                "codex-cli",
             ),
         )
         self.applied: list[tuple[str, str]] = []
@@ -41,10 +42,13 @@ class LocalSessionPort:
     def snapshot(self, session_id):
         return {
             "session_id": session_id, "task_id": "task-1", "run_id": "run-1",
-            "agent_id": "codex-cli", "state": "idle", "version": 4,
+            "agent_id": "codex-cli", "runtime_id": "codex-cli", "state": "idle", "version": 4,
             "turn_id": "turn-4", "assistant_text": "等待负责人确认测试范围",
             "decision": None, "updated_at": 1.0,
         }
+
+    def runtime_inventory(self):
+        return ()
 
     def send(self, envelope):
         self.applied.append((envelope.message_id, envelope.binding.session_id))

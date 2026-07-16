@@ -31,15 +31,16 @@ class OsstackSession:
     resume_ready: bool
     version: int
     updated_at: float
+    runtime_id: str
 
 
 _SESSION_KEYS = {
     "session_id", "task_id", "run_id", "agent_id", "state", "resume_supported",
-    "resume_ready", "version", "updated_at",
+    "resume_ready", "version", "updated_at", "runtime_id",
 }
 _SNAPSHOT_KEYS = {
     "session_id", "task_id", "run_id", "agent_id", "state", "version", "turn_id",
-    "assistant_text", "decision", "updated_at",
+    "assistant_text", "decision", "updated_at", "runtime_id",
 }
 _START_KEYS = _SESSION_KEYS | {"turn_id", "assistant_text", "decision", "events"}
 
@@ -103,7 +104,9 @@ class OsstackSessionPort:
                 raise OsstackPortError("session fields are invalid") from exc
             if (
                 not all(isinstance(getattr(session, key), str) and getattr(session, key)
-                        for key in ("session_id", "task_id", "run_id", "agent_id", "state"))
+                        for key in (
+                            "session_id", "task_id", "run_id", "agent_id", "runtime_id", "state"
+                        ))
                 or isinstance(session.version, bool)
                 or not isinstance(session.version, int)
                 or session.version < 1
@@ -115,6 +118,27 @@ class OsstackSessionPort:
             parsed.append(session)
         return tuple(parsed)
 
+    def runtime_inventory(self) -> tuple[dict[str, object], ...]:
+        agent_types = {
+            "codex-cli": "codex",
+            "claude-code": "claude-code",
+            "claude-cli": "claude-code",
+        }
+        counts: dict[str, tuple[str, int]] = {}
+        for session in self.list_sessions():
+            agent_type = agent_types.get(session.runtime_id, "other")
+            previous = counts.get(session.runtime_id, (agent_type, 0))
+            counts[session.runtime_id] = (agent_type, previous[1] + 1)
+        return tuple(
+            {
+                "runtime_id": runtime_id,
+                "agent_type": agent_type,
+                "state": "online",
+                "session_count": count,
+            }
+            for runtime_id, (agent_type, count) in sorted(counts.items())
+        )
+
     def send(self, envelope: RelayEnvelope) -> Mapping[str, Any]:
         if envelope.kind not in {"instruction.send", "decision.answer"}:
             raise OsstackPortError("unsupported inbound relay kind")
@@ -122,6 +146,7 @@ class OsstackSessionPort:
         value = self._run_json(
             [
                 self.binary, "session", "send", envelope.binding.session_id,
+                "--runtime", envelope.binding.runtime_id,
                 "--turn", envelope.binding.turn_id,
                 "--message-id", envelope.message_id,
                 "--expected-version", str(envelope.binding.session_version),

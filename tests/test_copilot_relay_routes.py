@@ -194,9 +194,37 @@ def test_owner_pairs_device_without_issuing_a_shared_secret_and_v2_auth_works(
         assert posted.status_code == 200
         assert posted.json() == {"ack_sequence": 1}
 
+        heartbeat_path = "/v1/copilot/device/heartbeat"
+        heartbeat_body = json.dumps(
+            {
+                "device_id": "device_macbook",
+                "gateway_version": "0.2.0",
+                "runtimes": [
+                    {
+                        "runtime_id": "codex-cli",
+                        "agent_type": "codex",
+                        "state": "online",
+                        "session_count": 1,
+                    }
+                ],
+            },
+            separators=(",", ":"),
+        ).encode()
+        heartbeat = client.post(
+            heartbeat_path,
+            content=heartbeat_body,
+            headers=_device_headers(
+                private, heartbeat_body, heartbeat_path, nonce="device-heartbeat-1"
+            ),
+        )
+        assert heartbeat.status_code == 200
+        assert heartbeat.json() == {"accepted": True}
+
         devices = client.get("/v1/copilot/devices", headers=human)
         assert devices.status_code == 200
         assert devices.json()["devices"][0]["device_id"] == "device_macbook"
+        assert devices.json()["devices"][0]["connection_state"] == "online"
+        assert devices.json()["devices"][0]["runtimes"][0]["runtime_id"] == "codex-cli"
 
     assert RelayStore(store).get_session("device_macbook", "session-1") is not None
 

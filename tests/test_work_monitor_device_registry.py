@@ -132,6 +132,34 @@ def test_signature_authentication_revocation_and_old_key_rotation(tmp_path: Path
         )
 
 
+def test_heartbeat_uses_server_time_and_connection_thresholds(tmp_path: Path) -> None:
+    current = [1_000.0]
+    registry = DeviceRegistry(MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: current[0])
+    owner = Principal("feishu", "owner")
+    _, public_key = _keys()
+    code = registry.create_pairing_code(owner)
+    registry.pair_device(
+        pairing_code=code,
+        device_id="device_health",
+        display_name="Health Mac",
+        public_key=public_key,
+    )
+
+    registry.record_heartbeat(
+        "device_health",
+        gateway_version="0.2.0",
+        runtimes=(
+            {"runtime_id": "codex-cli", "agent_type": "codex", "state": "online", "session_count": 1},
+        ),
+    )
+    assert registry.connection_state("device_health") == "online"
+    current[0] += 30
+    assert registry.connection_state("device_health") == "degraded"
+    current[0] += 89
+    assert registry.connection_state("device_health") == "degraded"
+    current[0] += 1
+    assert registry.connection_state("device_health") == "offline"
+
 @pytest.mark.parametrize("name", ["", " ", "x" * 201])
 def test_pairing_rejects_invalid_display_names(tmp_path: Path, name: str) -> None:
     registry = DeviceRegistry(MonitorStore(tmp_path / "monitor.sqlite3"), clock=lambda: 1)

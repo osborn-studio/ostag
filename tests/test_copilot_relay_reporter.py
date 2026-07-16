@@ -19,7 +19,10 @@ NOW = datetime(2026, 7, 14, 1, 0, tzinfo=UTC)
 class FakePort:
     def __init__(self) -> None:
         self.sessions = (
-            OsstackSession("sess_1", "task_1", "run_1", "codex-cli", "idle", True, True, 4, 1.0),
+            OsstackSession(
+                "sess_1", "task_1", "run_1", "codex-cli", "idle", True, True, 4, 1.0,
+                "codex-cli",
+            ),
         )
         self.sent: list[str] = []
         self.send_results = ["applied"]
@@ -32,9 +35,18 @@ class FakePort:
         return {
             "session_id": session_id, "task_id": "task_1", "run_id": "run_1",
             "agent_id": "codex-cli", "state": "idle", "version": 4,
+            "runtime_id": "codex-cli",
             "turn_id": "turn_4", "assistant_text": "请选择方案", "decision": None,
             "updated_at": 1.0,
         }
+
+    def runtime_inventory(self):
+        return (
+            {
+                "runtime_id": "codex-cli", "agent_type": "codex",
+                "state": "online", "session_count": 1,
+            },
+        )
 
     def send(self, envelope):
         self.sent.append(envelope.message_id)
@@ -142,7 +154,7 @@ async def test_awaiting_decision_snapshot_spools_a_real_decision_request(tmp_pat
     port.sessions = (
         OsstackSession(
             "sess_1", "task_1", "run_1", "codex-cli", "awaiting_decision",
-            True, True, 4, 1.0,
+            True, True, 4, 1.0, "codex-cli",
         ),
     )
     reporter = _reporter(tmp_path, port=port)
@@ -300,6 +312,54 @@ async def test_applied_inbound_is_acknowledged_with_stable_payload_hash(tmp_path
         "payload_hash": hashlib.sha256(canonical.encode()).hexdigest(),
     }
     assert await reporter.flush_receipts_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_device_heartbeat_is_bounded_and_sent_no_more_than_every_five_seconds(
+    tmp_path,
+) -> None:
+    current = [NOW]
+
+    class Identity:
+        device_id = "device_macbook"
+
+        @staticmethod
+        def sign(body: bytes) -> str:
+            assert body.startswith(b"v2\nPOST\n/v1/copilot/device/heartbeat")
+            return "signed"
+
+    transport = FakeTransport([TransportResponse(200, b'{"accepted":true}')] * 2)
+    reporter = CopilotReporter(
+        instance_id="device_macbook",
+        secret="",
+        central_url="https://relay.example",
+        spool_path=tmp_path / "relay.sqlite3",
+        port=FakePort(),
+        transport=transport,
+        clock=lambda: current[0],
+        device_identity=Identity(),  # type: ignore[arg-type]
+        gateway_version="0.2.0",
+    )
+
+    assert await reporter.heartbeat_once() == 1
+    assert await reporter.heartbeat_once() == 0
+    method, url, body, headers = transport.requests[0]
+    assert method == "POST" and url.endswith("/v1/copilot/device/heartbeat")
+    assert json.loads(body) == {
+        "device_id": "device_macbook",
+        "gateway_version": "0.2.0",
+        "runtimes": [
+            {
+                "runtime_id": "codex-cli",
+                "agent_type": "codex",
+                "state": "online",
+                "session_count": 1,
+            }
+        ],
+    }
+    assert headers["X-OStag-Device"] == "device_macbook"
+    current[0] += timedelta(seconds=5)
+    assert await reporter.heartbeat_once() == 1
 
 
 @pytest.mark.asyncio

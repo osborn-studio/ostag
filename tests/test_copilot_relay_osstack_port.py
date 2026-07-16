@@ -23,10 +23,11 @@ class FakeRunner:
 def _instruction(text: str = "采用方案 B") -> RelayEnvelope:
     return RelayEnvelope.from_dict(
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "message_id": "msg_feishu_1",
             "binding": {
                 "instance_id": "macmini", "task_id": "task_1", "run_id": "run_1",
+                "runtime_id": "codex-cli",
                 "session_id": "sess_1", "turn_id": "turn_7", "session_version": 4,
             },
             "sequence": 1,
@@ -47,7 +48,8 @@ def test_list_sessions_uses_exact_json_argv_and_rejects_native_ids() -> None:
             "sessions": [
                 {
                     "session_id": "sess_1", "task_id": "task_1", "run_id": "run_1",
-                    "agent_id": "codex-cli", "state": "idle", "resume_supported": True,
+                    "agent_id": "codex-cli", "runtime_id": "codex-cli",
+                    "state": "idle", "resume_supported": True,
                     "resume_ready": True, "version": 4, "updated_at": 10.0,
                 }
             ]
@@ -57,6 +59,12 @@ def test_list_sessions_uses_exact_json_argv_and_rejects_native_ids() -> None:
     sessions = OsstackSessionPort(runner=runner).list_sessions()
     assert runner.calls == [("osstack", "session", "list", "--json")]
     assert sessions[0].session_id == "sess_1"
+    assert sessions[0].runtime_id == "codex-cli"
+
+    inventory = OsstackSessionPort(runner=FakeRunner([output])).runtime_inventory()
+    assert inventory == (
+        {"runtime_id": "codex-cli", "agent_type": "codex", "state": "online", "session_count": 1},
+    )
 
     leaked = json.loads(output)
     leaked["sessions"][0]["native_session_id"] = "secret"
@@ -69,6 +77,7 @@ def test_send_uses_bound_version_turn_and_message_without_shell_interpolation() 
     result = OsstackSessionPort(runner=runner).send(_instruction("继续；$(touch /tmp/nope)"))
     argv = runner.calls[0]
     assert argv[:4] == ("osstack", "session", "send", "sess_1")
+    assert argv[argv.index("--runtime") + 1] == "codex-cli"
     assert argv[argv.index("--turn") + 1] == "turn_7"
     assert argv[argv.index("--message-id") + 1] == "msg_feishu_1"
     assert argv[argv.index("--expected-version") + 1] == "4"
@@ -91,7 +100,7 @@ def test_non_json_timeout_extra_result_fields_and_oversized_snapshot_fail_closed
 
     snapshot = {
         "session_id": "sess_1", "task_id": "task_1", "run_id": "run_1",
-        "agent_id": "codex-cli", "state": "idle", "version": 4,
+        "agent_id": "codex-cli", "runtime_id": "codex-cli", "state": "idle", "version": 4,
         "turn_id": "turn_7", "assistant_text": "x" * 4_001, "decision": None,
         "updated_at": 10.0,
     }
@@ -139,7 +148,7 @@ def test_confirmed_task_maps_to_idempotent_resumable_session_start() -> None:
     confirm["payload"] = {"proposal_id": "proposal_1", "confirmed": True}
     started = {
         "session_id": "sess_1", "task_id": "task_1", "run_id": "run_1",
-        "agent_id": "codex-cli", "state": "idle", "resume_supported": True,
+        "agent_id": "codex-cli", "runtime_id": "codex-cli", "state": "idle", "resume_supported": True,
         "resume_ready": True, "version": 3, "updated_at": 10.0,
         "turn_id": "turn_1", "assistant_text": "READY", "decision": None, "events": [],
     }
@@ -173,7 +182,7 @@ def test_confirmed_task_requires_a_safe_absolute_repository_and_exact_start_resu
 
     leaked = {
         "session_id": "sess_1", "task_id": "task_1", "run_id": "run_1",
-        "agent_id": "codex-cli", "state": "idle", "resume_supported": True,
+        "agent_id": "codex-cli", "runtime_id": "codex-cli", "state": "idle", "resume_supported": True,
         "resume_ready": True, "version": 3, "updated_at": 10.0,
         "turn_id": "turn_1", "assistant_text": "READY", "decision": None, "events": [],
         "native_session_id": "secret",

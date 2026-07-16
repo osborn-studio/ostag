@@ -161,6 +161,79 @@ class DeviceRegistry:
         assert device is not None
         return device
 
+    def record_heartbeat(
+        self,
+        device_id: str,
+        *,
+        gateway_version: str,
+        runtimes: tuple[dict[str, object], ...],
+    ) -> None:
+        if not isinstance(gateway_version, str) or len(gateway_version) > 100:
+            raise DeviceRegistryError("invalid gateway version")
+        if not isinstance(runtimes, tuple) or len(runtimes) > 100:
+            raise DeviceRegistryError("runtime inventory must be a bounded tuple")
+        parsed: list[tuple[str, str, str, int]] = []
+        seen: set[str] = set()
+        for runtime in runtimes:
+            if not isinstance(runtime, dict) or set(runtime) != {
+                "runtime_id", "agent_type", "state", "session_count"
+            }:
+                raise DeviceRegistryError("invalid runtime inventory item")
+            runtime_id = runtime["runtime_id"]
+            agent_type = runtime["agent_type"]
+            state = runtime["state"]
+            session_count = runtime["session_count"]
+            if (
+                not isinstance(runtime_id, str)
+                or not runtime_id
+                or len(runtime_id) > 128
+                or runtime_id in seen
+                or agent_type not in {"codex", "claude-code", "other"}
+                or state not in {"online", "degraded", "offline"}
+                or isinstance(session_count, bool)
+                or not isinstance(session_count, int)
+                or not 0 <= session_count <= 10_000
+            ):
+                raise DeviceRegistryError("invalid runtime inventory item")
+            seen.add(runtime_id)
+            parsed.append((runtime_id, str(agent_type), str(state), session_count))
+        now = self._timestamp(int(self._clock()))
+        with self._store.transaction() as connection:
+            active = connection.execute(
+                "SELECT 1 FROM monitor_devices WHERE device_id=? AND revoked_at=''", (device_id,)
+            ).fetchone()
+            if active is None:
+                raise DeviceRegistryError("active device not found")
+            connection.execute(
+                "UPDATE monitor_devices SET gateway_version=?,last_seen_at=? WHERE device_id=?",
+                (gateway_version, now, device_id),
+            )
+            connection.execute("DELETE FROM monitor_device_runtimes WHERE device_id=?", (device_id,))
+            connection.executemany(
+                "INSERT INTO monitor_device_runtimes(device_id,runtime_id,agent_type,state,session_count,updated_at) VALUES (?,?,?,?,?,?)",
+                [(device_id, *runtime, now) for runtime in parsed],
+            )
+
+    def list_runtimes(self, device_id: str) -> tuple[dict[str, object], ...]:
+        with self._store.connect() as connection:
+            rows = connection.execute(
+                "SELECT runtime_id,agent_type,state,session_count FROM monitor_device_runtimes WHERE device_id=? ORDER BY runtime_id",
+                (device_id,),
+            ).fetchall()
+        return tuple(dict(row) for row in rows)
+
+    def connection_state(self, device_id: str) -> str:
+        device = self.get_device(device_id)
+        if device is None or device.revoked_at or not device.last_seen_at:
+            return "offline"
+        seen = datetime.fromisoformat(device.last_seen_at.replace("Z", "+00:00")).timestamp()
+        age = max(0.0, self._clock() - seen)
+        if age < 30:
+            return "online"
+        if age < 120:
+            return "degraded"
+        return "offline"
+
     @staticmethod
     def canonical_request(
         *, method: str, path: str, device_id: str, timestamp: str, nonce: str, body: bytes

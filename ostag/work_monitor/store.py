@@ -197,6 +197,11 @@ MIGRATIONS = (
             "CREATE TABLE IF NOT EXISTS monitor_device_pairing_codes (code_digest TEXT PRIMARY KEY,principal_platform TEXT NOT NULL,actor_id TEXT NOT NULL,expires_at INTEGER NOT NULL,consumed_at INTEGER)",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS monitor_device_runtimes (device_id TEXT NOT NULL,runtime_id TEXT NOT NULL,agent_type TEXT NOT NULL,state TEXT NOT NULL,session_count INTEGER NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(device_id,runtime_id),FOREIGN KEY(device_id) REFERENCES monitor_devices(device_id))",
+        )
+    ),
 )
 
 

@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Protocol
 
 from ostag.work_monitor.reporter import (
     ReporterTransport,
@@ -19,6 +20,12 @@ from ostag.work_monitor.reporter import (
 
 from .models import RelayEnvelope, SessionBinding
 from .osstack_port import OsstackSession, OsstackSessionPort
+
+
+class SigningIdentity(Protocol):
+    device_id: str
+
+    def sign(self, body: bytes) -> str: ...
 
 
 class CopilotReporter:
@@ -32,9 +39,14 @@ class CopilotReporter:
         port: OsstackSessionPort,
         transport: ReporterTransport | None = None,
         clock: Callable[[], datetime] | None = None,
+        device_identity: SigningIdentity | None = None,
+        gateway_version: str = "0.2.0",
+        heartbeat_interval_seconds: int = 5,
     ) -> None:
-        if not instance_id or not secret:
-            raise ValueError("relay instance_id and secret are required")
+        if not instance_id or (not secret and device_identity is None):
+            raise ValueError("relay identity credentials are required")
+        if device_identity is not None and device_identity.device_id != instance_id:
+            raise ValueError("relay instance_id must match device identity")
         local_http = central_url.startswith(
             ("http://127.0.0.1", "http://localhost", "http://[::1]")
         )
@@ -42,6 +54,9 @@ class CopilotReporter:
             raise ValueError("relay central URL must use HTTPS outside localhost")
         self.instance_id = instance_id
         self._secret = secret
+        self._device_identity = device_identity
+        self.gateway_version = gateway_version
+        self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.central_url = central_url.rstrip("/")
         self.spool_path = Path(spool_path)
         self.port = port
@@ -152,11 +167,12 @@ class CopilotReporter:
         causation_id: str | None = None,
     ) -> RelayEnvelope:
         now = self.clock()
+        schema_version = 2 if self._device_identity is not None else 1
         return RelayEnvelope.from_dict(
             {
-                "schema_version": 1,
+                "schema_version": schema_version,
                 "message_id": message_id,
-                "binding": binding.to_dict(),
+                "binding": binding.to_dict(schema_version=schema_version),
                 "sequence": self._next_sequence(db),
                 "created_at": self._utc(now),
                 "expires_at": self._utc(now + timedelta(days=1)),
@@ -195,7 +211,7 @@ class CopilotReporter:
                 continue
             binding = SessionBinding(
                 self.instance_id, local.task_id, local.run_id, local.session_id,
-                str(snapshot["turn_id"]), local.version,
+                str(snapshot["turn_id"]), local.version, local.runtime_id,
             )
             with self._connect() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -254,10 +270,19 @@ class CopilotReporter:
     def _headers(self, method: str, path: str, body: bytes) -> dict[str, str]:
         timestamp = str(int(self.clock().timestamp()))
         nonce = uuid.uuid4().hex
+        version = "v2" if self._device_identity is not None else "v1"
         canonical = "\n".join(
-            ("v1", method.upper(), path, self.instance_id, timestamp, nonce,
+            (version, method.upper(), path, self.instance_id, timestamp, nonce,
              hashlib.sha256(body).hexdigest())
         ).encode()
+        if self._device_identity is not None:
+            return {
+                "Content-Type": "application/json",
+                "X-OStag-Device": self.instance_id,
+                "X-OStag-Timestamp": timestamp,
+                "X-OStag-Nonce": nonce,
+                "X-OStag-Signature": self._device_identity.sign(canonical),
+            }
         return {
             "Content-Type": "application/json",
             "X-OStag-Instance": self.instance_id,
@@ -267,6 +292,34 @@ class CopilotReporter:
                 self._secret.encode(), canonical, hashlib.sha256
             ).hexdigest(),
         }
+
+    async def heartbeat_once(self) -> int:
+        if self._device_identity is None:
+            return 0
+        last = self._meta("last_heartbeat_at")
+        if last:
+            previous = datetime.fromisoformat(last.replace("Z", "+00:00"))
+            if (self.clock() - previous).total_seconds() < self.heartbeat_interval_seconds:
+                return 0
+        runtimes = self.port.runtime_inventory()
+        if len(runtimes) > 100:
+            raise ValueError("runtime inventory exceeds heartbeat limit")
+        body = self._dump(
+            {
+                "device_id": self.instance_id,
+                "gateway_version": self.gateway_version,
+                "runtimes": list(runtimes),
+            }
+        ).encode()
+        try:
+            response = self._request("/v1/copilot/device/heartbeat", body)
+        except OSError:
+            return 0
+        if not 200 <= response.status < 300:
+            return 0
+        with self._connect() as db:
+            self._set_meta(db, "last_heartbeat_at", self._utc())
+        return 1
 
     def _request(self, path: str, body: bytes) -> TransportResponse:
         return self.transport.request(
@@ -400,6 +453,7 @@ class CopilotReporter:
                             str(snapshot["session_id"]),
                             str(snapshot["turn_id"]),
                             int(snapshot["version"]),
+                            str(snapshot["runtime_id"]),
                         ),
                         "assistant.snapshot",
                         {
