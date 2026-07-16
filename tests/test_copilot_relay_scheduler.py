@@ -65,7 +65,8 @@ def _setup(tmp_path):
     relay.enqueue(session, direction="inbound")
     relay.upsert_session(session)
     controller = CopilotFeishuController(
-        CopilotRelayService(relay, RelayPolicy(OWNER)), clock=lambda: NOW
+        CopilotRelayService(relay, RelayPolicy(OWNER), clock=lambda: NOW),
+        clock=lambda: NOW,
     )
     return store, identities, relay, controller
 
@@ -84,7 +85,57 @@ def test_decision_is_planned_once_and_stage_summaries_are_coalesced(tmp_path) ->
             "SELECT payload FROM notification_outbox WHERE payload LIKE '%relay.%'"
         )]
     assert sum(item["kind"] == "relay.decision" for item in payloads) == 1
-    assert sum(item["kind"] == "relay.stage" for item in payloads) == 1
+    assert sum(item["kind"] == "relay.stage" for item in payloads) == 0
+
+
+def test_only_terminal_lifecycle_states_are_pushed_once(tmp_path) -> None:
+    store, identities, relay, _ = _setup(tmp_path)
+    for version, state in ((2, "starting"), (3, "running"), (4, "completed")):
+        envelope = _envelope("session.upsert", f"stage-{state}", version=version)
+        raw = envelope.to_dict()
+        raw["payload"]["state"] = state
+        relay.enqueue(RelayEnvelope.from_dict(raw), direction="inbound")
+
+    planner = CopilotRelayScheduler(store, identities, clock=lambda: NOW)
+    assert planner.plan_once() == 1
+    assert planner.plan_once() == 0
+    with store.connect() as db:
+        payloads = [json.loads(row[0]) for row in db.execute(
+            "SELECT payload FROM notification_outbox WHERE payload LIKE '%relay.stage%'"
+        )]
+    assert len(payloads) == 1
+    assert payloads[0]["relay_message_id"] == "stage-completed"
+
+
+def test_reconnect_emits_one_unresolved_decision_reminder(tmp_path) -> None:
+    store, identities, relay, _ = _setup(tmp_path)
+    decision = _envelope("decision.request", "decision-reconnect")
+    relay.enqueue(decision, direction="inbound")
+    relay.record_decision(decision)
+    identities.bind_instance(
+        OWNER, "macmini", display_name="Mac mini", bound_at=NOW.isoformat()
+    )
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO monitor_devices(device_id,principal_platform,actor_id,display_name,public_key,paired_at,last_seen_at) "
+            "VALUES ('macmini','feishu','owner','Mac mini','test-key',?,'')",
+            (NOW.isoformat(),),
+        )
+    planner = CopilotRelayScheduler(store, identities, clock=lambda: NOW)
+    planner.plan_once()
+    with store.transaction() as db:
+        db.execute(
+            "UPDATE monitor_devices SET last_seen_at=? WHERE device_id='macmini'",
+            (NOW.isoformat(),),
+        )
+
+    assert planner.plan_once() == 1
+    assert planner.plan_once() == 0
+    with store.connect() as db:
+        reminders = db.execute(
+            "SELECT COUNT(*) FROM notification_outbox WHERE event_id LIKE 'relay-reconnect:%'"
+        ).fetchone()[0]
+    assert reminders == 1
 
 
 def test_expired_decision_times_out_without_guess_and_notifies_local_session(tmp_path) -> None:
@@ -141,6 +192,20 @@ async def test_work_monitor_owner_delivers_relay_card_and_persists_quote_binding
     await scheduler.tick()
 
     assert len([item for item in sender.cards if "等待决策" in str(item[1])]) == 1
+    rendered = str(sender.cards[-1][1])
+    assert "本次回复将发送到：macmini · Codex · Relay" in rendered
+    callback = next(
+        action["value"]["callback_id"]
+        for element in sender.cards[-1][1]["elements"]
+        if element["tag"] == "action"
+        for action in element["actions"]
+    )
+    answered = controller.handle_callback(
+        callback,
+        principal=OWNER,
+        destination=Destination("feishu", "owner-chat", "private"),
+    )
+    assert answered.text.startswith("回答已排队")
     platform_id = sender.cards[-1][0]
     with store.connect() as db:
         row = db.execute(
@@ -214,5 +279,5 @@ async def test_relay_delivery_uses_existing_retry_deadletter_and_scheduler_owner
         ).fetchone()
         owners = db.execute("SELECT count(*) FROM monitor_scheduler_owners").fetchone()[0]
     assert tuple(row[:2]) == ("dead_letter", 5)
-    assert row["delivery_id"].startswith("relay:decision-retry:")
+    assert row["delivery_id"].startswith("relay:relay-decision:decision-retry:")
     assert owners == 1

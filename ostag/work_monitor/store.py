@@ -219,6 +219,11 @@ MIGRATIONS = (
             "CREATE INDEX relay_sessions_device_runtime ON relay_sessions(instance_id,runtime_id,updated_at)",
         )
     ),
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS relay_device_notification_state (device_id TEXT PRIMARY KEY,connection_state TEXT NOT NULL,last_seen_at TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL)",
+        )
+    ),
 )
 
 

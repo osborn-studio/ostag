@@ -321,10 +321,11 @@ class WorkMonitorScheduler:
             ):
                 from ostag.copilot_relay.feishu_cards import (
                     render_current_task_card,
-                    render_decision_card,
                     render_receipt_card,
                     render_snapshot_card,
+                    render_targeted_decision_card,
                 )
+                from ostag.copilot_relay.status_board import StatusSessionItem
                 from ostag.copilot_relay.store import RelayStore
 
                 relay = RelayStore(self.store)
@@ -332,7 +333,9 @@ class WorkMonitorScheduler:
                 if envelope is None:
                     raise ValueError("relay notification target no longer exists")
                 session = relay.get_session(
-                    envelope.binding.instance_id, envelope.binding.session_id
+                    envelope.binding.instance_id,
+                    envelope.binding.session_id,
+                    envelope.binding.runtime_id,
                 )
                 if session is None:
                     raise ValueError("relay session projection no longer exists")
@@ -340,11 +343,20 @@ class WorkMonitorScheduler:
                 destination = Destination("feishu", destination_id, str(active["chat_type"]))
 
                 def relay_callback(action: str, reference: str) -> str:
-                    stored_reference = (
-                        f"{envelope.message_id}\0{reference}"
-                        if action == "decision"
-                        else reference
-                    )
+                    stored_reference = reference
+                    if action == "decision_answer":
+                        stored_reference = json.dumps(
+                            {
+                                "message_id": envelope.message_id,
+                                "instance_id": envelope.binding.instance_id,
+                                "runtime_id": envelope.binding.runtime_id,
+                                "session_id": envelope.binding.session_id,
+                                "turn_id": envelope.binding.turn_id,
+                                "session_version": envelope.binding.session_version,
+                                "choice_id": reference,
+                            },
+                            separators=(",", ":"),
+                        )
                     return self.copilot.issue_callback(
                         principal,
                         destination,
@@ -353,11 +365,36 @@ class WorkMonitorScheduler:
                     )
 
                 if payload["kind"] == "relay.decision":
-                    card = render_decision_card(
-                        session,
+                    with self.store.connect() as db:
+                        device = db.execute(
+                            "SELECT display_name,last_seen_at FROM monitor_devices "
+                            "WHERE device_id=? AND revoked_at=''",
+                            (session.instance_id,),
+                        ).fetchone()
+                    display_name = (
+                        str(device["display_name"])
+                        if device is not None
+                        else session.instance_id
+                    )
+                    status_session = StatusSessionItem(
+                        instance_id=session.instance_id,
+                        session_id=session.session_id,
+                        device_name=display_name,
+                        agent_id=session.agent_id,
+                        title=session.title,
+                        state=session.state,
+                        latest_summary=session.latest_summary,
+                        updated_at=session.updated_at,
+                        online=bool(device is not None and device["last_seen_at"]),
+                        waiting_decision=True,
+                        runtime_id=session.runtime_id,
+                    )
+                    card = render_targeted_decision_card(
+                        status_session,
                         envelope,
-                        can_act=bool(self.copilot.write_enabled),
-                        callback_factory=relay_callback,
+                        callback_factory=(
+                            relay_callback if self.copilot.write_enabled else None
+                        ),
                     )
                     text = f"需要决策：{envelope.payload['question']}"
                 elif payload["kind"] == "relay.snapshot":

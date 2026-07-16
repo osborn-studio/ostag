@@ -406,7 +406,7 @@ def render_targeted_decision_card(
     session: StatusSessionItem,
     envelope: RelayEnvelope,
     *,
-    callback_factory: Callable[[str, str], str],
+    callback_factory: Callable[[str, str], str] | None,
 ) -> dict[str, Any]:
     if envelope.kind != "decision.request":
         raise ValueError("decision card requires decision.request")
@@ -424,14 +424,17 @@ def render_targeted_decision_card(
     elements: list[dict[str, Any]] = [
         {"tag": "note", "elements": [{"tag": "plain_text", "content": target}]},
         {"tag": "markdown", "content": "\n".join(lines)},
-        _action(
-            callback_factory,
-            tuple(
-                ("decision_answer", str(choice["label"]), str(choice["choice_id"]))
-                for choice in payload["choices"]
-            ),
-        ),
     ]
+    if callback_factory is not None:
+        elements.append(
+            _action(
+                callback_factory,
+                tuple(
+                    ("decision_answer", str(choice["label"]), str(choice["choice_id"]))
+                    for choice in payload["choices"]
+                ),
+            )
+        )
     return _card("OStag · 等待决策", elements)
 
 

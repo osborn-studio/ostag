@@ -46,6 +46,40 @@ class CopilotRelayScheduler:
             for row in rows
         )
 
+    def _recipients(
+        self, instance_id: str
+    ) -> tuple[tuple[Principal, str, str, str], ...]:
+        with self.store.connect() as db:
+            owner = db.execute(
+                "SELECT principal_platform,actor_id FROM monitor_devices "
+                "WHERE device_id=? AND revoked_at=''",
+                (instance_id,),
+            ).fetchone()
+            if owner is None:
+                owner = db.execute(
+                    "SELECT principal_platform,actor_id FROM monitor_instance_owners "
+                    "WHERE instance_id=? AND revoked=0",
+                    (instance_id,),
+                ).fetchone()
+            if owner is None:
+                return self._owners()
+            rows = db.execute(
+                "SELECT platform,destination_id,chat_type FROM monitor_bindings "
+                "WHERE owner_platform=? AND owner_actor_id=? AND revoked=0 "
+                "AND chat_type='private' ORDER BY destination_id",
+                (owner["principal_platform"], owner["actor_id"]),
+            ).fetchall()
+        principal = Principal(str(owner["principal_platform"]), str(owner["actor_id"]))
+        return tuple(
+            (
+                principal,
+                str(row["platform"]),
+                str(row["destination_id"]),
+                str(row["chat_type"]),
+            )
+            for row in rows
+        )
+
     def _enqueue(
         self,
         *,
@@ -69,7 +103,7 @@ class CopilotRelayScheduler:
             sort_keys=True,
         )
         destination_key = f"{platform}:{destination_id}:binding"
-        delivery_id = f"relay:{relay_message_id}:{destination_id}"
+        delivery_id = f"relay:{event_id}:{destination_id}"
         now = self.clock().isoformat()
         with self.store.transaction() as db:
             inserted = db.execute(
@@ -136,9 +170,42 @@ class CopilotRelayScheduler:
             self.relay.enqueue(timeout, direction="outbound")
         return len(rows)
 
+    def _record_connection_transitions(self) -> tuple[str, ...]:
+        now = self.clock().astimezone(UTC)
+        with self.store.transaction() as db:
+            devices = db.execute(
+                "SELECT device_id,last_seen_at FROM monitor_devices WHERE revoked_at=''"
+            ).fetchall()
+            reconnected: list[str] = []
+            for device in devices:
+                device_id = str(device["device_id"])
+                last_seen = str(device["last_seen_at"] or "")
+                if not last_seen:
+                    current = "offline"
+                else:
+                    seen = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+                    age = max(0.0, (now - seen).total_seconds())
+                    current = "online" if age < 30 else "degraded" if age < 120 else "offline"
+                previous = db.execute(
+                    "SELECT connection_state FROM relay_device_notification_state "
+                    "WHERE device_id=?",
+                    (device_id,),
+                ).fetchone()
+                if previous is not None and previous["connection_state"] != "online" \
+                        and current == "online":
+                    reconnected.append(device_id)
+                db.execute(
+                    "INSERT INTO relay_device_notification_state(device_id,connection_state,last_seen_at,updated_at) "
+                    "VALUES (?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET "
+                    "connection_state=excluded.connection_state,last_seen_at=excluded.last_seen_at,"
+                    "updated_at=excluded.updated_at",
+                    (device_id, current, last_seen, now.isoformat()),
+                )
+        return tuple(reconnected)
+
     def plan_once(self) -> int:
         changed = self._expire_decisions()
-        owners = self._owners()
+        reconnected = self._record_connection_transitions()
         with self.store.connect() as db:
             decisions = db.execute(
                 "SELECT m.payload_json FROM relay_messages m JOIN relay_decisions d "
@@ -162,7 +229,9 @@ class CopilotRelayScheduler:
             ).fetchall()
         for row in decisions:
             envelope = RelayEnvelope.from_dict(json.loads(row["payload_json"]))
-            for principal, platform, destination_id, chat_type in owners:
+            for principal, platform, destination_id, chat_type in self._recipients(
+                envelope.binding.instance_id
+            ):
                 changed += self._enqueue(
                     event_id=f"relay-decision:{envelope.message_id}",
                     relay_message_id=envelope.message_id,
@@ -175,7 +244,11 @@ class CopilotRelayScheduler:
         for row in stages:
             envelope = RelayEnvelope.from_dict(json.loads(row["payload_json"]))
             state = str(envelope.payload["state"])
-            for principal, platform, destination_id, chat_type in owners:
+            if state not in {"completed", "failed"}:
+                continue
+            for principal, platform, destination_id, chat_type in self._recipients(
+                envelope.binding.instance_id
+            ):
                 changed += self._enqueue(
                     event_id=(
                         f"relay-stage:{envelope.binding.instance_id}:"
@@ -191,7 +264,9 @@ class CopilotRelayScheduler:
                 )
         for row in snapshots:
             envelope = RelayEnvelope.from_dict(json.loads(row["payload_json"]))
-            for principal, platform, destination_id, chat_type in owners:
+            for principal, platform, destination_id, chat_type in self._recipients(
+                envelope.binding.instance_id
+            ):
                 changed += self._enqueue(
                     event_id=f"relay-snapshot:{envelope.message_id}",
                     relay_message_id=envelope.message_id,
@@ -203,7 +278,9 @@ class CopilotRelayScheduler:
                 )
         for row in receipts:
             envelope = RelayEnvelope.from_dict(json.loads(row["payload_json"]))
-            for principal, platform, destination_id, chat_type in owners:
+            for principal, platform, destination_id, chat_type in self._recipients(
+                envelope.binding.instance_id
+            ):
                 changed += self._enqueue(
                     event_id=f"relay-receipt:{envelope.message_id}",
                     relay_message_id=envelope.message_id,
@@ -213,4 +290,21 @@ class CopilotRelayScheduler:
                     destination_id=destination_id,
                     chat_type=chat_type,
                 )
+        for device_id in reconnected:
+            for row in decisions:
+                envelope = RelayEnvelope.from_dict(json.loads(row["payload_json"]))
+                if envelope.binding.instance_id != device_id:
+                    continue
+                for principal, platform, destination_id, chat_type in self._recipients(
+                    device_id
+                ):
+                    changed += self._enqueue(
+                        event_id=f"relay-reconnect:{device_id}:{envelope.message_id}",
+                        relay_message_id=envelope.message_id,
+                        kind="relay.decision",
+                        principal=principal,
+                        platform=platform,
+                        destination_id=destination_id,
+                        chat_type=chat_type,
+                    )
         return changed
