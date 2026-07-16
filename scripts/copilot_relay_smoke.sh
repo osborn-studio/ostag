@@ -10,6 +10,8 @@ cd "$ROOT"
 export PYTHON_DOTENV_DISABLED=1
 export OSTAG_SMOKE_RELAY_SECRET="$(uv run python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 uv run pytest -q tests/test_copilot_relay_integration.py --basetemp "$TMP_ROOT/pytest"
+uv run python scripts/multi_device_copilot_acceptance.py \
+  --fixtures tests/fixtures/multi-device
 
 if [[ ! -d "$OSSTACK_ROOT/packages/cli" ]]; then
   echo "osstack Copilot worktree not found: $OSSTACK_ROOT" >&2
@@ -24,4 +26,4 @@ if find "$TMP_ROOT" -type f -print0 | xargs -0 grep -F -a -l \
   exit 1
 fi
 
-echo "Copilot Relay smoke passed: central/local restart, same-session resume, stable IDs."
+echo "Copilot Relay smoke passed: central/local restart, same-session resume, dual-device isolation."
