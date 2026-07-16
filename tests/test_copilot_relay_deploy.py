@@ -33,6 +33,9 @@ def test_launchd_template_is_bounded_absolute_and_keeps_secrets_outside_plist() 
     assert plist["EnvironmentVariables"]["OSTAG_COPILOT_RELAY_SPOOL_DB"].startswith(
         "/Users/Shared/OStag/"
     )
+    assert plist["EnvironmentVariables"]["OSTAG_COPILOT_RELAY_SPOOL_DB"].endswith(
+        "/device-relay.sqlite3"
+    )
     assert plist["EnvironmentVariables"]["OSSTACK_HOME"].startswith(
         "/Users/Shared/OStag/"
     )

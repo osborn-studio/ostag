@@ -96,7 +96,7 @@ if [[ ! -e "$ENV_FILE" || -n "$PAIRING_CODE" || -n "$CENTRAL_URL" ]]; then
     echo "OSTAG_COPILOT_RELAY_ENABLED=true"
     echo "OSTAG_COPILOT_RELAY_WRITE_ENABLED=true"
     printf 'OSTAG_COPILOT_RELAY_CENTRAL_URL=%q\n' "$CENTRAL_URL"
-    printf 'OSTAG_COPILOT_RELAY_SPOOL_DB=%q\n' "$DATA_DIR/copilot-relay.sqlite3"
+    printf 'OSTAG_COPILOT_RELAY_SPOOL_DB=%q\n' "$DATA_DIR/device-relay.sqlite3"
     printf 'OSTAG_DEVICE_IDENTITY_FILE=%q\n' "$IDENTITY_FILE"
     printf 'OSTAG_DEVICE_DISPLAY_NAME=%q\n' "$DISPLAY_NAME"
     [[ -z "$PRESERVED_OSSTACK_BIN" ]] || printf 'OSTAG_COPILOT_RELAY_OSSTACK_BIN=%q\n' "$PRESERVED_OSSTACK_BIN"
