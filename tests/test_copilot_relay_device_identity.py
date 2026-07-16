@@ -49,6 +49,24 @@ def test_load_or_create_persists_only_public_device_metadata(tmp_path: Path) -> 
     assert "PRIVATE" not in path.read_text()
 
 
+def test_macos_keychain_hex_encoded_password_is_decoded_before_import(tmp_path) -> None:
+    class HexSecurityRunner(FakeSecurityRunner):
+        def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+            result = super().__call__(argv)
+            if argv[1] == "find-generic-password" and "-w" in argv and result.returncode == 0:
+                result = subprocess.CompletedProcess(
+                    argv, 0, result.stdout.strip().encode().hex() + "\n", ""
+                )
+            return result
+
+    store = DeviceIdentityStore(
+        tmp_path / "device-identity.json", runner=HexSecurityRunner()
+    )
+    identity = store.load_or_create(display_name="MacBook Pro")
+
+    assert identity.sign(b"signed-heartbeat")
+
+
 def test_identity_file_rejects_symlinks(tmp_path: Path) -> None:
     target = tmp_path / "target.json"
     target.write_text("{}")

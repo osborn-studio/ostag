@@ -241,12 +241,20 @@ class DeviceIdentityStore:
         ])
         if secret.returncode != 0:
             raise DeviceIdentityError("device key is missing from macOS Keychain")
+        private_pem = secret.stdout.strip()
+        if not private_pem.startswith("-----BEGIN"):
+            try:
+                decoded = bytes.fromhex(private_pem).decode("utf-8")
+            except (ValueError, UnicodeError):
+                decoded = ""
+            if decoded.startswith("-----BEGIN"):
+                private_pem = decoded
         try:
-            private_key = ECC.import_key(secret.stdout.strip())
+            private_key = ECC.import_key(private_pem)
         except (ValueError, IndexError, TypeError) as exc:
             raise DeviceIdentityError("macOS Keychain contains an invalid device key") from exc
         if not private_key.has_private() or private_key.curve != "Ed25519":
             raise DeviceIdentityError("macOS Keychain device key must be private Ed25519 material")
         if private_key.public_key().export_key(format="PEM") != public_pem:
             raise DeviceIdentityError("macOS Keychain key does not match device metadata")
-        return secret.stdout.strip()
+        return private_pem
