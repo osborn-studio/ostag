@@ -13,6 +13,8 @@
   <string>/opt/ostag</string>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>OSTAG_COPILOT_CONFIG_FILE</key>
+    <string>/Users/Shared/OStag/copilot-relay.env</string>
     <key>OSTAG_COPILOT_RELAY_SPOOL_DB</key>
     <string>/Users/Shared/OStag/copilot-relay.sqlite3</string>
     <key>PYTHONUNBUFFERED</key>
