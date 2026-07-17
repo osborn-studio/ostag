@@ -88,6 +88,19 @@ the inbound relay reservation must stay accepted and retryable: do not write an
 empty applied turn and do not mark the message stale merely because the local
 session version advanced while it was reserved.
 
+Claude native sessions are scoped to their original working directory. The
+governed osstack session must persist that absolute `repo_path` when it starts
+and pass the same path back to the SDK on every resume. For a pre-migration
+session, backfill only after matching its protected native ID to exactly one
+local Claude JSONL transcript, extracting exactly one existing absolute `cwd`,
+and completing a compare-and-swap update. Never infer the path from a central
+payload or expose it on the status board.
+
+Only the SDK `system:init` event establishes native session identity. Current
+Claude versions may emit `hook_started` and `hook_response` events before
+`init`; their transient IDs must be ignored. A different ID on `system:init`
+still fails closed as `native_session_mismatch`.
+
 ## Health and logs
 
 Heartbeat interpretation uses server receipt time:
