@@ -73,7 +73,7 @@ class CopilotFeishuController:
         *,
         action: str,
         reference: str,
-        ttl_seconds: int = 300,
+        ttl_seconds: int = STATUS_CALLBACK_TTL_SECONDS,
     ) -> str:
         callback_id = "cr_" + secrets.token_urlsafe(18)
         self.store.create_callback(

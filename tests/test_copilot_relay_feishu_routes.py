@@ -236,6 +236,16 @@ def test_quote_binding_survives_restart_and_stale_decision_is_rejected(tmp_path)
 
 def test_callbacks_are_one_use_ttl_actor_and_destination_bound(tmp_path) -> None:
     controller, store = _controller(tmp_path)
+    default_callback = controller.issue_callback(
+        OWNER, PRIVATE, action="snapshot", reference="current"
+    )
+    with store.monitor_store.connect() as connection:
+        default_row = connection.execute(
+            "SELECT expires_at FROM relay_callbacks WHERE callback_id=?",
+            (default_callback,),
+        ).fetchone()
+    assert default_row["expires_at"] == int(NOW.timestamp()) + 86_400
+
     callback_id = controller.issue_callback(
         OWNER, PRIVATE, action="switch", reference="macmini\0session-2", ttl_seconds=60
     )
