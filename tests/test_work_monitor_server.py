@@ -349,7 +349,7 @@ def test_health_router_hook_and_no_placeholder_webhooks(tmp_path: Path) -> None:
 
     contract = SecurityContract("authenticated_dependency", authenticated)
     app, _ = _app(tmp_path, routers=[(router, contract)])
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/webhooks/feishu" not in paths and "/webhooks/telegram" not in paths
     with TestClient(app) as client:
         assert client.get("/healthz").json() == {"status": "ok"}
