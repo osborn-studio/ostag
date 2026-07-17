@@ -64,6 +64,30 @@ socket. `session list --json` must show `runtime_id: codex-cli` on MacBook Pro
 or `runtime_id: claude-code` on Mac mini before pairing is accepted as healthy.
 Native session identifiers must not appear in logs or evidence.
 
+## Claude Code headless authentication
+
+An interactive Claude login in Terminal does not prove that a macOS
+LaunchAgent can authenticate. Terminal may read the user's Keychain credential
+while an SSH or background launch context reports `loggedIn: false`. Treat that
+difference as an authentication-context problem, not as a missing session or a
+reason to copy the Keychain item.
+
+For a dedicated Mac mini daemon, obtain explicit operator approval before
+creating a long-lived credential. Run `claude setup-token` only from the
+already logged-in GUI Terminal, store the result in a mode `0600` file owned by
+the user, and expose it as `CLAUDE_CODE_OAUTH_TOKEN` only to
+`ai.osstack.copilot-daemon`. Never place the token in the Gateway environment,
+shell history, command output, osstack state, logs, or central evidence. Do not
+export or duplicate `Claude Code-credentials` from Keychain.
+
+After restarting the dedicated daemon, run one bounded read-only Claude probe
+through the same LaunchAgent environment. The gate passes only when the probe
+returns non-empty result text and the original governed session remains
+addressable. If Claude returns a terminal authentication or adapter failure,
+the inbound relay reservation must stay accepted and retryable: do not write an
+empty applied turn and do not mark the message stale merely because the local
+session version advanced while it was reserved.
+
 ## Health and logs
 
 Heartbeat interpretation uses server receipt time:
