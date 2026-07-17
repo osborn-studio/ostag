@@ -461,7 +461,22 @@ class CopilotReporter:
                         message,
                         binding=replace(message.binding, runtime_id=session.runtime_id),
                     )
-            if session is None or session.version != message.binding.session_version:
+            reserved_retry = (
+                session is not None
+                and message.kind in {"instruction.send", "decision.answer"}
+                and session.version
+                in {
+                    message.binding.session_version + 1,
+                    message.binding.session_version + 2,
+                }
+            )
+            if (
+                session is None
+                or (
+                    session.version != message.binding.session_version
+                    and not reserved_retry
+                )
+            ):
                 self._finish_inbound(
                     message, "stale", "exact runtime session is unavailable"
                 )

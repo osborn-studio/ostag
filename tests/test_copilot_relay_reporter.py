@@ -320,6 +320,39 @@ async def test_crash_after_local_apply_replays_same_message_id_and_osstack_dedup
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("version_delta", [1, 2])
+async def test_reserved_osstack_delivery_at_recovery_version_is_retried_not_stale(
+    tmp_path, version_delta,
+) -> None:
+    transport = FakeTransport(
+        [TransportResponse(200, json.dumps({"messages": [_instruction().to_dict()]}).encode())]
+    )
+    port = FakePort()
+    original = port.sessions[0]
+    port.sessions = (
+        OsstackSession(
+            original.session_id,
+            original.task_id,
+            original.run_id,
+            original.agent_id,
+            original.state,
+            original.resume_supported,
+            original.resume_ready,
+            original.version + version_delta,
+            original.updated_at,
+            original.runtime_id,
+        ),
+    )
+    reporter = _reporter(tmp_path, transport=transport, port=port)
+
+    assert await reporter.poll_inbound_once() == 1
+    assert await reporter.apply_inbound_once() == 1
+    assert port.sent == ["in_1"]
+    receipts = [item for item in reporter.pending_outbound() if item.kind == "delivery.receipt"]
+    assert receipts[-1].payload["state"] == "applied"
+
+
+@pytest.mark.asyncio
 async def test_applied_inbound_is_acknowledged_with_stable_payload_hash(tmp_path) -> None:
     instruction = _instruction()
     transport = FakeTransport(
