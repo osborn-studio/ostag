@@ -1,0 +1,14 @@
+{
+  "task_id": "v03-upgrade-p2-evidence-board",
+  "capability": "code.test",
+  "prompt": "OStag v0.3 upgrade Phase 2: evidence-aware personal/admin completion boards (WorkLoopView projection). Builder is Claude; this loop is the verification harness of record.",
+  "priority": 95,
+  "source": "task_queue",
+  "context": {"phase": "P2", "branch": "feat/v0.3-p2-evidence-board"},
+  "evaluation": [
+    {"id": "board-tests", "mode": "command", "description": "Completion board tests pass (state matrix, non-leakage, admin auth, sanitize, expired waiver).", "command": "uv run pytest tests/test_completion_board.py -q", "required": true},
+    {"id": "pytest-full", "mode": "command", "description": "Full suite green.", "command": "uv run pytest -q", "required": true},
+    {"id": "ruff-clean", "mode": "command", "description": "Static analysis passes.", "command": "uv run ruff check .", "required": true},
+    {"id": "two-device-acceptance", "mode": "command", "description": "Dual-device fixture acceptance exits 0 with status=passed crossed_routes=0.", "command": "bash -o pipefail -c \"uv run python scripts/multi_device_copilot_acceptance.py --fixtures tests/fixtures/multi-device | grep -q 'status=passed .*crossed_routes=0'\"", "required": true}
+  ]
+}
