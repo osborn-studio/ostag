@@ -32,7 +32,7 @@ DINGTALK_CLIENT_SECRET=...
 DINGTALK_ROBOT_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=...
 DINGTALK_ROBOT_SECRET=SEC...
 OSTAG_BACKEND=codex_cli
-OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=vNG4YZ7JnPmQKkapTN6DDzzeW2LD0oRE
+OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=<base_token>
 OSTAG_AUTO_BASE_DEFAULT_TABLE_ID=EMSgbTd
 OSTAG_AUTO_BASE_DEFAULT_TABLE_NAME=需求收集管理
 DWS_CLI_BIN=/Users/gilbertchen/.nvm/versions/node/v22.19.0/bin/npx -y dingtalk-workspace-cli
@@ -97,7 +97,7 @@ configured DingTalk AI Table:
 ```text
 Base: OS Tag 需求管理
 Table: 需求收集管理
-URL: https://alidocs.dingtalk.com/i/nodes/vNG4YZ7JnPmQKkapTN6DDzzeW2LD0oRE?iframeQuery=sheetId%3DEMSgbTd
+URL: https://alidocs.dingtalk.com/i/nodes/<document_token>?iframeQuery=sheetId%3DEMSgbTd
 Source parity target: 飞书「🛠️ 需求收集与管理 底表」/「需求收集管理」
 ```
 

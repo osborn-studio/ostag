@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import ANY
 
 import pytest
 
@@ -99,3 +100,129 @@ async def test_context_export_unknown_run_errors(
     assert exit_code == 1
     error = json.loads(capsys.readouterr().out)["error"]
     assert error["code"] == "run_not_found"
+
+
+@pytest.fixture()
+def monitor_access_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    database = tmp_path / "monitor.sqlite3"
+    monkeypatch.setenv("OSTAG_MONITOR_SERVER_DB", str(database))
+    return database
+
+
+async def test_monitor_access_binds_lists_and_revokes_instance(
+    monitor_access_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bind = await main_async(
+        [
+            "monitor",
+            "access",
+            "bind-instance",
+            "--platform",
+            "feishu",
+            "--actor",
+            "ou_employee",
+            "--private-chat",
+            "oc_employee",
+            "--instance",
+            "employee-mac",
+            "--display-name",
+            "员工 Mac mini",
+            "--role",
+            "member",
+            "--json",
+        ]
+    )
+    assert bind == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "bound": True,
+        "platform": "feishu",
+        "actor_id": "ou_employee",
+        "instance_id": "employee-mac",
+        "display_name": "员工 Mac mini",
+        "role": "member",
+    }
+
+    listed = await main_async(
+        ["monitor", "access", "list", "--actor", "ou_employee", "--json"]
+    )
+    assert listed == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "bindings": [
+            {
+                "platform": "feishu",
+                "actor_id": "ou_employee",
+                "instance_id": "employee-mac",
+                "display_name": "员工 Mac mini",
+                "bound_at": ANY,
+            }
+        ]
+    }
+
+    revoked = await main_async(
+        ["monitor", "access", "revoke-instance", "--instance", "employee-mac", "--json"]
+    )
+    assert revoked == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "revoked": True,
+        "instance_id": "employee-mac",
+    }
+    assert await main_async(["monitor", "access", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"bindings": []}
+
+
+async def test_monitor_access_rejects_duplicate_active_instance_owner(
+    monitor_access_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    common = [
+        "monitor",
+        "access",
+        "bind-instance",
+        "--platform",
+        "feishu",
+        "--private-chat",
+        "oc_employee",
+        "--instance",
+        "employee-mac",
+        "--display-name",
+        "Employee Mac",
+        "--role",
+        "member",
+        "--json",
+    ]
+    assert await main_async(common + ["--actor", "ou_employee"]) == 0
+    capsys.readouterr()
+
+    assert await main_async(common + ["--actor", "ou_other"]) == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error["code"] == "identity_binding_failed"
+
+
+async def test_copilot_device_cli_creates_lists_and_revokes_for_private_owner(
+    monitor_access_env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert await main_async(
+        [
+            "monitor", "access", "bind-instance",
+            "--platform", "feishu",
+            "--actor", "ou_owner",
+            "--private-chat", "oc_owner",
+            "--instance", "legacy-instance",
+            "--display-name", "Legacy",
+            "--role", "owner",
+            "--json",
+        ]
+    ) == 0
+    capsys.readouterr()
+
+    assert await main_async(["copilot", "device", "pairing-code", "--json"]) == 0
+    pairing = json.loads(capsys.readouterr().out)
+    assert pairing["expires_in"] == 600
+    assert pairing["pairing_code"].count("-") == 2
+
+    assert await main_async(["copilot", "device", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"devices": []}
+
+    assert await main_async(
+        ["copilot", "device", "revoke", "--device", "device_missing", "--json"]
+    ) == 1
+    assert json.loads(capsys.readouterr().out)["error"]["code"] == "device_operation_failed"

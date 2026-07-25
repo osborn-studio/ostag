@@ -11,6 +11,7 @@ from typing import Any
 
 from ostag.config import Settings
 from ostag.core.event import NormalizedEvent
+from ostag.work_monitor.transport import TransportError
 
 AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>")
 
@@ -18,8 +19,16 @@ AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>")
 class FeishuAdapter:
     platform = "feishu"
 
-    def __init__(self, config: Settings):
+    def __init__(self, config: Settings, *, runner: Any | None = None):
         self.config = config
+        self.runner = runner
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._client: Any | None = None
+        self._inflight: set[Any] = set()
+        self._ws_stop = threading.Event()
+        self._sdk_loop: asyncio.AbstractEventLoop | None = None
+        self._bridge_ready = threading.Event()
+        self._stop_requested = threading.Event()
 
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
@@ -48,7 +57,40 @@ class FeishuAdapter:
         if not self.app_id or not self.app_secret:
             raise RuntimeError(f"{self.platform.upper()}_APP_ID and APP_SECRET are required.")
 
+        self.runner = runner
+        self._loop = asyncio.get_running_loop()
+        self._bridge_ready.clear()
+        self._stop_requested.clear()
         await asyncio.to_thread(self._start_blocking, runner)
+
+    async def run(self, stop: asyncio.Event) -> None:
+        """Run one supervised WS bridge with one event loop and no per-event threads."""
+        if self.runner is None:
+            raise RuntimeError("FeishuAdapter.run requires a bound runner")
+        if not self.app_id or not self.app_secret:
+            raise RuntimeError(f"{self.platform.upper()}_APP_ID and APP_SECRET are required.")
+        self._loop = asyncio.get_running_loop()
+        failure: list[BaseException] = []
+
+        def bridge() -> None:
+            try:
+                self._start_blocking(self.runner)
+            except BaseException as exc:
+                failure.append(exc)
+
+        thread = threading.Thread(target=bridge, name="ostag-feishu-ws-bridge", daemon=False)
+        thread.start()
+        while thread.is_alive() and not self._bridge_ready.is_set() and not stop.is_set():
+            await asyncio.sleep(0.01)
+        while thread.is_alive() and not stop.is_set():
+            await asyncio.sleep(0.05)
+        if stop.is_set():
+            await self.stop()
+        await asyncio.to_thread(thread.join, 5)
+        if thread.is_alive():
+            raise RuntimeError("Feishu WebSocket bridge did not stop")
+        if failure and not stop.is_set():
+            raise failure[0]
 
     def _start_blocking(self, runner: Any) -> None:
         try:
@@ -65,24 +107,66 @@ class FeishuAdapter:
             )
             .build()
         )
-        cli = (
-            lark.ws.Client(
-                self.app_id,
-                self.app_secret,
-                event_handler=event_handler,
-                log_level=lark.LogLevel.INFO,
-                domain=self.api_base_url,
+        log_level = getattr(lark.LogLevel, "ERROR", None)
+        if log_level is None:
+            raise RuntimeError(
+                "Feishu SDK must provide ERROR log level; refusing ticket-bearing logs"
             )
+        cli = lark.ws.Client(
+            self.app_id,
+            self.app_secret,
+            event_handler=event_handler,
+            # INFO logs include the short-lived WebSocket endpoint ticket.
+            log_level=log_level,
+            domain=self.api_base_url,
         )
+        self._client = cli
+        self._ws_stop.clear()
+        try:
+            from lark_oapi.ws.client import loop as sdk_loop
+        except ImportError:
+            sdk_loop = None
+        self._sdk_loop = sdk_loop
+        self._bridge_ready.set()
+        if self._stop_requested.is_set():
+            return
         cli.start()
 
     def _run_live_event_handler(self, data: Any, runner: Any) -> None:
-        thread = threading.Thread(
-            target=lambda: asyncio.run(self._handle_live_event(data, runner)),
-            name=f"ostag-{self.platform}-event",
-            daemon=True,
-        )
-        thread.start()
+        if self._loop is None or self._loop.is_closed():
+            raise RuntimeError("Feishu event loop is not running")
+        future = asyncio.run_coroutine_threadsafe(self._handle_live_event(data, runner), self._loop)
+        self._inflight.add(future)
+        future.add_done_callback(self._inflight.discard)
+
+    async def stop(self) -> None:
+        self._ws_stop.set()
+        self._stop_requested.set()
+        client = self._client
+        if client is not None:
+            closer = getattr(client, "stop", None) or getattr(client, "close", None)
+            if callable(closer):
+                result = closer()
+                if asyncio.iscoroutine(result):
+                    await result
+            elif self._sdk_loop is not None and self._sdk_loop.is_running():
+                disconnect = getattr(client, "_disconnect", None)
+
+                async def shutdown_sdk() -> None:
+                    try:
+                        if callable(disconnect):
+                            await disconnect()
+                    finally:
+                        self._sdk_loop.stop()
+
+                self._sdk_loop.call_soon_threadsafe(
+                    lambda: self._sdk_loop.create_task(shutdown_sdk())
+                )
+        if self._inflight:
+            await asyncio.gather(
+                *(asyncio.wrap_future(item) for item in tuple(self._inflight)),
+                return_exceptions=True,
+            )
 
     async def _handle_live_event(self, data: Any, runner: Any) -> None:
         raw = data.raw if hasattr(data, "raw") else data
@@ -91,9 +175,105 @@ class FeishuAdapter:
         elif not isinstance(raw, dict):
             raw = _to_plain_data(raw)
         event = await self.normalize_event(raw)
+        if await self._handle_monitor_card(event, runner):
+            return
+        if await self._handle_copilot(event, runner):
+            return
         reply = await runner.handle_event(event)
         if reply:
             await self.reply(event, reply)
+
+    async def _handle_monitor_card(self, event: NormalizedEvent, runner: Any) -> bool:
+        service = getattr(runner, "work_monitor", None)
+        if service is None:
+            return False
+        from ostag.core.identity import Principal
+        from ostag.work_monitor.feishu_cards import render_feishu_card
+        from ostag.work_monitor.feishu_routes import issue_feishu_callback
+        from ostag.work_monitor.identity import Destination
+        from ostag.work_monitor.rendering import TaskDetailView
+        from ostag.work_monitor.service import parse_monitor_command
+
+        command = parse_monitor_command(event.text)
+        if command is None or command.name not in {"board", "task", "instances"}:
+            return False
+        principal = Principal("feishu", event.sender_id)
+        destination = Destination("feishu", event.destination_id, event.chat_type)
+        try:
+            if command.name == "board":
+                view = service.board(principal, destination, page=int(command.argument or "1"))
+                fallback = view.to_text()
+                card = render_feishu_card(view)
+            elif command.name == "task":
+                view = service.task(principal, destination, command.argument)
+                if destination.chat_type != "private" and "cancel" in view.capabilities:
+                    view = TaskDetailView(
+                        task=view.task,
+                        capabilities=tuple(
+                            action for action in view.capabilities if action != "cancel"
+                        ),
+                    )
+                fallback = view.to_text()
+                factory = None
+                if service.identities.allows(principal, destination, "write"):
+                    def factory(action: str, task_id: str) -> str:
+                        return issue_feishu_callback(
+                            service, principal, destination, action=action, task_id=task_id
+                        )
+                card = render_feishu_card(view, callback_factory=factory)
+            else:
+                instances = service.instances(principal, destination)
+                fallback = "实例\n" + "\n".join(
+                    str(item.get("instance_id", "")) for item in instances
+                )
+                card = {"config": {"wide_screen_mode": False}, "header": {
+                    "template": "indigo", "title": {"tag": "plain_text", "content": "OStag 实例"}},
+                    "elements": [{"tag": "div", "text": {"tag": "plain_text",
+                        "content": str(item.get("instance_id", ""))[:80]}} for item in instances[:10]]}
+        except Exception:  # service owns stable, localized error rendering
+            try:
+                fallback = service.handle_event(event)
+            except (PermissionError, ValueError):
+                fallback = "没有权限或请求无效。"
+            if fallback:
+                await self.reply(event, fallback)
+            return True
+        recipient_id = event.sender_id if event.chat_type == "private" else event.destination_id
+        await self.send_card(
+            recipient_id, card, fallback, chat_type=event.chat_type,
+            delivery_id=f"monitor-{event.event_id or event.message_id}",
+        )
+        return True
+
+    async def _handle_copilot(self, event: NormalizedEvent, runner: Any) -> bool:
+        controller = getattr(runner, "copilot_relay", None)
+        if controller is None:
+            return False
+        response = controller.handle_event(event)
+        if response is None:
+            return False
+        if response.card is not None:
+            recipient_id = event.sender_id if event.chat_type == "private" else event.destination_id
+            platform_message_id = await self.send_card(
+                recipient_id,
+                response.card,
+                response.text,
+                chat_type=event.chat_type,
+                delivery_id=f"copilot-{event.event_id or event.message_id}",
+            )
+            if platform_message_id and response.relay_message_id:
+                from ostag.core.identity import Principal
+                from ostag.work_monitor.identity import Destination
+
+                controller.record_delivery(
+                    platform_message_id=platform_message_id,
+                    relay_message_id=response.relay_message_id,
+                    principal=Principal("feishu", event.sender_id),
+                    destination=Destination("feishu", event.destination_id, event.chat_type),
+                )
+        elif response.text:
+            await self.reply(event, response.text)
+        return True
 
     async def normalize_event(self, raw_event: dict[str, Any]) -> NormalizedEvent:
         event = raw_event.get("event", raw_event)
@@ -103,13 +283,20 @@ class FeishuAdapter:
         content = _parse_content(message.get("content"))
         text = _content_text(content) or message.get("text") or event.get("text") or ""
         mentions = message.get("mentions") or content.get("mentions") or []
-        mention_bot = bool(mentions) or _mentions_bot(text, self.config.bot_name)
+        chat_id = message.get("chat_id") or event.get("chat_id", "")
+        raw_chat_type = str(message.get("chat_type") or event.get("chat_type") or "")
+        chat_type = "private" if raw_chat_type in {"p2p", "private"} else "group"
+        mention_bot = chat_type == "private" or bool(mentions) or _mentions_bot(
+            text, self.config.bot_name
+        )
         cleaned_text = strip_mentions(text, self.config.bot_name)
 
         return NormalizedEvent(
             platform="feishu",
-            event_id=header.get("event_id") or event.get("event_id") or message.get("message_id", ""),
-            chat_id=message.get("chat_id") or event.get("chat_id", ""),
+            event_id=header.get("event_id")
+            or event.get("event_id")
+            or message.get("message_id", ""),
+            chat_id=chat_id,
             message_id=message.get("message_id") or event.get("message_id", ""),
             sender_id=(
                 sender.get("sender_id", {}).get("open_id")
@@ -119,7 +306,10 @@ class FeishuAdapter:
             ),
             text=cleaned_text,
             mention_bot=mention_bot,
+            chat_type=chat_type,
+            destination_id=chat_id,
             thread_id=message.get("thread_id") or message.get("root_id"),
+            quote_message_id=message.get("parent_id") or event.get("parent_id"),
             raw=raw_event,
         )
 
@@ -146,15 +336,27 @@ class FeishuAdapter:
                 "Content-Type": "application/json; charset=utf-8",
             },
         )
-        await asyncio.to_thread(_urlopen_json, req)
+        response = await asyncio.to_thread(_urlopen_json, req)
+        if response.get("code", 0) != 0:
+            code = int(response.get("code", -1))
+            raise TransportError(
+                f"Feishu rejected message: code={code}",
+                status_code=400,
+                transient=code in {99991663, 99991664},
+            )
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(
+        self, chat_id: str, text: str, *, delivery_id: str, chat_type: str = "group"
+    ) -> None:
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive messages")
         if not text:
             return
         if self.config.dry_run:
             print(text)
             return
         token = await self._tenant_access_token()
+        receive_id_type = "open_id" if chat_type == "private" else "chat_id"
         payload = json.dumps(
             {
                 "receive_id": chat_id,
@@ -162,7 +364,10 @@ class FeishuAdapter:
                 "content": json.dumps({"text": text}, ensure_ascii=False),
             }
         ).encode()
-        url = f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type=chat_id"
+        url = (
+            f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+            f"&uuid={delivery_id}"
+        )
         req = urllib.request.Request(
             url,
             data=payload,
@@ -172,7 +377,60 @@ class FeishuAdapter:
                 "Content-Type": "application/json; charset=utf-8",
             },
         )
-        await asyncio.to_thread(_urlopen_json, req)
+        response = await asyncio.to_thread(_urlopen_json, req)
+        if response.get("code", 0) != 0:
+            code = int(response.get("code", -1))
+            raise TransportError(
+                f"Feishu rejected message: code={code}",
+                status_code=400,
+                transient=code in {99991663, 99991664},
+            )
+
+    async def send_card(
+        self,
+        destination_id: str,
+        card: dict[str, Any],
+        fallback_text: str,
+        *,
+        chat_type: str = "group",
+        delivery_id: str,
+    ) -> str | None:
+        """Proactively deliver an interactive card, falling back to plain text."""
+        if self.config.dry_run:
+            print(fallback_text)
+            return None
+        receive_id_type = "open_id" if chat_type == "private" else "chat_id"
+        token = await self._tenant_access_token()
+        payload = json.dumps(
+            {
+                "receive_id": destination_id,
+                "msg_type": "interactive",
+                "content": json.dumps(card, ensure_ascii=False),
+            }
+        ).encode()
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive cards")
+        req = urllib.request.Request(
+            f"{self.api_base_url}/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
+            f"&uuid={delivery_id}",
+            data=payload,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        try:
+            response = await asyncio.to_thread(_urlopen_json, req)
+            if response.get("code", 0) != 0:
+                raise RuntimeError("Feishu rejected interactive card")
+            data = response.get("data") or {}
+            return str(data.get("message_id") or "") or None
+        except (RuntimeError, TimeoutError):
+            await self.send_message(
+                destination_id, fallback_text, chat_type=chat_type, delivery_id=delivery_id
+            )
+            return None
 
     async def _tenant_access_token(self) -> str:
         body = json.dumps(
@@ -266,5 +524,10 @@ def _urlopen_json(req: urllib.request.Request) -> dict[str, Any]:
         with urllib.request.urlopen(req, timeout=20) as response:  # noqa: S310
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Feishu API HTTP {exc.code}: {body}") from exc
+        retry_after = exc.headers.get("Retry-After") if exc.headers else None
+        raise TransportError(
+            f"Feishu API HTTP {exc.code}",
+            status_code=exc.code,
+            retry_after_seconds=float(retry_after) if retry_after else None,
+            transient=exc.code == 429 or exc.code >= 500,
+        ) from None

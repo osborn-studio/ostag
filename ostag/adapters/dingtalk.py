@@ -98,6 +98,8 @@ class DingTalkAdapter:
             sender_id=sender_id,
             text=cleaned_text,
             mention_bot=mention_bot,
+            chat_type="private" if str(data.get("conversationType")) == "1" else "group",
+            destination_id=chat_id,
             thread_id=str(data.get("conversationId") or ""),
             raw=raw_event,
         )
@@ -116,9 +118,9 @@ class DingTalkAdapter:
         if session_webhook:
             await self._post_json(session_webhook, _text_payload(text))
             return
-        await self.send_message(event.chat_id, text)
+        await self.send_message(event.chat_id, text, delivery_id=event.message_id)
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         if not text:
             return
         text = dingtalk_text(text)
@@ -135,6 +137,34 @@ class DingTalkAdapter:
             ),
             _text_payload(text),
         )
+
+    async def send_card(
+        self,
+        destination_id: str,
+        payload: dict[str, Any],
+        fallback_text: str,
+        *,
+        delivery_id: str,
+    ) -> None:
+        """Deliver a native robot payload, falling back once to text/Markdown."""
+        if not delivery_id:
+            raise ValueError("stable delivery_id is required for proactive cards")
+        if self.config.dry_run:
+            print(fallback_text)
+            return
+        if not self.config.dingtalk_robot_webhook:
+            await self.send_message(destination_id, fallback_text, delivery_id=delivery_id)
+            return
+        try:
+            await self._post_json(
+                signed_webhook_url(
+                    self.config.dingtalk_robot_webhook,
+                    self.config.dingtalk_robot_secret,
+                ),
+                payload,
+            )
+        except Exception:
+            await self.send_message(destination_id, fallback_text, delivery_id=delivery_id)
 
     async def _send_by_dws_bot(self, chat_id: str, text: str) -> None:
         argv = shlex.split(self.config.dws_cli_bin)
@@ -252,13 +282,17 @@ def _parse_json_string(value: str) -> Any:
 
 
 def _is_direct_chat(data: dict[str, Any]) -> bool:
-    value = str(
-        data.get("conversationType")
-        or data.get("conversation_type")
-        or data.get("chatType")
-        or data.get("chat_type")
-        or ""
-    ).strip().lower()
+    value = (
+        str(
+            data.get("conversationType")
+            or data.get("conversation_type")
+            or data.get("chatType")
+            or data.get("chat_type")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     return value in {"1", "single", "single_chat", "private", "private_chat", "p2p"}
 
 

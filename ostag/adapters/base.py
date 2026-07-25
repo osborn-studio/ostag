@@ -22,5 +22,20 @@ class Adapter(Protocol):
     async def reply(self, event: NormalizedEvent, text: str) -> None:
         """Send a reply through the platform transport."""
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(
+        self, chat_id: str, text: str, *, delivery_id: str, chat_type: str = "group"
+    ) -> None:
         """Send a proactive message through the platform transport."""
+
+
+@runtime_checkable
+class StructuredCardAdapter(Protocol):
+    async def send_card(
+        self,
+        destination_id: str,
+        card: dict[str, Any],
+        fallback_text: str,
+        *,
+        delivery_id: str,
+    ) -> str | None:
+        """Send a native structured card to a chat."""

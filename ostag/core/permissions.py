@@ -10,7 +10,10 @@ operator's own machine.
 
 from __future__ import annotations
 
+import warnings
+
 from ostag.config import Settings
+from ostag.core.identity import Principal
 from ostag.core.schemas import PERMISSION_LEVELS, SchemaError
 
 LOCAL_ADMIN_ACTOR = "local-admin"
@@ -24,6 +27,10 @@ VERB_REQUIRED_LEVEL = {
     "reject": "propose",
     "approve": "write",
     "apply": "write",
+    "pause": "write",
+    "resume": "write",
+    "retry": "write",
+    "cancel": "write",
 }
 
 _ORDER = {level: index for index, level in enumerate(PERMISSION_LEVELS)}
@@ -38,6 +45,39 @@ def parse_actor_permissions(pairs: tuple[str, ...]) -> dict[str, str]:
         if actor and level in PERMISSION_LEVELS:
             mapping[actor] = level
     return mapping
+
+
+def parse_principal_permissions(pairs: tuple[str, ...]) -> dict[Principal, str]:
+    """Parse strict ``platform:actor_id:level`` grants without bare-actor fallback."""
+    mapping: dict[Principal, str] = {}
+    for pair in pairs:
+        parts = tuple(part.strip() for part in pair.split(":"))
+        if len(parts) != 3:
+            if len(parts) == 2:
+                warnings.warn(
+                    f"Ignoring legacy actor grant {pair!r} on a remote Principal path; "
+                    "migrate it to platform:actor_id:level",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            continue
+        platform, actor_id, level = parts
+        if platform and actor_id and level in PERMISSION_LEVELS:
+            mapping[Principal(platform, actor_id)] = level
+    return mapping
+
+
+def resolve_principal_permission(
+    config: Settings, principal: Principal, channel_grants: tuple[str, ...] = ()
+) -> str:
+    """Resolve only platform-scoped grants; identical actor IDs never alias."""
+    channel_mapping = parse_principal_permissions(channel_grants)
+    if principal in channel_mapping:
+        return channel_mapping[principal]
+    mapping = parse_principal_permissions(config.actor_permissions)
+    if principal in mapping:
+        return mapping[principal]
+    return config.default_permission_level
 
 
 def resolve_permission(
@@ -81,8 +121,7 @@ def ensure_verb_allowed(actor_id: str, level: str, verb: str) -> None:
         raise SchemaError(
             code="permission_denied",
             message=(
-                f"Actor {actor_id!r} has permission level {level!r}; "
-                f"'{verb}' requires {required!r}"
+                f"Actor {actor_id!r} has permission level {level!r}; '{verb}' requires {required!r}"
             ),
             recovery_hint=(
                 "Ask an admin to raise your level via OSTAG_ACTOR_PERMISSIONS "

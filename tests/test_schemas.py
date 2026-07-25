@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from ostag.core.identity import Principal
 from ostag.core.schemas import (
     ActionReceipt,
     ApplyPlan,
@@ -19,6 +20,20 @@ from ostag.core.schemas import (
     new_id,
     prune,
 )
+
+
+def test_action_receipt_round_trips_canonical_principal() -> None:
+    receipt = ActionReceipt(
+        action_id="action_control",
+        run_id="run_control",
+        title="Pause",
+        target_system="work_monitor",
+        target_object="mac/task-1",
+        mutation_type="pause",
+        principal=Principal("feishu", "owner"),
+    )
+    assert ActionReceipt.from_dict(receipt.to_dict()).principal == Principal("feishu", "owner")
+    assert receipt.with_state("needs_approval").principal == receipt.principal
 
 
 def _sample_run() -> Run:

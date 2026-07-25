@@ -1,0 +1,723 @@
+"""Durable outbound reporter for OStag and osstack work events."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import sqlite3
+import time
+import urllib.error
+import urllib.request
+import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Callable, Protocol
+
+from .models import MonitorEvent, RemoteCommand
+from .redaction import sanitize_task_input
+from .executor import OsstackTaskReference
+
+
+@dataclass(frozen=True)
+class TransportResponse:
+    status: int
+    body: bytes
+
+
+class ReporterTransport(Protocol):
+    def request(
+        self, method: str, url: str, body: bytes, headers: dict[str, str]
+    ) -> TransportResponse: ...
+
+
+class UrlTransport:
+    def request(
+        self, method: str, url: str, body: bytes, headers: dict[str, str]
+    ) -> TransportResponse:
+        request = urllib.request.Request(url, data=body, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:  # noqa: S310
+                return TransportResponse(response.status, response.read())
+        except urllib.error.HTTPError as exc:
+            return TransportResponse(exc.code, exc.read())
+
+
+class Reporter:
+    def __init__(
+        self,
+        *,
+        instance_id: str,
+        secret: str,
+        central_url: str,
+        ledger_path: str | Path,
+        spool_path: str | Path,
+        transport: ReporterTransport | None = None,
+        clock: Callable[[], datetime] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        interval_seconds: int = 30,
+        command_poll_seconds: int = 10,
+        capabilities: Callable[[], frozenset[str]] | None = None,
+        task_capabilities: Callable[[], dict[str, frozenset[str]]] | None = None,
+    ) -> None:
+        if not instance_id:
+            raise ValueError("instance_id is required")
+        self.instance_id = instance_id
+        self._secret = secret
+        self.central_url = central_url.rstrip("/")
+        self.ledger_path = Path(ledger_path)
+        self.spool_path = Path(spool_path)
+        self.transport = transport or UrlTransport()
+        self.clock = clock or (lambda: datetime.now(UTC))
+        self.sleep = sleep
+        self.interval_seconds = interval_seconds
+        self.command_poll_seconds = command_poll_seconds
+        self.capabilities = capabilities or (lambda: frozenset())
+        self.task_capabilities = task_capabilities or (lambda: {})
+        self._before_spool_commit: Callable[[], None] = lambda: None
+        self._after_command_execute: Callable[[], None] = lambda: None
+        self.spool_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.spool_path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _init_db(self) -> None:
+        with self._connect() as db:
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS spool (
+                    sequence INTEGER PRIMARY KEY,
+                    event_id TEXT NOT NULL UNIQUE,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS event_history (
+                    event_id TEXT PRIMARY KEY, payload TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS task_metadata (
+                    task_id TEXT PRIMARY KEY, title TEXT NOT NULL, agent TEXT NOT NULL,
+                    project TEXT NOT NULL, version INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS command_state (
+                    command_id TEXT PRIMARY KEY, state TEXT NOT NULL,
+                    command_payload TEXT NOT NULL, result_payload TEXT
+                );
+                CREATE TABLE IF NOT EXISTS osstack_references (
+                    task_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, workspace TEXT NOT NULL,
+                    state_path TEXT NOT NULL, version INTEGER NOT NULL, lifecycle TEXT NOT NULL,
+                    attempt_id TEXT NOT NULL, attempt_order INTEGER NOT NULL
+                );
+                """
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO event_history(event_id,payload) "
+                "SELECT event_id,payload FROM spool"
+            )
+
+    def _state(self, key: str, default: str = "") -> str:
+        with self._connect() as db:
+            row = db.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+        return default if row is None else str(row["value"])
+
+    @staticmethod
+    def _set_state(db: sqlite3.Connection, key: str, value: object) -> None:
+        db.execute(
+            "INSERT INTO state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, str(value)),
+        )
+
+    def enqueue(
+        self, payload: dict[str, object], *, osstack_reference: OsstackTaskReference | None = None
+    ) -> MonitorEvent:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT payload FROM event_history WHERE event_id=?",
+                (str(payload.get("event_id", "")),),
+            ).fetchone()
+            if existing is not None:
+                db.commit()
+                return MonitorEvent.from_dict(json.loads(existing["payload"]))
+            if osstack_reference is not None:
+                raw_task = payload.get("task")
+                if not isinstance(raw_task, dict):
+                    raise ValueError("osstack reference requires a task event")
+                task_id = str(raw_task.get("task_id", ""))
+                if int(raw_task.get("version", 0)) != osstack_reference.version:
+                    raise ValueError("osstack reference version must match task version")
+                expected_lifecycle = {
+                    "task.failed": "failed",
+                    "task.completed": "completed",
+                    "task.cancelled": "cancelled",
+                    "task.started": "running",
+                    "task.progress": "running",
+                    "task.blocked": "blocked",
+                    "task.awaiting_approval": "blocked",
+                    "task.created": "queued",
+                }.get(str(payload.get("kind", "")))
+                if expected_lifecycle != osstack_reference.lifecycle:
+                    raise ValueError("osstack reference lifecycle must match task status")
+                db.execute(
+                    "INSERT INTO osstack_references VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(task_id) DO UPDATE SET run_id=excluded.run_id,workspace=excluded.workspace,"
+                    "state_path=excluded.state_path,version=excluded.version,lifecycle=excluded.lifecycle,"
+                    "attempt_id=excluded.attempt_id,attempt_order=excluded.attempt_order",
+                    (
+                        task_id,
+                        osstack_reference.run_id,
+                        osstack_reference.workspace,
+                        osstack_reference.state_path,
+                        osstack_reference.version,
+                        osstack_reference.lifecycle,
+                        osstack_reference.attempt_id,
+                        osstack_reference.attempt_order,
+                    ),
+                )
+            event = self._enqueue_in_transaction(db, payload)
+            db.commit()
+        return event
+
+    def osstack_references(self) -> dict[str, OsstackTaskReference]:
+        with self._connect() as db:
+            rows = db.execute("SELECT * FROM osstack_references ORDER BY task_id").fetchall()
+        return {
+            str(row["task_id"]): OsstackTaskReference(
+                run_id=str(row["run_id"]),
+                workspace=str(row["workspace"]),
+                state_path=str(row["state_path"]),
+                version=int(row["version"]),
+                lifecycle=str(row["lifecycle"]),
+                attempt_id=str(row["attempt_id"]),
+                attempt_order=int(row["attempt_order"]),
+            )
+            for row in rows
+        }
+
+    def seed_osstack_references(self, references: dict[str, OsstackTaskReference]) -> None:
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for task_id, reference in references.items():
+                row = db.execute(
+                    "SELECT version FROM osstack_references WHERE task_id=?", (task_id,)
+                ).fetchone()
+                if row is not None and int(row["version"]) >= reference.version:
+                    continue
+                db.execute(
+                    "INSERT INTO osstack_references VALUES(?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(task_id) DO UPDATE SET run_id=excluded.run_id,workspace=excluded.workspace,"
+                    "state_path=excluded.state_path,version=excluded.version,lifecycle=excluded.lifecycle,"
+                    "attempt_id=excluded.attempt_id,attempt_order=excluded.attempt_order",
+                    (
+                        task_id,
+                        reference.run_id,
+                        reference.workspace,
+                        reference.state_path,
+                        reference.version,
+                        reference.lifecycle,
+                        reference.attempt_id,
+                        reference.attempt_order,
+                    ),
+                )
+            db.commit()
+
+    def _enqueue_in_transaction(
+        self, db: sqlite3.Connection, payload: dict[str, object]
+    ) -> MonitorEvent:
+        existing = db.execute(
+            "SELECT payload FROM event_history WHERE event_id=?", (str(payload["event_id"]),)
+        ).fetchone()
+        if existing is not None:
+            return MonitorEvent.from_dict(json.loads(existing["payload"]))
+        row = db.execute("SELECT value FROM state WHERE key='next_sequence'").fetchone()
+        sequence = 1 if row is None else int(row["value"])
+        raw_task = payload.get("task")
+        task = None if raw_task is None else sanitize_task_input(dict(raw_task))  # type: ignore[arg-type]
+        event = MonitorEvent(
+            event_id=str(payload["event_id"]),
+            instance_id=self.instance_id,
+            sequence=sequence,
+            kind=str(payload["kind"]),
+            occurred_at=str(payload["occurred_at"]),
+            task=task,
+            per_task_capabilities={
+                str(task_id): tuple(sorted(actions))
+                for task_id, actions in dict(payload.get("per_task_capabilities", {})).items()
+            },
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO spool(sequence,event_id,payload) VALUES(?,?,?)",
+            (
+                sequence,
+                event.event_id,
+                json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True),
+            ),
+        )
+        db.execute(
+            "INSERT INTO event_history(event_id,payload) VALUES(?,?)",
+            (event.event_id, json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True)),
+        )
+        self._set_state(db, "next_sequence", sequence + 1)
+        return event
+
+    def pending_events(self) -> list[MonitorEvent]:
+        with self._connect() as db:
+            rows = db.execute("SELECT payload FROM spool ORDER BY sequence").fetchall()
+        return [MonitorEvent.from_dict(json.loads(row["payload"])) for row in rows]
+
+    def tail_ledger_once(self) -> int:
+        if not self.ledger_path.exists():
+            return 0
+        stat = self.ledger_path.stat()
+        inode = str(stat.st_ino)
+        old_inode = self._state("ledger_inode")
+        offset = int(self._state("ledger_offset", "0")) if old_inode == inode else 0
+        if old_inode == inode and stat.st_size < offset:
+            offset = 0
+        count = 0
+        with self.ledger_path.open("rb") as handle:
+            handle.seek(offset)
+            while True:
+                start = handle.tell()
+                line = handle.readline()
+                if not line or not line.endswith(b"\n"):
+                    break
+                try:
+                    record = json.loads(line)
+                    if not isinstance(record, dict):
+                        raise ValueError("ledger record must be an object")
+                    mapped = self._map_ledger_record(record)
+                    parse_error = ""
+                except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                    record, mapped, parse_error = {}, None, f"malformed ledger line: {exc}"
+                end = handle.tell()
+                with self._connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    if parse_error:
+                        self._record_error_in_transaction(db, parse_error)
+                    if mapped is not None:
+                        duplicate = db.execute(
+                            "SELECT 1 FROM event_history WHERE event_id=?",
+                            (str(mapped["event_id"]),),
+                        ).fetchone()
+                        if duplicate is None:
+                            mapped = self._apply_task_metadata(db, mapped)
+                            self._enqueue_in_transaction(db, mapped)
+                            count += 1
+                    self._before_spool_commit()
+                    self._set_state(db, "ledger_inode", inode)
+                    self._set_state(db, "ledger_offset", end)
+                    self._set_state(db, "ledger_event_id", record.get("event_id", ""))
+                    db.commit()
+                offset = end
+                if end <= start:  # pragma: no cover - defensive
+                    break
+        return count
+
+    def _record_error_in_transaction(self, db: sqlite3.Connection, message: str) -> None:
+        row = db.execute("SELECT value FROM state WHERE key='error_count'").fetchone()
+        self._set_state(db, "error_count", (0 if row is None else int(row["value"])) + 1)
+        self._set_state(db, "last_error", message[:500])
+
+    def _record_error(self, message: str) -> None:
+        with self._connect() as db:
+            self._record_error_in_transaction(db, message)
+
+    def _apply_task_metadata(
+        self, db: sqlite3.Connection, mapped: dict[str, object]
+    ) -> dict[str, object]:
+        task = dict(mapped["task"])  # type: ignore[arg-type]
+        task_id = str(task["task_id"])
+        row = db.execute("SELECT * FROM task_metadata WHERE task_id=?", (task_id,)).fetchone()
+        if row is None:
+            version = 1
+            title, agent, project = str(task["title"]), str(task["agent"]), str(task["project"])
+            db.execute(
+                "INSERT INTO task_metadata VALUES(?,?,?,?,?)",
+                (task_id, title, agent, project, version),
+            )
+        else:
+            version = int(row["version"]) + 1
+            title, agent, project = str(row["title"]), str(row["agent"]), str(row["project"])
+            db.execute("UPDATE task_metadata SET version=? WHERE task_id=?", (version, task_id))
+        task.update({"title": title, "agent": agent, "project": project, "version": version})
+        return {**mapped, "task": task}
+
+    def _map_ledger_record(self, record: dict[str, object]) -> dict[str, object] | None:
+        event_type = str(record.get("event_type", ""))
+        payload = dict(record.get("payload", {}))  # type: ignore[arg-type]
+        run = dict(payload.get("run", {})) if isinstance(payload.get("run"), dict) else {}
+        status = str(payload.get("status", ""))
+        mapping = {
+            "run_created": "task.created",
+            "action_proposed": "task.awaiting_approval",
+            "action_state_changed": "task.progress",
+            "run_status_changed": {
+                "running": "task.started",
+                "blocked": "task.blocked",
+                "waiting_approval": "task.awaiting_approval",
+            }.get(status, "task.progress"),
+            "run_finished": {
+                "succeeded": "task.completed",
+                "failed": "task.failed",
+                "cancelled": "task.cancelled",
+            }.get(status),
+        }
+        kind = mapping.get(event_type)
+        if not kind:
+            return None
+        intent = run.get("intent", {}) if isinstance(run.get("intent"), dict) else {}
+        summary_source = payload.get("detail") or payload.get("summary")
+        receipt = payload.get("receipt", {}) if isinstance(payload.get("receipt"), dict) else {}
+        summary_source = summary_source or receipt.get("summary") or status
+        title = intent.get("raw_text") or f"OStag run {record.get('run_id', '')}"
+        task_status = {
+            "task.created": "todo",
+            "task.started": "running",
+            "task.progress": "running",
+            "task.blocked": "blocked",
+            "task.awaiting_approval": "blocked",
+            "task.completed": "done",
+            "task.failed": "blocked",
+            "task.cancelled": "done",
+        }[kind]
+        return {
+            "event_id": f"monitor-{record.get('event_id', '')}",
+            "kind": kind,
+            "occurred_at": str(record.get("created_at", self.clock().isoformat())),
+            "task": {
+                "task_id": str(record.get("run_id", "")),
+                "title": str(title),
+                "project": "ostag",
+                "status": task_status,
+                "agent": str(run.get("executor_id") or "ostag"),
+                "progress": 100 if task_status == "done" else (10 if task_status == "todo" else 50),
+                "duration_seconds": 0,
+                "summary": str(summary_source or ""),
+                "error_class": "execution_failed" if kind == "task.failed" else None,
+                "evidence_ref": f"ledger:{record.get('event_id', '')}",
+                "version": 1,
+            },
+        }
+
+    def heartbeat(self) -> MonitorEvent:
+        now = self.clock().isoformat()
+        return self.enqueue(
+            {
+                "event_id": f"heartbeat-{self.instance_id}-{uuid.uuid4().hex}",
+                "kind": "instance.heartbeat",
+                "occurred_at": now,
+                "task": None,
+                "per_task_capabilities": self.task_capabilities(),
+            }
+        )
+
+    def _headers(self, method: str, path: str, body: bytes) -> dict[str, str]:
+        timestamp = str(int(self.clock().timestamp()))
+        nonce = uuid.uuid4().hex
+        canonical = "\n".join(("v1", method.upper(), path, self.instance_id, timestamp, nonce,
+                                hashlib.sha256(body).hexdigest())).encode()
+        signature = hmac.new(
+            self._secret.encode(), canonical, hashlib.sha256
+        ).hexdigest()
+        return {
+            "Content-Type": "application/json",
+            "X-OStag-Instance": self.instance_id,
+            "X-OStag-Timestamp": timestamp,
+            "X-OStag-Nonce": nonce,
+            "X-OStag-Signature": signature,
+        }
+
+    def flush_once(self) -> int:
+        if not self.central_url or not self._secret:
+            return 0
+        next_attempt = self._state("next_attempt_at")
+        if next_attempt and self.clock() < datetime.fromisoformat(next_attempt):
+            return 0
+        events = self.pending_events()
+        if not events:
+            return 0
+        body = json.dumps(
+            {
+                "events": [event.to_dict() for event in events],
+                "supported_actions": sorted(self.capabilities()),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        try:
+            response = self.transport.request(
+                "POST", f"{self.central_url}/v1/events", body,
+                self._headers("POST", "/v1/events", body)
+            )
+        except OSError:
+            response = TransportResponse(599, b"")
+        if not 200 <= response.status < 300:
+            self._record_failure()
+            return 0
+        try:
+            result = json.loads(response.body or b"{}")
+            ack = result["ack_sequence"]
+            if isinstance(ack, bool) or not isinstance(ack, int):
+                raise ValueError("invalid ack")
+            sequences = [event.sequence for event in events]
+            if ack < 0 or ack > max(sequences) or (ack and ack not in sequences):
+                raise ValueError("ack outside sent contiguous range")
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            self._record_failure()
+            return 0
+        with self._connect() as db:
+            deleted = db.execute("DELETE FROM spool WHERE sequence<=?", (ack,)).rowcount
+            self._set_state(db, "failure_count", 0)
+            self._set_state(db, "next_attempt_at", "")
+        return deleted
+
+    def _record_failure(self) -> None:
+        failures = int(self._state("failure_count", "0")) + 1
+        delay = min(300, 2 ** min(failures, 8))
+        with self._connect() as db:
+            self._set_state(db, "failure_count", failures)
+            self._set_state(
+                db, "next_attempt_at", (self.clock() + timedelta(seconds=delay)).isoformat()
+            )
+
+    def poll_commands_once(self, execute: Callable[[RemoteCommand], dict[str, object]]) -> int:
+        if not self.central_url or not self._secret:
+            return 0
+        next_attempt = self._state("command_next_attempt_at")
+        if next_attempt and self.clock() < datetime.fromisoformat(next_attempt):
+            return 0
+        empty = b"{}"
+        try:
+            response = self.transport.request(
+                "POST",
+                f"{self.central_url}/v1/commands/poll",
+                empty,
+                self._headers("POST", "/v1/commands/poll", empty),
+            )
+        except (OSError, TimeoutError, urllib.error.URLError) as exc:
+            self._record_error(f"command poll transport: {exc}")
+            self._record_command_failure()
+            return 0
+        if not 200 <= response.status < 300:
+            self._record_error(f"command poll HTTP {response.status}")
+            self._record_command_failure()
+            return 0
+        self._clear_command_failure()
+        try:
+            commands = json.loads(response.body or b"{}").get("commands", [])
+        except (json.JSONDecodeError, AttributeError):
+            self._record_error("malformed command poll response")
+            return 0
+        handled = 0
+        for raw in commands:
+            try:
+                command = RemoteCommand.from_dict(raw)
+            except (ValueError, TypeError, KeyError) as exc:
+                self._record_error(f"malformed remote command: {exc}")
+                continue
+            canonical = json.dumps(command.to_dict(), sort_keys=True, separators=(",", ":"))
+            with self._connect() as db:
+                row = db.execute(
+                    "SELECT state,command_payload,result_payload FROM command_state WHERE command_id=?",
+                    (command.command_id,),
+                ).fetchone()
+                if row is None:
+                    db.execute(
+                        "INSERT INTO command_state VALUES(?,?,?,NULL)",
+                        (
+                            command.command_id,
+                            "received",
+                            canonical,
+                        ),
+                    )
+                    state, stored = "received", None
+                else:
+                    try:
+                        stored_canonical = json.dumps(
+                            json.loads(row["command_payload"]),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+                    if not hmac.compare_digest(stored_canonical, canonical):
+                        continue
+                    state, stored = str(row["state"]), row["result_payload"]
+            if state in {"acked", "rejected_acked"}:
+                continue
+            if state in {"executed", "executed_unverified", "rejected"}:
+                result = json.loads(stored)
+            elif state == "executing":
+                owner = getattr(execute, "__self__", None)
+                reconcile = getattr(owner, "reconcile", None)
+                try:
+                    result = (
+                        reconcile(command)
+                        if callable(reconcile)
+                        else {"ok": False, "code": "STATUS_UNAVAILABLE"}
+                    )
+                except Exception as exc:
+                    self._record_error(f"command reconcile error: {type(exc).__name__}: {exc}")
+                    result = {"ok": False, "code": "STATUS_UNAVAILABLE"}
+                if not result.get("ok"):
+                    result = {
+                        "ok": False,
+                        "code": "INDETERMINATE_REQUIRES_IDEMPOTENT_UPSTREAM",
+                        "reconcile_code": result.get("code", "STATUS_UNAVAILABLE"),
+                    }
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state='executed_unverified',result_payload=? WHERE command_id=?",
+                        (json.dumps(result, sort_keys=True), command.command_id),
+                    )
+            else:
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state='executing' WHERE command_id=? AND state='received'",
+                        (command.command_id,),
+                    )
+                try:
+                    result = execute(command)
+                except Exception as exc:  # isolate an untrusted command/plugin boundary
+                    self._record_error(f"command execution error: {type(exc).__name__}: {exc}")
+                    result = {"ok": False, "code": "COMMAND_REJECTED"}
+                    with self._connect() as db:
+                        db.execute(
+                            "UPDATE command_state SET state='rejected',result_payload=? WHERE command_id=?",
+                            (
+                                json.dumps(result),
+                                command.command_id,
+                            ),
+                        )
+                    state = "rejected"
+                else:
+                    self._after_command_execute()
+                    code = str(result.get("code", ""))
+                    execution_state = (
+                        "executed_unverified"
+                        if code.endswith("_NOT_CONFIRMED") or code == "STATUS_UNAVAILABLE"
+                        else "executed"
+                    )
+                    with self._connect() as db:
+                        db.execute(
+                            "UPDATE command_state SET state=?,result_payload=? WHERE command_id=?",
+                            (
+                                execution_state,
+                                json.dumps(result, sort_keys=True),
+                                command.command_id,
+                            ),
+                        )
+            body = json.dumps({"result": result}, sort_keys=True).encode()
+            try:
+                ack_response = self.transport.request(
+                    "POST", f"{self.central_url}/v1/commands/{command.command_id}/ack", body,
+                    self._headers("POST", f"/v1/commands/{command.command_id}/ack", body)
+                )
+            except (OSError, TimeoutError, urllib.error.URLError) as exc:
+                self._record_error(f"command ack transport: {exc}")
+                self._record_command_failure()
+                continue
+            if 200 <= ack_response.status < 300:
+                with self._connect() as db:
+                    db.execute(
+                        "UPDATE command_state SET state=? WHERE command_id=?",
+                        ("rejected_acked" if state == "rejected" else "acked", command.command_id),
+                    )
+                handled += 1
+            else:
+                self._record_error(f"command ack HTTP {ack_response.status}")
+                self._record_command_failure()
+        return handled
+
+    def _record_command_failure(self) -> None:
+        failures = int(self._state("command_failure_count", "0")) + 1
+        delay = min(300, 2 ** min(failures, 8))
+        with self._connect() as db:
+            self._set_state(db, "command_failure_count", failures)
+            self._set_state(
+                db, "command_next_attempt_at", (self.clock() + timedelta(seconds=delay)).isoformat()
+            )
+
+    def _clear_command_failure(self) -> None:
+        with self._connect() as db:
+            self._set_state(db, "command_failure_count", 0)
+            self._set_state(db, "command_next_attempt_at", "")
+
+    def command_states(self) -> dict[str, str]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT command_id,state FROM command_state ORDER BY command_id"
+            ).fetchall()
+        return {str(row["command_id"]): str(row["state"]) for row in rows}
+
+    def run_once(
+        self, execute: Callable[[RemoteCommand], dict[str, object]] | None = None
+    ) -> dict[str, object]:
+        now = self.clock()
+        report_due = self._due("last_report_at", self.interval_seconds, now)
+        poll_due = self._due("last_command_poll_at", self.command_poll_seconds, now)
+        tailed = self.tail_ledger_once() if report_due else 0
+        if report_due:
+            self.heartbeat()
+            flushed = self.flush_once()
+            self._save_time("last_report_at", now)
+        else:
+            flushed = 0
+        polled = False
+        handled = 0
+        if poll_due and execute is not None:
+            handled = self.poll_commands_once(execute)
+            self._save_time("last_command_poll_at", now)
+            polled = True
+        return {
+            "tailed": tailed,
+            "flushed": flushed,
+            "heartbeat": report_due,
+            "polled": polled,
+            "handled": handled,
+            **self.status(),
+        }
+
+    def _due(self, key: str, seconds: int, now: datetime) -> bool:
+        previous = self._state(key)
+        return not previous or now >= datetime.fromisoformat(previous) + timedelta(seconds=seconds)
+
+    def _save_time(self, key: str, value: datetime) -> None:
+        with self._connect() as db:
+            self._set_state(db, key, value.isoformat())
+
+    def start(self, execute: Callable[[RemoteCommand], dict[str, object]] | None = None) -> None:
+        while True:
+            self.run_once(execute)
+            self.sleep(min(self.interval_seconds, self.command_poll_seconds))
+
+    def status(self) -> dict[str, object]:
+        command_states = self.command_states()
+        return {
+            "enabled": bool(self.central_url and self._secret),
+            "instance_id": self.instance_id,
+            "pending_events": len(self.pending_events()),
+            "ledger_inode": self._state("ledger_inode"),
+            "ledger_offset": int(self._state("ledger_offset", "0")),
+            "last_ledger_event_id": self._state("ledger_event_id"),
+            "failure_count": int(self._state("failure_count", "0")),
+            "next_attempt_at": self._state("next_attempt_at"),
+            "next_sequence": int(self._state("next_sequence", "1")),
+            "command_states": command_states,
+            "indeterminate_commands": [
+                command_id
+                for command_id, state in command_states.items()
+                if state in {"executing", "executed_unverified"}
+            ],
+            "control_replay_guarantee": "at_most_once_with_indeterminate_crash_window",
+            "release_gate": "Task3A_idempotent_versioned_upstream_controls_required",
+            "error_count": int(self._state("error_count", "0")),
+            "last_error": self._state("last_error"),
+            "command_failure_count": int(self._state("command_failure_count", "0")),
+            "command_next_attempt_at": self._state("command_next_attempt_at"),
+        }

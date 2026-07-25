@@ -68,6 +68,48 @@ Example group commands:
 If multiple records match, OS Tag refuses to update and asks for a more specific
 requirement keyword or code.
 
+## Daily FDE Requirement Dashboard
+
+OStag can read the original requirement Base and send one interactive dashboard
+card every calendar day at 12:00 Asia/Shanghai time, including weekends. The
+scheduled path is read-only; Base writes remain limited to separately authorized
+explicit commands.
+
+Production values for the approved FDE rollout:
+
+```dotenv
+OSTAG_AMBIENT_ENABLED=true
+OSTAG_AMBIENT_CHAT_IDS=oc_ef8aba337000ae1c69aae11dfdfd8ef0
+OSTAG_AMBIENT_INTERVAL_SECONDS=300
+OSTAG_AMBIENT_RECORD_LIMIT=200
+OSTAG_AMBIENT_DAILY_BOARD_ENABLED=true
+OSTAG_AMBIENT_DAILY_BOARD_HOUR=12
+OSTAG_AMBIENT_DAILY_BOARD_WINDOW_MINUTES=60
+OSTAG_AMBIENT_TIMEZONE=Asia/Shanghai
+OSTAG_AMBIENT_DAILY_BOARD_GROUP_NAME="Dadao 投研交易 FDE"
+OSTAG_AMBIENT_DAILY_BOARD_BASE_URL=<approved_original_base_https_url>
+OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN=<approved_base_token>
+OSTAG_AUTO_BASE_DEFAULT_TABLE_ID=<approved_table_id>
+OSTAG_AUTO_BASE_IDENTITY=bot
+```
+
+Publish the OStag app with `base:field:read` and `base:record:read`, in addition
+to its existing group-message send capability. Do not add scheduled Base write
+scope for this feature.
+
+Render without sending, then perform exactly one controlled live validation:
+
+```bash
+uv run python -m ostag.main ambient board-once --json
+uv run python -m ostag.main ambient board-once --send --json
+```
+
+Confirm counts against a fresh Base read, verify the two buttons, and verify that
+only overdue P0 owners are mentioned. The success marker prevents a second send
+for the same Asia/Shanghai date. Roll back by setting
+`OSTAG_AMBIENT_DAILY_BOARD_ENABLED=false` and restarting the single scheduler
+process.
+
 ## Deployment Preflight
 
 Run the full deploy preflight before a pilot launch:
@@ -166,6 +208,54 @@ launchctl unload ~/Library/LaunchAgents/ai.ostag.feishu.plist
 OSTAG_DRY_RUN=true python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
 ```
 
+## Feishu osstack status dashboards
+
+The private-chat status dashboard is opt-in. Enable it on the central work-monitor
+server only after the verified Feishu owner and each device have been bound:
+
+```dotenv
+OSTAG_COPILOT_STATUS_BOARD_ENABLED=true
+```
+
+Bind the global owner (or an administrator) from the trusted local CLI:
+
+```bash
+uv run ostag monitor access bind-instance \
+  --platform feishu \
+  --actor '<verified-open-id>' \
+  --private-chat '<verified-private-chat-id>' \
+  --instance 'ostag-local' \
+  --display-name 'Mac mini' \
+  --role admin \
+  --json
+```
+
+Bind each employee only to that employee's own osstack instance by using the same
+command with their verified identifiers and `--role member`. Never copy actor or
+chat identifiers from message text; obtain them from authenticated Feishu events.
+
+Inspect or revoke active ownership without exposing credentials:
+
+```bash
+uv run ostag monitor access list --json
+uv run ostag monitor access list --actor '<verified-open-id>' --json
+uv run ostag monitor access revoke-instance --instance '<instance-id>' --json
+```
+
+`现在 osstack 在干嘛` and equivalent read-only queries return the personal status
+dashboard directly and never create a relay inbox/outbox message. A member sees
+only explicitly bound devices. The verified global owner may switch to the team
+dashboard; that authorization is checked again on every card callback. Device and
+agent names, freshness, and all displayed times come from the central projection;
+times are rendered in `Asia/Shanghai` and labeled `北京时间`.
+
+Before enabling or upgrading this feature, make an online SQLite backup and verify
+`PRAGMA integrity_check` (the production commands below use
+`scripts/backup_work_monitor.sh`). Also back up the protected `.env` with mode
+`0600`. Retain the previous immutable image tag. To roll back, restore that image
+tag and disable `OSTAG_COPILOT_STATUS_BOARD_ENABLED`; restore the database only if
+an incompatible migration requires it.
+
 ## Production Notes
 
 - Start with `OSTAG_BACKEND=mock`, then switch to Codex/OpenAI after message
@@ -173,3 +263,75 @@ OSTAG_DRY_RUN=true python -m ostag.main --platform feishu --dry-run --event exam
 - Keep `MFS_ALLOWED_SCOPES` narrow.
 - Keep unsafe CLI flags disabled unless testing on an isolated machine.
 - Rotate Feishu/Lark secrets if audit logs or shell history expose credentials.
+
+## Production work monitor on Tencent Cloud
+
+Prepare a CVM or Lighthouse Linux host with Docker, a protected registry login,
+and a host persistent directory:
+
+```bash
+sudo install -d -m 0700 -o 10001 -g 10001 /var/lib/ostag /var/backups/ostag
+sudo install -m 0600 /dev/null /opt/ostag/source/deploy/work-monitor/.env
+docker login <registry>
+docker pull <registry>/ostag-work-monitor@sha256:<approved-digest>
+cd /opt/ostag/source
+export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<approved-digest>
+export OSTAG_MONITOR_DATA_DIR=/var/lib/ostag
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml config
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml up -d --no-build
+curl --fail --silent http://127.0.0.1:8000/healthz
+```
+
+The checked-in image command fixes uvicorn at `--workers 1`; the scheduler writes
+its runtime owner lease to SQLite and doctor rejects zero or duplicate live owners.
+Restrict origin TCP 8000 to EdgeOne origin ranges and an operator bastion. Configure TLS, WAF, 1 MiB body limit,
+rate limits, no caching, and origin proxying exactly as described in
+`deploy/work-monitor/edgeone-origin.md`.
+
+Back up the live database with SQLite's online API and verify a disposable
+restore before every upgrade:
+
+```bash
+sudo scripts/backup_work_monitor.sh backup \
+  /var/lib/ostag/work_monitor.sqlite3 \
+  /var/backups/ostag/work_monitor-$(date -u +%Y%m%dT%H%M%SZ).sqlite3
+sudo scripts/backup_work_monitor.sh restore \
+  /var/backups/ostag/<selected>.sqlite3 /tmp/ostag-restore-check.sqlite3
+rm /tmp/ostag-restore-check.sqlite3
+```
+
+Deploy a new digest only after local gates and backup verification. Roll back
+without changing the database first; if the new release migrated incompatibly,
+stop the service and restore to a new path, then atomically select it:
+
+```bash
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml down
+docker pull <registry>/ostag-work-monitor@sha256:<previous-digest>
+export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<previous-digest>
+sudo scripts/backup_work_monitor.sh restore \
+  /var/backups/ostag/<pre-upgrade>.sqlite3 /var/lib/ostag/work_monitor.restore.sqlite3
+sudo mv /var/lib/ostag/work_monitor.sqlite3 /var/lib/ostag/work_monitor.failed.sqlite3
+sudo mv /var/lib/ostag/work_monitor.restore.sqlite3 /var/lib/ostag/work_monitor.sqlite3
+docker compose -f deploy/work-monitor/docker-compose.yml \
+  -f deploy/work-monitor/docker-compose.production.yml up -d --no-build
+```
+
+These commands are operator instructions, not evidence they were run. Record
+actual external and mobile validation in
+`release/work-monitor-live-validation-template.md`; it intentionally remains
+incomplete until Tencent, EdgeOne, Feishu, Telegram, and device state is inspected.
+
+For local verification, default Compose intentionally uses a named volume so the
+non-root container can initialize SQLite without host ownership mismatch:
+
+```bash
+docker compose -f deploy/work-monitor/docker-compose.yml up -d --build
+docker compose -f deploy/work-monitor/docker-compose.yml down  # volume retained
+```
+
+Run `scripts/work_monitor_container_smoke.sh` to build, verify Feishu/Crypto
+imports, health, SQLite write, restart, and persistence. It retains its unique
+test volume unless `OSTAG_CONTAINER_SMOKE_CLEANUP_VOLUME=1` is explicitly set.

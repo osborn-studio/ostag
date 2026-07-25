@@ -30,6 +30,8 @@ def _event(text: str = "请总结项目") -> NormalizedEvent:
         sender_id="u1",
         text=text,
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
 

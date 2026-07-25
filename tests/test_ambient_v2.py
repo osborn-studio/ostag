@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from ostag.config import load_settings
-from ostag.core.ambient import AmbientMonitor, AmbientScheduler, RequirementSnapshot
+from ostag.core.ambient import (
+    AmbientMonitor,
+    AmbientRunResult,
+    AmbientScheduler,
+    RequirementSnapshot,
+)
 from ostag.core.channel_brain import ChannelBrain, ChannelBrainStore, ChannelPolicy
 from ostag.core.run_ledger import RunLedger
 from ostag.main import main_async
@@ -158,7 +163,7 @@ class CapturingAdapter:
     def __init__(self) -> None:
         self.sent: list[tuple[str, str]] = []
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.sent.append((chat_id, text))
 
 
@@ -230,3 +235,26 @@ async def test_cli_ambient_run_once_dry_json(
     assert payload["delivery"] == "dry_run"
     assert payload["errors"] == 0
     assert payload["messages"] == []
+
+
+async def test_cli_daily_board_once_collects_card(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class FakeScheduler:
+        def __init__(self, config, *, adapter):
+            self.adapter = adapter
+
+        async def run_daily_board_once(self, *, force=True):
+            assert force is True
+            await self.adapter.send_card(
+                "oc_demo", {"schema": "2.0"}, "fallback", delivery_id="daily-board-test"
+            )
+            return AmbientRunResult(checked=1, sent=1)
+
+    monkeypatch.setattr("ostag.main.AmbientScheduler", FakeScheduler)
+    exit_code = await main_async(["ambient", "board-once", "--json"])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sent"] == 1
+    assert payload["cards"] == [{"chat_id": "oc_demo", "card": {"schema": "2.0"}}]

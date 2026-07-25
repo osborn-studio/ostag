@@ -80,6 +80,8 @@ def _event(text: str) -> NormalizedEvent:
         sender_id="ou_sender",
         text=text,
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={
             "event": {
                 "message": {
@@ -142,7 +144,7 @@ async def test_approved_receipt_applies_via_executor(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
         apply_enabled=True,
-        actor_permissions=("ou_sender:write",),
+        actor_permissions=("ou_sender:write", "feishu:ou_sender:write"),
     )
     fake_cli = FakeCLI()
     workflow = AutoBaseWorkflow(config, cli=fake_cli)
@@ -177,7 +179,7 @@ async def test_full_chat_loop_propose_approve_apply(tmp_path: Path) -> None:
     config = _config(
         tmp_path,
         apply_enabled=True,
-        actor_permissions=("ou_sender:write",),
+        actor_permissions=("ou_sender:write", "feishu:ou_sender:write"),
         backend="mock",
     )
     fake_cli = FakeCLI()

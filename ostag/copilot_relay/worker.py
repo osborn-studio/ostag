@@ -1,0 +1,83 @@
+"""Long-running local Copilot Relay reporter entry point."""
+
+from __future__ import annotations
+
+import asyncio
+import signal
+
+from ostag.config import load_settings
+
+from .device_identity import DeviceIdentityStore
+from .osstack_port import OsstackSessionPort
+from .reporter import CopilotReporter
+
+
+async def run_cycle(reporter: CopilotReporter, *, write_enabled: bool) -> None:
+    """Run one reporter cycle, keeping inbound execution independently gated."""
+    async def attempt(operation) -> None:
+        try:
+            await operation()
+        except Exception:  # noqa: BLE001 - each independent operation retries next cycle
+            return
+
+    await attempt(reporter.heartbeat_once)
+    await attempt(reporter.discover_sessions_once)
+    await attempt(reporter.capture_changed_snapshots_once)
+    await attempt(reporter.flush_outbound_once)
+    if write_enabled:
+        await attempt(reporter.poll_inbound_once)
+        await attempt(reporter.apply_inbound_once)
+    await attempt(reporter.flush_receipts_once)
+    await attempt(reporter.flush_outbound_once)
+
+
+async def run_worker(stop: asyncio.Event | None = None) -> None:
+    settings = load_settings().validate()
+    if not settings.copilot_relay_enabled:
+        raise RuntimeError("OSTAG_COPILOT_RELAY_ENABLED must be true")
+    device_identity = None
+    instance_id = settings.copilot_relay_instance_id
+    if settings.device_identity_file.exists():
+        device_identity = DeviceIdentityStore(settings.device_identity_file).load_or_create(
+            display_name=settings.device_display_name
+        )
+        instance_id = device_identity.device_id
+    reporter = CopilotReporter(
+        instance_id=instance_id,
+        secret=settings.copilot_relay_secret,
+        central_url=settings.copilot_relay_central_url,
+        spool_path=settings.copilot_relay_spool_db,
+        port=OsstackSessionPort(
+            binary=settings.copilot_relay_osstack_bin,
+            default_repo=settings.copilot_relay_default_repo,
+        ),
+        device_identity=device_identity,
+    )
+    stop = stop or asyncio.Event()
+    while not stop.is_set():
+        try:
+            await run_cycle(reporter, write_enabled=settings.copilot_relay_write_enabled)
+        except Exception as exc:  # noqa: BLE001 - launch worker retries without logging payloads
+            print(f"copilot relay cycle failed: {type(exc).__name__}", flush=True)
+        try:
+            await asyncio.wait_for(
+                stop.wait(), timeout=settings.copilot_relay_poll_interval_seconds
+            )
+        except TimeoutError:
+            pass
+
+
+def main() -> None:
+    stop = asyncio.Event()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    for name in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(name, stop.set)
+    try:
+        loop.run_until_complete(run_worker(stop))
+    finally:
+        loop.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 try:
     from dotenv import load_dotenv
@@ -11,7 +13,7 @@ except ImportError:  # pragma: no cover
     load_dotenv = None
 
 
-Platform = Literal["slack", "feishu", "lark", "dingtalk"]
+Platform = Literal["slack", "feishu", "lark", "dingtalk", "telegram"]
 BackendName = Literal["mock", "codex_cli", "claude_cli", "openai_api"]
 
 
@@ -31,6 +33,41 @@ def _int(name: str, default: int) -> int:
 
 def _csv(name: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in os.getenv(name, "").split(",") if item.strip())
+
+
+def _json_object(name: str) -> dict[str, object]:
+    value = json.loads(os.getenv(name, "{}"))
+    if not isinstance(value, dict) or not all(isinstance(key, str) and key for key in value):
+        raise ValueError(f"{name} must be a JSON object with non-empty string keys")
+    return value
+
+
+def _instance_secrets() -> tuple[tuple[str, str], ...]:
+    value = _json_object("OSTAG_MONITOR_INSTANCE_SECRETS")
+    if not all(isinstance(secret, str) and secret for secret in value.values()):
+        raise ValueError("OSTAG_MONITOR_INSTANCE_SECRETS values must be non-empty strings")
+    return tuple((key, secret) for key, secret in value.items())  # type: ignore[misc]
+
+
+def _human_credentials() -> tuple[tuple[str, str, str, str, str], ...]:
+    value = _json_object("OSTAG_MONITOR_HUMAN_CREDENTIALS")
+    required = {"platform", "actor_id", "destination_id", "chat_type"}
+    records = []
+    for token, credential in value.items():
+        if not isinstance(credential, dict) or set(credential) != required:
+            raise ValueError(
+                "human credentials require exactly platform, actor_id, destination_id, chat_type"
+            )
+        fields = tuple(
+            credential[key] for key in ("platform", "actor_id", "destination_id", "chat_type")
+        )
+        if not all(isinstance(field, str) and field for field in fields) or fields[-1] not in {
+            "private",
+            "group",
+        }:
+            raise ValueError("human credential fields are invalid")
+        records.append((token, *fields))
+    return tuple(records)  # type: ignore[return-value]
 
 
 @dataclass(frozen=True)
@@ -79,6 +116,7 @@ class Settings:
     feishu_encrypt_key: str = ""
     feishu_use_websocket: bool = True
     feishu_api_base_url: str = "https://open.feishu.cn"
+    feishu_callback_url: str = ""
     lark_app_id: str = ""
     lark_app_secret: str = ""
     lark_verification_token: str = ""
@@ -91,6 +129,11 @@ class Settings:
     dingtalk_client_secret: str = ""
     dingtalk_robot_webhook: str = ""
     dingtalk_robot_secret: str = ""
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_webhook_url: str = ""
+    telegram_group_allowlist: tuple[str, ...] = ()
+    telegram_admin_ids: tuple[str, ...] = ()
     auto_base_enabled: bool = True
     auto_base_identity: str = "user"
     auto_base_history_page_size: int = 30
@@ -115,8 +158,182 @@ class Settings:
     ambient_stale_days: int = 7
     ambient_suppress_days: int = 3
     ambient_max_decisions: int = 3
+    ambient_daily_board_enabled: bool = False
+    ambient_daily_board_hour: int = 12
+    ambient_daily_board_window_minutes: int = 60
+    ambient_timezone: str = "Asia/Shanghai"
+    ambient_daily_board_group_name: str = "Dadao 投研交易 FDE"
+    ambient_daily_board_base_url: str = ""
+    monitor_enabled: bool = False
+    monitor_instance_id: str = "local"
+    monitor_instance_secret: str = ""
+    monitor_enrollment_secret: str = ""
+    monitor_central_url: str = ""
+    monitor_spool_db: Path = Path("./logs/work_monitor_spool.sqlite3")
+    monitor_report_interval_seconds: int = 30
+    monitor_command_poll_seconds: int = 10
+    monitor_osstack_bin: str = "osstack"
+    monitor_osstack_references: Path = Path("./logs/osstack_task_references.json")
+    monitor_server_db: Path = Path("/var/lib/ostag/work_monitor.sqlite3")
+    monitor_admin_token: str = ""
+    monitor_instance_secrets: tuple[tuple[str, str], ...] = ()
+    monitor_human_credentials: tuple[tuple[str, str, str, str, str], ...] = ()
+    monitor_server_max_body_bytes: int = 1_048_576
+    monitor_scheduler_enabled: bool = True
+    monitor_morning_digest_hour: int = 9
+    monitor_evening_digest_hour: int = 19
+    monitor_degraded_seconds: int = 120
+    monitor_offline_seconds: int = 600
+    monitor_notification_retry_cap: int = 5
+    copilot_relay_enabled: bool = False
+    copilot_relay_server_enabled: bool = True
+    copilot_relay_write_enabled: bool = True
+    copilot_status_board_enabled: bool = False
+    copilot_relay_canary_session_ids: tuple[str, ...] = ()
+    copilot_relay_instance_id: str = "local"
+    copilot_relay_secret: str = ""
+    copilot_relay_central_url: str = ""
+    copilot_relay_spool_db: Path = Path("./logs/copilot_relay_spool.sqlite3")
+    copilot_relay_osstack_bin: str = "osstack"
+    copilot_relay_default_repo: str = ""
+    copilot_relay_poll_interval_seconds: int = 5
+    copilot_relay_max_text_chars: int = 4_000
+    device_identity_file: Path = (
+        Path.home() / "Library/Application Support/OStag/device-identity.json"
+    )
+    device_display_name: str = "OStag Device"
+    daily_task_boards_enabled: bool = False
+    daily_task_board_poll_seconds: int = 30
+    daily_task_board_morning_hour: int = 9
+    daily_task_board_evening_hour: int = 18
+    daily_task_board_record_limit: int = 50
+    daily_task_board_feishu_chat_id: str = ""
+    daily_task_board_feishu_base_token: str = ""
+    daily_task_board_feishu_table_id: str = ""
+    daily_task_board_feishu_table_url: str = ""
+    daily_task_board_feishu_manager_ids: tuple[str, ...] = ()
+    daily_task_board_dingtalk_chat_id: str = ""
+    daily_task_board_dingtalk_base_token: str = ""
+    daily_task_board_dingtalk_table_id: str = ""
+    daily_task_board_dingtalk_table_url: str = ""
+    daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
+    def validate(self) -> Settings:
+        if not 0 <= self.ambient_daily_board_hour <= 23:
+            raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_HOUR must be between 0 and 23")
+        if self.ambient_daily_board_window_minutes <= 0:
+            raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_WINDOW_MINUTES must be positive")
+        try:
+            ZoneInfo(self.ambient_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Invalid OSTAG_AMBIENT_TIMEZONE: {self.ambient_timezone}") from exc
+        if self.ambient_daily_board_enabled:
+            if len(self.ambient_chat_ids) != 1:
+                raise ValueError("daily requirement board requires exactly one ambient chat")
+            required = {
+                "auto_base_default_base_token": self.auto_base_default_base_token,
+                "auto_base_default_table_id": self.auto_base_default_table_id,
+                "ambient_daily_board_base_url": self.ambient_daily_board_base_url,
+                "feishu_app_id": self.feishu_app_id,
+                "feishu_app_secret": self.feishu_app_secret,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"daily requirement board requires {missing}")
+            if not self.ambient_daily_board_base_url.startswith("https://"):
+                raise ValueError("daily requirement board URL must use HTTPS")
+            if not 1 <= self.ambient_record_limit <= 500:
+                raise ValueError("daily requirement board record limit must be in 1..500")
+        if (
+            not 0 <= self.monitor_morning_digest_hour <= 23
+            or not 0 <= self.monitor_evening_digest_hour <= 23
+        ):
+            raise ValueError("monitor digest hours must be in 0..23")
+        if self.monitor_morning_digest_hour == self.monitor_evening_digest_hour:
+            raise ValueError("monitor digest hours must be different")
+        if not 0 < self.monitor_degraded_seconds < self.monitor_offline_seconds:
+            raise ValueError("monitor thresholds require 0 < degraded < offline")
+        if self.monitor_notification_retry_cap <= 0:
+            raise ValueError("monitor notification retry cap must be positive")
+        if self.copilot_relay_enabled:
+            required = {
+                "copilot_relay_instance_id": self.copilot_relay_instance_id,
+                "copilot_relay_central_url": self.copilot_relay_central_url,
+                "copilot_relay_osstack_bin": self.copilot_relay_osstack_bin,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"copilot relay requires {missing}")
+            if not self.copilot_relay_secret and not self.device_identity_file.is_file():
+                raise ValueError(
+                    "copilot relay requires copilot_relay_secret or device identity"
+                )
+            if self.copilot_relay_default_repo and not Path(self.copilot_relay_default_repo).is_absolute():
+                raise ValueError("copilot relay default repository must be absolute")
+            url = self.copilot_relay_central_url
+            local_http = url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]"))
+            if not url.startswith("https://") and not local_http:
+                raise ValueError("copilot relay central URL must use HTTPS outside localhost")
+            if self.env.casefold() in {"prod", "production"} and not url.startswith("https://"):
+                raise ValueError("copilot relay production central URL must use HTTPS")
+            if self.copilot_relay_poll_interval_seconds < 1:
+                raise ValueError("copilot relay poll interval must be positive")
+            if not 1 <= self.copilot_relay_max_text_chars <= 16_000:
+                raise ValueError("copilot relay max text must be in 1..16000")
+        if self.daily_task_boards_enabled:
+            if (
+                not 0 <= self.daily_task_board_morning_hour <= 23
+                or not 0 <= self.daily_task_board_evening_hour <= 23
+            ):
+                raise ValueError("daily task board hours must be in 0..23")
+            if self.daily_task_board_morning_hour == self.daily_task_board_evening_hour:
+                raise ValueError("daily task board hours must be different")
+            if self.daily_task_board_poll_seconds < 5:
+                raise ValueError("daily task board poll seconds must be at least 5")
+            if not 1 <= self.daily_task_board_record_limit <= 500:
+                raise ValueError("daily task board record limit must be in 1..500")
+            required = {
+                "daily_task_board_feishu_chat_id": self.daily_task_board_feishu_chat_id,
+                "daily_task_board_feishu_base_token": self.daily_task_board_feishu_base_token,
+                "daily_task_board_feishu_table_id": self.daily_task_board_feishu_table_id,
+                "daily_task_board_feishu_table_url": self.daily_task_board_feishu_table_url,
+                "daily_task_board_dingtalk_chat_id": self.daily_task_board_dingtalk_chat_id,
+                "daily_task_board_dingtalk_base_token": self.daily_task_board_dingtalk_base_token,
+                "daily_task_board_dingtalk_table_id": self.daily_task_board_dingtalk_table_id,
+                "daily_task_board_dingtalk_table_url": self.daily_task_board_dingtalk_table_url,
+                "feishu_app_id": self.feishu_app_id,
+                "feishu_app_secret": self.feishu_app_secret,
+                "dingtalk_client_id": self.dingtalk_client_id,
+                "dingtalk_client_secret": self.dingtalk_client_secret,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"daily task boards require {missing}")
+        telegram_configured = any(
+            (self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url)
+        )
+        if self.env.casefold() in {"prod", "production"} and (
+            self.platform == "telegram" or telegram_configured
+        ):
+            if not all(
+                (self.telegram_bot_token, self.telegram_webhook_secret, self.telegram_webhook_url)
+            ):
+                raise ValueError("Telegram production requires token, secret, and webhook URL")
+            if not self.telegram_webhook_url.startswith("https://"):
+                raise ValueError("Telegram production webhook URL must use HTTPS")
+        return self
 
+    def monitor_human_credentials_dict(self):
+        from ostag.core.identity import Principal
+        from ostag.work_monitor.identity import Destination
+        from ostag.work_monitor.server import HumanCredential
+
+        return {
+            token: HumanCredential(
+                Principal(platform, actor), Destination(platform, destination, chat_type)
+            )
+            for token, platform, actor, destination, chat_type in self.monitor_human_credentials
+        }
 def load_settings(config_path: str | None = None, **overrides: object) -> Settings:
     if load_dotenv:
         load_dotenv(config_path or ".env", override=False)
@@ -171,6 +388,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         feishu_encrypt_key=os.getenv("FEISHU_ENCRYPT_KEY", ""),
         feishu_use_websocket=_bool("FEISHU_USE_WEBSOCKET", True),
         feishu_api_base_url=os.getenv("FEISHU_API_BASE_URL", "https://open.feishu.cn"),
+        feishu_callback_url=os.getenv("FEISHU_CALLBACK_URL", ""),
         lark_app_id=os.getenv("LARK_APP_ID", ""),
         lark_app_secret=os.getenv("LARK_APP_SECRET", ""),
         lark_verification_token=os.getenv("LARK_VERIFICATION_TOKEN", ""),
@@ -183,6 +401,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         dingtalk_client_secret=os.getenv("DINGTALK_CLIENT_SECRET", ""),
         dingtalk_robot_webhook=os.getenv("DINGTALK_ROBOT_WEBHOOK", ""),
         dingtalk_robot_secret=os.getenv("DINGTALK_ROBOT_SECRET", ""),
+        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
+        telegram_webhook_secret=os.getenv("TELEGRAM_WEBHOOK_SECRET", ""),
+        telegram_webhook_url=os.getenv("TELEGRAM_WEBHOOK_URL", ""),
+        telegram_group_allowlist=_csv("TELEGRAM_GROUP_ALLOWLIST"),
+        telegram_admin_ids=_csv("TELEGRAM_ADMIN_IDS"),
         auto_base_enabled=_bool("OSTAG_AUTO_BASE_ENABLED", True),
         auto_base_identity=os.getenv("OSTAG_AUTO_BASE_IDENTITY", "user"),
         auto_base_history_page_size=_int("OSTAG_AUTO_BASE_HISTORY_PAGE_SIZE", 30),
@@ -191,9 +414,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         auto_base_default_table_name=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_NAME", "需求池"),
         auto_base_default_base_token=os.getenv("OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN", ""),
         auto_base_default_table_id=os.getenv("OSTAG_AUTO_BASE_DEFAULT_TABLE_ID", ""),
-        auto_base_download_dir=os.getenv(
-            "OSTAG_AUTO_BASE_DOWNLOAD_DIR", "tmp/ostag-auto-base"
-        ),
+        auto_base_download_dir=os.getenv("OSTAG_AUTO_BASE_DOWNLOAD_DIR", "tmp/ostag-auto-base"),
         auto_base_workdir=os.getenv("OSTAG_AUTO_BASE_WORKDIR", "."),
         lark_cli_bin=os.getenv("LARK_CLI_BIN", "lark-cli"),
         dws_cli_bin=os.getenv("DWS_CLI_BIN", "npx -y dingtalk-workspace-cli"),
@@ -213,6 +434,98 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         ambient_stale_days=_int("OSTAG_AMBIENT_STALE_DAYS", 7),
         ambient_suppress_days=_int("OSTAG_AMBIENT_SUPPRESS_DAYS", 3),
         ambient_max_decisions=_int("OSTAG_AMBIENT_MAX_DECISIONS", 3),
+        ambient_daily_board_enabled=_bool("OSTAG_AMBIENT_DAILY_BOARD_ENABLED", False),
+        ambient_daily_board_hour=_int("OSTAG_AMBIENT_DAILY_BOARD_HOUR", 12),
+        ambient_daily_board_window_minutes=_int("OSTAG_AMBIENT_DAILY_BOARD_WINDOW_MINUTES", 60),
+        ambient_timezone=os.getenv("OSTAG_AMBIENT_TIMEZONE", "Asia/Shanghai"),
+        ambient_daily_board_group_name=os.getenv(
+            "OSTAG_AMBIENT_DAILY_BOARD_GROUP_NAME", "Dadao 投研交易 FDE"
+        ).strip('"'),
+        ambient_daily_board_base_url=os.getenv("OSTAG_AMBIENT_DAILY_BOARD_BASE_URL", ""),
+        monitor_enabled=_bool("OSTAG_MONITOR_ENABLED", False),
+        monitor_instance_id=os.getenv("OSTAG_MONITOR_INSTANCE_ID", "local"),
+        monitor_instance_secret=os.getenv("OSTAG_MONITOR_INSTANCE_SECRET", ""),
+        monitor_enrollment_secret=os.getenv("OSTAG_MONITOR_ENROLLMENT_SECRET", ""),
+        monitor_central_url=os.getenv("OSTAG_MONITOR_CENTRAL_URL", ""),
+        monitor_spool_db=Path(
+            os.getenv("OSTAG_MONITOR_SPOOL_DB", "./logs/work_monitor_spool.sqlite3")
+        ),
+        monitor_report_interval_seconds=_int("OSTAG_MONITOR_REPORT_INTERVAL_SECONDS", 30),
+        monitor_command_poll_seconds=_int("OSTAG_MONITOR_COMMAND_POLL_SECONDS", 10),
+        monitor_osstack_bin=os.getenv("OSTAG_MONITOR_OSSTACK_BIN", "osstack"),
+        monitor_osstack_references=Path(
+            os.getenv("OSTAG_MONITOR_OSSTACK_REFERENCES", "./logs/osstack_task_references.json")
+        ),
+        monitor_server_db=Path(
+            os.getenv("OSTAG_MONITOR_SERVER_DB", "/var/lib/ostag/work_monitor.sqlite3")
+        ),
+        monitor_admin_token=os.getenv("OSTAG_MONITOR_ADMIN_TOKEN", ""),
+        monitor_instance_secrets=_instance_secrets(),
+        monitor_human_credentials=_human_credentials(),
+        monitor_server_max_body_bytes=_int("OSTAG_MONITOR_SERVER_MAX_BODY_BYTES", 1_048_576),
+        monitor_scheduler_enabled=_bool("OSTAG_MONITOR_SCHEDULER_ENABLED", True),
+        monitor_morning_digest_hour=_int("OSTAG_MONITOR_MORNING_DIGEST_HOUR", 9),
+        monitor_evening_digest_hour=_int("OSTAG_MONITOR_EVENING_DIGEST_HOUR", 19),
+        monitor_degraded_seconds=_int("OSTAG_MONITOR_DEGRADED_SECONDS", 120),
+        monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
+        monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
+        copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
+        copilot_relay_server_enabled=_bool("OSTAG_COPILOT_RELAY_SERVER_ENABLED", True),
+        copilot_relay_write_enabled=_bool("OSTAG_COPILOT_RELAY_WRITE_ENABLED", True),
+        copilot_status_board_enabled=_bool("OSTAG_COPILOT_STATUS_BOARD_ENABLED", False),
+        copilot_relay_canary_session_ids=_csv("OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS"),
+        copilot_relay_instance_id=os.getenv("OSTAG_COPILOT_RELAY_INSTANCE_ID", "local"),
+        copilot_relay_secret=os.getenv("OSTAG_COPILOT_RELAY_SECRET", ""),
+        copilot_relay_central_url=os.getenv("OSTAG_COPILOT_RELAY_CENTRAL_URL", ""),
+        copilot_relay_spool_db=Path(
+            os.getenv("OSTAG_COPILOT_RELAY_SPOOL_DB", "./logs/copilot_relay_spool.sqlite3")
+        ),
+        copilot_relay_osstack_bin=os.getenv("OSTAG_COPILOT_RELAY_OSSTACK_BIN", "osstack"),
+        copilot_relay_default_repo=os.getenv("OSTAG_COPILOT_RELAY_DEFAULT_REPO", ""),
+        copilot_relay_poll_interval_seconds=_int("OSTAG_COPILOT_RELAY_POLL_INTERVAL_SECONDS", 5),
+        copilot_relay_max_text_chars=_int("OSTAG_COPILOT_RELAY_MAX_TEXT_CHARS", 4_000),
+        device_identity_file=Path(
+            os.getenv(
+                "OSTAG_DEVICE_IDENTITY_FILE",
+                "~/Library/Application Support/OStag/device-identity.json",
+            )
+        ).expanduser(),
+        device_display_name=os.getenv("OSTAG_DEVICE_DISPLAY_NAME", "OStag Device").strip(),
+        daily_task_boards_enabled=_bool("OSTAG_DAILY_TASK_BOARDS_ENABLED", False),
+        daily_task_board_poll_seconds=_int("OSTAG_DAILY_TASK_BOARD_POLL_SECONDS", 30),
+        daily_task_board_morning_hour=_int("OSTAG_DAILY_TASK_BOARD_MORNING_HOUR", 9),
+        daily_task_board_evening_hour=_int("OSTAG_DAILY_TASK_BOARD_EVENING_HOUR", 18),
+        daily_task_board_record_limit=_int("OSTAG_DAILY_TASK_BOARD_RECORD_LIMIT", 50),
+        daily_task_board_feishu_chat_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_CHAT_ID", ""
+        ),
+        daily_task_board_feishu_base_token=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_BASE_TOKEN", ""
+        ),
+        daily_task_board_feishu_table_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_TABLE_ID", ""
+        ),
+        daily_task_board_feishu_table_url=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_TABLE_URL", ""
+        ),
+        daily_task_board_feishu_manager_ids=_csv(
+            "OSTAG_DAILY_TASK_BOARD_FEISHU_MANAGER_IDS"
+        ),
+        daily_task_board_dingtalk_chat_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_CHAT_ID", ""
+        ),
+        daily_task_board_dingtalk_base_token=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_BASE_TOKEN", ""
+        ),
+        daily_task_board_dingtalk_table_id=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_TABLE_ID", ""
+        ),
+        daily_task_board_dingtalk_table_url=os.getenv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_TABLE_URL", ""
+        ),
+        daily_task_board_dingtalk_manager_ids=_csv(
+            "OSTAG_DAILY_TASK_BOARD_DINGTALK_MANAGER_IDS"
+        ),
     )
     if overrides:
         data = settings.__dict__ | overrides
@@ -220,4 +533,4 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
     if "run_ledger_path" not in overrides and os.getenv("OSTAG_RUN_LEDGER_PATH") is None:
         derived = settings.audit_log.parent / "run_ledger.jsonl"
         settings = Settings(**(settings.__dict__ | {"run_ledger_path": derived}))
-    return settings
+    return settings.validate()

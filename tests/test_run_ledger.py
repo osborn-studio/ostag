@@ -9,7 +9,8 @@ from ostag.config import load_settings
 from ostag.core.event import NormalizedEvent
 from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
-from ostag.core.schemas import Artifact, LedgerEvent, SchemaError, new_id
+from ostag.core.identity import Principal
+from ostag.core.schemas import ActionReceipt, Artifact, LedgerEvent, SchemaError, new_id
 
 
 def _event(text: str = "帮我总结一下") -> NormalizedEvent:
@@ -21,6 +22,8 @@ def _event(text: str = "帮我总结一下") -> NormalizedEvent:
         sender_id="sender1",
         text=text,
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         thread_id="thread1",
     )
 
@@ -127,6 +130,35 @@ def test_ledger_lines_are_stable_json(tmp_path: Path) -> None:
     assert list(record) == sorted(record)
 
 
+def test_legacy_receipt_migrates_only_from_explicit_unique_outer_context(tmp_path: Path) -> None:
+    ledger = RunLedger(tmp_path / "ledger.jsonl")
+    receipt = ActionReceipt(
+        action_id="action_legacy",
+        run_id="run_legacy",
+        title="Pause",
+        target_system="work_monitor",
+        target_object="mac/task",
+        mutation_type="pause",
+    )
+    ledger.record_receipt(receipt, platform="feishu", proposer_id="owner")
+    assert ledger.get_receipt(receipt.action_id).principal == Principal("feishu", "owner")
+
+
+def test_ambiguous_legacy_receipt_is_unbound_instead_of_guessing_platform(tmp_path: Path) -> None:
+    ledger = RunLedger(tmp_path / "ledger.jsonl")
+    receipt = ActionReceipt(
+        action_id="action_legacy",
+        run_id="run_legacy",
+        title="Cancel",
+        target_system="work_monitor",
+        target_object="mac/task",
+        mutation_type="cancel",
+    )
+    ledger.record_receipt(receipt, platform="feishu", proposer_id="same")
+    ledger.record_receipt(receipt, platform="lark", proposer_id="same")
+    assert ledger.get_receipt(receipt.action_id).principal is None
+
+
 @pytest.mark.asyncio
 async def test_runner_creates_run_for_every_handled_event(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log", backend="mock")
@@ -169,6 +201,8 @@ async def test_runner_ignores_non_mention_without_creating_run(tmp_path: Path) -
         sender_id="sender1",
         text="普通闲聊",
         mention_bot=False,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)

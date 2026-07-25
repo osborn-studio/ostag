@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
+
+import pytest
 
 from ostag.config import load_settings
 from ostag.core.ambient import (
@@ -9,6 +11,7 @@ from ostag.core.ambient import (
     AmbientScheduler,
     RequirementSnapshot,
     format_daily_digest,
+    format_weekly_requirement_review,
     snapshots_from_records,
 )
 from ostag.core.channel_brain import ChannelBrain, ChannelBrainStore, ChannelPolicy
@@ -53,9 +56,14 @@ class CapturingAmbientAdapter:
 
     def __init__(self):
         self.sent = []
+        self.cards = []
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         self.sent.append((chat_id, text))
+
+    async def send_card(self, chat_id: str, card: dict, fallback: str, *, delivery_id: str) -> None:
+        assert delivery_id
+        self.cards.append((chat_id, card))
 
 
 def test_ambient_monitor_is_disabled_by_default(tmp_path: Path) -> None:
@@ -114,9 +122,7 @@ def test_ambient_monitor_rate_limits_daily_reminders(tmp_path: Path) -> None:
         "feishu", "oc_demo", [requirement], today=date(2026, 6, 30)
     )
     assert (
-        monitor.evaluate_requirements(
-            "feishu", "oc_demo", [requirement], today=date(2026, 6, 30)
-        )
+        monitor.evaluate_requirements("feishu", "oc_demo", [requirement], today=date(2026, 6, 30))
         == []
     )
 
@@ -133,6 +139,8 @@ async def test_runner_reports_ambient_status(tmp_path: Path, monkeypatch) -> Non
         sender_id="ou_demo",
         text="主动巡检状态",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)
@@ -171,6 +179,8 @@ async def test_runner_reports_ambient_scheduler_status(tmp_path: Path, monkeypat
         sender_id="ou_demo",
         text="主动巡检状态",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await runner.handle_event(event)
@@ -226,6 +236,57 @@ def test_snapshots_from_records_extracts_owner_status_and_staleness() -> None:
             days_stale=20,
         ),
     ]
+
+
+def test_format_weekly_requirement_review_summarizes_risks() -> None:
+    review = format_weekly_requirement_review(
+        [
+            RequirementSnapshot(
+                record_id="rec_overdue",
+                title="交易盯盘",
+                owner="张三",
+                status="开发交付中",
+                priority="高",
+                due_date=date(2026, 7, 1),
+                days_stale=2,
+            ),
+            RequirementSnapshot(
+                record_id="rec_unowned",
+                title="客户周报",
+                owner="",
+                status="方案设计中",
+                due_date=date(2026, 7, 9),
+                days_stale=8,
+            ),
+            RequirementSnapshot(
+                record_id="rec_missing",
+                title="投研报告",
+                owner="李四",
+                status="",
+                due_date=date(2026, 7, 10),
+            ),
+            RequirementSnapshot(
+                record_id="rec_done",
+                title="本周已交付",
+                owner="王五",
+                status="已完成",
+                due_date=date(2026, 7, 3),
+            ),
+        ],
+        today=date(2026, 7, 5),
+        stale_days=7,
+    )
+
+    assert "OS Tag 本周需求回顾" in review
+    assert "未完成：3 项" in review
+    assert "本周完成：1 项" in review
+    assert "逾期：1 项" in review
+    assert "无人负责：1 项" in review
+    assert "缺状态：1 项" in review
+    assert "停滞：1 项" in review
+    assert "「交易盯盘」" in review
+    assert "rec_overdue" in review
+    assert "「客户周报」" in review
 
 
 def test_snapshots_from_records_extracts_feishu_user_ids_and_due_date() -> None:
@@ -299,8 +360,8 @@ def test_format_morning_daily_digest_groups_due_tasks_and_mentions_manager() -> 
         manager_ids=("ou_manager",),
     )
 
-    assert "<at user_id=\"ou_manager\">管理者</at>" in text
-    assert "<at user_id=\"ou_owner\">葛德彬</at>" in text
+    assert '<at user_id="ou_manager">管理者</at>' in text
+    assert '<at user_id="ou_owner">葛德彬</at>' in text
     assert "读取和展示QD资产分配值" in text
     assert "证券字段中可自定义新增字段和内容" not in text
     assert "今日重点任务" in text
@@ -339,8 +400,8 @@ def test_format_evening_daily_digest_summarizes_done_and_open_tasks() -> None:
     assert "仍未完成" in text
     assert "读取和展示QD资产分配值" in text
     assert "证券字段中可自定义新增字段和内容" in text
-    assert "<at user_id=\"ou_owner\">葛德彬</at>" in text
-    assert "<at user_id=\"ou_left\">左士文</at>" in text
+    assert '<at user_id="ou_owner">葛德彬</at>' in text
+    assert '<at user_id="ou_left">左士文</at>' in text
 
 
 async def test_ambient_scheduler_sends_proposal_for_enabled_channel(
@@ -412,16 +473,14 @@ async def test_ambient_scheduler_sends_proposal_for_enabled_channel(
                 "需求持续时长",
             ),
             50,
-        )
+        ),
     ]
     assert adapter.sent == [
         ("oc_demo", "主动巡检建议：需求「交易盯盘」还没有负责人，建议指定 owner。")
     ]
 
 
-async def test_ambient_scheduler_projects_only_existing_fields(
-    tmp_path: Path, monkeypatch
-) -> None:
+async def test_ambient_scheduler_projects_only_existing_fields(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OSTAG_AMBIENT_ENABLED", "true")
     monkeypatch.setenv("OSTAG_AMBIENT_CHAT_IDS", "oc_demo")
     config = load_settings(
@@ -469,9 +528,7 @@ async def test_ambient_scheduler_projects_only_existing_fields(
     )
 
 
-async def test_ambient_scheduler_projects_dingtalk_field_names(
-    tmp_path: Path, monkeypatch
-) -> None:
+async def test_ambient_scheduler_projects_dingtalk_field_names(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("OSTAG_AMBIENT_ENABLED", "true")
     monkeypatch.setenv("OSTAG_AMBIENT_CHAT_IDS", "cid_demo")
     config = load_settings(
@@ -579,7 +636,7 @@ async def test_ambient_scheduler_sends_morning_digest_once_per_day(
         adapter=adapter,
         channel_brain_store=store,
         requirement_connector=connector,
-        now=lambda: datetime(2026, 7, 1, 9, 5),
+        now=lambda: datetime(2026, 7, 1, 1, 5, tzinfo=UTC),
     )
 
     first = await scheduler.run_once()
@@ -589,7 +646,7 @@ async def test_ambient_scheduler_sends_morning_digest_once_per_day(
     assert second.sent == 0
     assert len(adapter.sent) == 1
     assert "今日重点任务" in adapter.sent[0][1]
-    assert "<at user_id=\"ou_manager\">管理者</at>" in adapter.sent[0][1]
+    assert '<at user_id="ou_manager">管理者</at>' in adapter.sent[0][1]
 
 
 async def test_daily_digest_mode_suppresses_continuous_proposals(
@@ -653,3 +710,102 @@ async def test_ambient_scheduler_is_disabled_by_config(tmp_path: Path, monkeypat
 
     assert result.sent == 0
     assert result.skipped == 1
+
+
+def daily_board_config(tmp_path: Path):
+    return load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        ambient_enabled=True,
+        ambient_chat_ids=("oc_demo",),
+        ambient_daily_board_enabled=True,
+        ambient_daily_board_hour=12,
+        ambient_daily_board_window_minutes=60,
+        ambient_timezone="Asia/Shanghai",
+        ambient_daily_board_group_name="Dadao 投研交易 FDE",
+        ambient_daily_board_base_url="https://example.feishu.cn/base/demo?table=tblDemo",
+        auto_base_default_base_token="base_demo",
+        auto_base_default_table_id="tblDemo",
+        feishu_app_id="cli_test",
+        feishu_app_secret="secret",
+    )
+
+
+def daily_board_store(config, tmp_path: Path):
+    store = ChannelBrainStore(config, root=tmp_path)
+    store.save(ChannelBrain(platform="feishu", chat_id="oc_demo",
+                            policy=ChannelPolicy(ambient_enabled=True)))
+    return store
+
+
+async def test_daily_board_sends_on_weekend_shanghai_noon_and_persists_idempotency(tmp_path: Path):
+    config = daily_board_config(tmp_path)
+    store = daily_board_store(config, tmp_path)
+    adapter = CapturingAmbientAdapter()
+    connector = FakeRequirementConnector({"data": {"records": []}})
+    def saturday_noon():
+        return datetime(2026, 7, 18, 4, 5, tzinfo=UTC)
+
+    first = await AmbientScheduler(config, adapter=adapter, channel_brain_store=store,
+                                   requirement_connector=connector, now=saturday_noon).run_once()
+    second = await AmbientScheduler(config, adapter=adapter, channel_brain_store=store,
+                                    requirement_connector=connector, now=saturday_noon).run_once()
+
+    assert first.sent == 1 and first.errors == 0
+    assert second.sent == 0
+    assert len(adapter.cards) == 1
+    assert "12:00（北京时间）" in str(adapter.cards[0][1])
+    assert store.load("feishu", "oc_demo").action_counts["daily_board:2026-07-18"] == 1
+
+
+async def test_daily_board_skips_before_shanghai_noon(tmp_path: Path):
+    config = daily_board_config(tmp_path)
+    adapter = CapturingAmbientAdapter()
+    result = await AmbientScheduler(
+        config, adapter=adapter, channel_brain_store=daily_board_store(config, tmp_path),
+        requirement_connector=FakeRequirementConnector({"data": {"records": []}}),
+        now=lambda: datetime(2026, 7, 18, 3, 59, tzinfo=UTC),
+    ).run_once()
+    assert result.sent == 0
+    assert adapter.cards == []
+
+
+async def test_daily_board_failure_retries_without_success_marker(tmp_path: Path):
+    class FlakyAdapter(CapturingAmbientAdapter):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+
+        async def send_card(
+            self, chat_id: str, card: dict, fallback: str, *, delivery_id: str
+        ) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("temporary send failure")
+            await super().send_card(chat_id, card, fallback, delivery_id=delivery_id)
+
+    config = daily_board_config(tmp_path)
+    store = daily_board_store(config, tmp_path)
+    adapter = FlakyAdapter()
+    scheduler = AmbientScheduler(
+        config, adapter=adapter, channel_brain_store=store,
+        requirement_connector=FakeRequirementConnector({"data": {"records": []}}),
+        now=lambda: datetime(2026, 7, 18, 4, 5, tzinfo=UTC),
+    )
+
+    first = await scheduler.run_once()
+    assert first.errors == 1
+    assert "daily_board:2026-07-18" not in store.load("feishu", "oc_demo").action_counts
+    second = await scheduler.run_once()
+    assert second.sent == 1 and adapter.attempts == 2
+
+
+def test_daily_board_settings_validate_hour_window_and_timezone(tmp_path: Path):
+    with pytest.raises(ValueError, match="HOUR"):
+        load_settings(None, audit_log=tmp_path / "audit.log", ambient_daily_board_hour=24)
+    with pytest.raises(ValueError, match="WINDOW"):
+        load_settings(None, audit_log=tmp_path / "audit.log",
+                      ambient_daily_board_window_minutes=0)
+    with pytest.raises(ValueError, match="TIMEZONE"):
+        load_settings(None, audit_log=tmp_path / "audit.log",
+                      ambient_timezone="Mars/Olympus")

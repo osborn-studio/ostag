@@ -7,9 +7,9 @@ import re
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 from xml.etree import ElementTree
 
@@ -161,11 +161,13 @@ class AutoBaseWorkflow:
         cli: LarkCLI | None = None,
         requirement_connector: RequirementTableConnector | None = None,
         task_connector: TaskConnector | None = None,
+        today: Callable[[], date] | None = None,
     ):
         self.config = config
         self.cli = cli or LarkCLI(config)
         self.requirements = requirement_connector or self._default_requirement_connector(config)
         self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
+        self.today = today or (lambda: datetime.now().date())
         self.channel_brain = ChannelBrainStore(config)
         self.run_ledger = RunLedger(config.run_ledger_path)
         # Set by the runner before each handle() call so proposed receipts
@@ -275,6 +277,15 @@ class AutoBaseWorkflow:
                 "下载并解析需求文档，写入需求池；也可以维护默认需求底表，"
                 "支持分配负责人、更新状态/优先级、创建飞书任务。"
             )
+        if is_requirement_weekly_review_request(event.text):
+            try:
+                return await self._handle_requirement_weekly_review(event)
+            except TimeoutError as exc:
+                return f"需求周报未完成：调用 lark-cli 超时。{exc}"
+            except AutoBaseError as exc:
+                return f"需求周报未完成：{friendly_lark_error(str(exc))}"
+            except Exception as exc:  # noqa: BLE001
+                return f"需求周报未完成：{type(exc).__name__}: {exc}"
         management_command = parse_requirement_management_command(event, self.config)
         if management_command:
             ledger = StageLedger()
@@ -653,6 +664,41 @@ class AutoBaseWorkflow:
                 f"这个群今天的 OS Tag 动作预算已用完：{used}/{policy.daily_action_budget}。"
             )
 
+    async def _handle_requirement_weekly_review(self, event: NormalizedEvent) -> str:
+        from ostag.core.ambient import (
+            AMBIENT_PROJECTION_FIELDS,
+            format_weekly_requirement_review,
+            snapshots_from_records,
+        )
+
+        base = default_base_context(self.config, event)
+        if not base:
+            raise AutoBaseError(
+                "还没有配置默认需求底表。请设置频道策略 default_base/default_table，"
+                "或设置 OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN 和 "
+                "OSTAG_AUTO_BASE_DEFAULT_TABLE_ID。"
+            )
+        resolved = await self._resolve_or_create_table(base)
+        fields = await self._list_fields(resolved.base_token, resolved.table.table_id)
+        existing_names = {field.name for field in fields}
+        projection_fields = [name for name in AMBIENT_PROJECTION_FIELDS if name in existing_names]
+        data = await self.requirements.list_records(
+            resolved.base_token,
+            resolved.table.table_id,
+            projection_fields,
+            limit=self.config.ambient_record_limit,
+        )
+        snapshots = snapshots_from_records(data)
+        table_label = resolved.table.name or resolved.table.table_id
+        return (
+            f"需求表「{table_label}」只读周报：\n"
+            + format_weekly_requirement_review(
+                snapshots,
+                today=self.today(),
+                stale_days=self.config.ambient_stale_days,
+            )
+        )
+
 
 def is_auto_base_request(text: str) -> bool:
     value = text.lower()
@@ -666,6 +712,27 @@ def is_auto_base_status_request(text: str) -> bool:
     has_feature = any(key in value for key in ("自动入表", "入表能力", "入表功能", "需求运营", "需求管理"))
     has_status = any(key in value for key in ("是否", "已经", "上线", "能不能", "可以", "状态"))
     return has_feature and has_status
+
+
+def is_requirement_weekly_review_request(text: str) -> bool:
+    value = text.lower()
+    has_requirement_scope = any(key in value for key in ("需求", "需求表", "需求池", "任务"))
+    has_review = any(key in value for key in ("周报", "本周", "回顾", "复盘", "review"))
+    has_risk = any(
+        key in value
+        for key in (
+            "逾期",
+            "没人负责",
+            "无人负责",
+            "没有负责人",
+            "缺状态",
+            "停滞",
+            "未完成",
+        )
+    )
+    return has_requirement_scope and has_review and (
+        has_risk or any(key in value for key in ("看一下", "整理", "做一个", "做一下", "生成"))
+    )
 
 
 def parse_requirement_management_command(
@@ -1007,8 +1074,6 @@ def build_rows_for_fields(
 
     selected_fields: list[FieldInfo] = []
     rows: list[list[Any]] = []
-    field_names = [field.name for field in writable]
-
     for field in writable:
         if field_value_for_record(
             field,

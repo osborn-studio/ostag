@@ -1,0 +1,8 @@
+{
+  "display_name": "MacBook Pro",
+  "agent_type": "codex",
+  "session_state": "running",
+  "latency_seconds": 2.1,
+  "callback_result": "applied_once",
+  "crossed_routes": 0
+}

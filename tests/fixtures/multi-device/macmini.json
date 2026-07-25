@@ -1,0 +1,8 @@
+{
+  "display_name": "Mac mini",
+  "agent_type": "claude-code",
+  "session_state": "awaiting_decision",
+  "latency_seconds": 3.4,
+  "callback_result": "applied_once",
+  "crossed_routes": 0
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.ostag.monitor-reporter</string>
+  <key>WorkingDirectory</key><string>/Users/gilbertchen/Documents/CODE/agentsteam/ostag-work-monitor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/gilbertchen/.local/bin/uv</string>
+    <string>run</string>
+    <string>ostag</string>
+    <string>monitor</string>
+    <string>reporter</string>
+    <string>start</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/gilbertchen/Documents/CODE/agentsteam/ostag-work-monitor/logs/launchd-monitor.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/gilbertchen/Documents/CODE/agentsteam/ostag-work-monitor/logs/launchd-monitor.err.log</string>
+</dict>
+</plist>

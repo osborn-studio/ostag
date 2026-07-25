@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import json
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 
-from ostag.connectors.requirements import DwsRequirementTableConnector, LarkCLIRequirementTableConnector
+from ostag.connectors.requirements import (
+    DwsRequirementTableConnector,
+    FeishuBaseReadConnector,
+    LarkCLIRequirementTableConnector,
+)
 from ostag.connectors.tasks import LarkCLITaskConnector
 
 
@@ -14,6 +20,112 @@ class CapturingCLI:
     async def json(self, *args):
         self.calls.append(args)
         return {"ok": True, "data": {}}
+
+
+async def test_feishu_base_read_connector_uses_app_identity_and_read_only_search() -> None:
+    requests = []
+
+    def opener(request):
+        requests.append(request)
+        if request.full_url.endswith("/auth/v3/tenant_access_token/internal"):
+            return {"code": 0, "tenant_access_token": "tenant-token"}
+        if "/fields?" in request.full_url:
+            return {
+                "code": 0,
+                "data": {
+                    "items": [
+                        {"field_name": "需求描述"},
+                        {"field_name": "需求状态"},
+                    ]
+                },
+            }
+        return {
+            "code": 0,
+            "data": {
+                "items": [
+                    {"record_id": "rec1", "fields": {"需求描述": "交易盯盘"}}
+                ]
+            },
+        }
+
+    connector = FeishuBaseReadConnector(
+        api_base_url="https://open.feishu.cn",
+        app_id="cli_demo",
+        app_secret="secret-demo",
+        opener=opener,
+    )
+
+    result = await connector.list_records(
+        "appToken", "tblDemo", ["需求描述", "不存在字段", "需求状态"], limit=200
+    )
+
+    assert result["data"]["items"][0]["record_id"] == "rec1"
+    assert len(requests) == 3
+    auth, fields, search = requests
+    assert auth.get_method() == "POST"
+    assert json.loads(auth.data) == {
+        "app_id": "cli_demo",
+        "app_secret": "secret-demo",
+    }
+    assert fields.get_method() == "GET"
+    assert fields.full_url.endswith(
+        "/open-apis/bitable/v1/apps/appToken/tables/tblDemo/fields?page_size=100"
+    )
+    assert search.get_method() == "POST"
+    assert search.full_url.endswith(
+        "/open-apis/bitable/v1/apps/appToken/tables/tblDemo/records/search?page_size=200"
+    )
+    assert search.headers["Authorization"] == "Bearer tenant-token"
+    assert json.loads(search.data) == {"field_names": ["需求描述", "需求状态"]}
+
+
+async def test_feishu_base_read_connector_rejects_api_errors() -> None:
+    responses = iter(
+        [
+            {"code": 0, "tenant_access_token": "tenant-token"},
+            {"code": 0, "data": {"items": [{"field_name": "需求描述"}]}},
+            {"code": 99991672, "msg": "missing scope"},
+        ]
+    )
+    connector = FeishuBaseReadConnector(
+        api_base_url="https://open.feishu.cn",
+        app_id="cli_demo",
+        app_secret="secret-demo",
+        opener=lambda request: next(responses),
+    )
+
+    try:
+        await connector.list_records("appToken", "tblDemo", ["需求描述"])
+    except RuntimeError as exc:
+        assert "99991672" in str(exc)
+        assert "secret-demo" not in str(exc)
+    else:
+        raise AssertionError("expected Feishu API error")
+
+
+async def test_feishu_base_read_connector_preserves_json_http_errors(monkeypatch) -> None:
+    def reject(request, timeout):
+        raise HTTPError(
+            request.full_url,
+            400,
+            "Bad Request",
+            {},
+            BytesIO(b'{"code":99991672,"msg":"missing scope"}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", reject)
+    connector = FeishuBaseReadConnector(
+        api_base_url="https://open.feishu.cn",
+        app_id="cli_demo",
+        app_secret="secret-demo",
+    )
+
+    try:
+        await connector.list_records("appToken", "tblDemo", ["需求描述"])
+    except RuntimeError as exc:
+        assert "99991672" in str(exc)
+    else:
+        raise AssertionError("expected Feishu HTTP error")
 
 
 async def test_requirement_connector_search_builds_lark_cli_arguments() -> None:

@@ -122,6 +122,8 @@ async def test_run_follow_up_cancels_when_run_finished(tmp_path: Path) -> None:
             sender_id="u1",
             text="任务",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
     service.schedule_run_follow_up(
@@ -150,6 +152,8 @@ async def test_run_follow_up_fires_for_unfinished_run(tmp_path: Path) -> None:
             sender_id="u1",
             text="任务",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
     ledger.record_status(run.run_id, "waiting_approval")
@@ -177,6 +181,8 @@ async def test_continue_verb_schedules_follow_up(tmp_path: Path) -> None:
             sender_id="dev",
             text="任务",
             mention_bot=True,
+            chat_type="group",
+            destination_id="chat",
         )
     )
     service = ApprovalService(config, ledger)
@@ -215,6 +221,8 @@ async def test_governed_proposal_schedules_reminder(tmp_path: Path) -> None:
         sender_id="u1",
         text="x",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
     workflow.current_run_id = "run_prop1"
 

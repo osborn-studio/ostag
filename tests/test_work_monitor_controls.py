@@ -1,0 +1,390 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from ostag.core.identity import Principal
+from ostag.core.run_ledger import RunLedger
+from ostag.core.schemas import ActionReceipt, SchemaError
+from ostag.work_monitor.identity import Destination, IdentityError, IdentityStore
+from ostag.work_monitor.models import RemoteCommand
+from ostag.work_monitor.service import WorkMonitorService
+from ostag.work_monitor.store import MonitorStore
+
+
+NOW = datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
+
+
+def _service(tmp_path: Path, *, clock=lambda: NOW):
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    with store.transaction() as db:
+        db.execute(
+            "INSERT INTO instances(instance_id,last_sequence,last_seen_at) VALUES (?,?,?)",
+            ("mac", 1, NOW.isoformat()),
+        )
+        db.execute(
+            "INSERT INTO tasks(instance_id,task_id,title,project,status,agent,progress,"
+            "duration_seconds,summary,error_class,evidence_ref,version,occurred_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "mac",
+                "task-1",
+                "Ship",
+                "ostag",
+                "running",
+                "codex",
+                10,
+                2,
+                "ok",
+                None,
+                None,
+                7,
+                NOW.isoformat(),
+            ),
+        )
+        db.execute(
+            "INSERT INTO events(event_id,instance_id,sequence,kind,occurred_at,payload) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                "hb",
+                "mac",
+                1,
+                "instance.heartbeat",
+                NOW.isoformat(),
+                json.dumps(
+                    {"per_task_capabilities": {"task-1": ["pause", "resume", "retry", "cancel"]}}
+                ),
+            ),
+        )
+    identities = IdentityStore(store.path, enrollment_secret="join")
+    owner = Principal("feishu", "owner")
+    private = Destination("feishu", "private", "private")
+    identities.bind_private(owner=owner, destination=private, enrollment_secret="join")
+    identities.grant(owner, private, owner, "write")
+    ledger = RunLedger(tmp_path / "ledger.jsonl", clock=clock)
+    return WorkMonitorService(store, identities, ledger=ledger, clock=clock), owner, private, ledger
+
+
+def _command_rows(service: WorkMonitorService):
+    with service.store.connect() as db:
+        return db.execute("SELECT payload FROM commands ORDER BY rowid").fetchall()
+
+
+@pytest.mark.parametrize("action", ["pause", "resume", "retry", "cancel"])
+def test_control_proposal_creates_principal_bound_receipt_without_command(
+    tmp_path: Path, action: str
+) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action=action)
+    assert receipt.mutation_type == action
+    assert receipt.principal == owner
+    assert receipt.state == "needs_approval"
+    assert _command_rows(service) == []
+    assert ledger.get_receipt(receipt.action_id).principal == owner
+
+
+def test_approval_does_not_enqueue_and_apply_enqueues_exactly_one_versioned_command(
+    tmp_path: Path,
+) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    approved = service.approve_control(owner, private, receipt.action_id)
+    assert approved.state == "ready_to_apply"
+    assert _command_rows(service) == []
+
+    applying = service.apply_control(owner, private, receipt.action_id)
+    assert applying.state == "applying"
+    rows = _command_rows(service)
+    assert len(rows) == 1
+    command = json.loads(rows[0]["payload"])
+    assert RemoteCommand.from_dict(command).command_id == command["command_id"]
+    assert command["expected_version"] == 7
+    assert command["expected_lifecycle"] == "running"
+    assert command["requested_by"] == "feishu:owner"
+    with pytest.raises(SchemaError):
+        service.apply_control(owner, private, receipt.action_id)
+    assert len(_command_rows(service)) == 1
+
+
+def test_controls_require_write_and_group_cancel_is_rejected(tmp_path: Path) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    reader = Principal("feishu", "reader")
+    service.identities.grant(owner, private, reader, "read")
+    with pytest.raises(IdentityError, match="write"):
+        service.propose_control(reader, private, task_id="task-1", action="pause")
+
+    group = Destination("feishu", "group", "group")
+    service.identities.enroll_group(owner, group, via=private, scope="all")
+    service.identities.grant(owner, group, owner, "write")
+    with pytest.raises(IdentityError, match="private"):
+        service.propose_control(owner, group, task_id="task-1", action="cancel")
+
+
+def test_confirmation_expires_after_five_minutes_and_is_principal_instance_bound(
+    tmp_path: Path,
+) -> None:
+    current = [NOW]
+    service, owner, private, _ = _service(tmp_path, clock=lambda: current[0])
+    receipt = service.propose_control(owner, private, task_id="task-1", action="cancel")
+    attacker = Principal("lark", "owner")
+    other = Destination("lark", "private", "private")
+    service.identities.bind_private(owner=attacker, destination=other, local_admin=True)
+    service.identities.grant(attacker, other, attacker, "write")
+    with pytest.raises(IdentityError, match="principal"):
+        service.approve_control(attacker, other, receipt.action_id)
+
+    current[0] += timedelta(minutes=5, microseconds=1)
+    with pytest.raises(SchemaError) as exc:
+        service.approve_control(owner, private, receipt.action_id)
+    assert exc.value.code == "stale_receipt"
+
+
+def test_receipt_cannot_be_approved_from_another_destination(tmp_path: Path) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    other = Destination("feishu", "other-private", "private")
+    service.identities.bind_private(owner=owner, destination=other, local_admin=True)
+    service.identities.grant(owner, other, owner, "write")
+    with pytest.raises(IdentityError, match="destination"):
+        service.approve_control(owner, other, receipt.action_id)
+
+
+def test_legacy_receipt_without_unique_destination_fails_closed(tmp_path: Path) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = ActionReceipt(
+        action_id="action_legacy_destination",
+        run_id="run_legacy_destination",
+        title="Pause",
+        target_system="work_monitor",
+        target_object="mac/task-1",
+        mutation_type="pause",
+        principal=owner,
+        state="needs_approval",
+        required_permissions=("write",),
+        apply_payload={
+            "instance_id": "mac",
+            "task_id": "task-1",
+            "expected_version": 7,
+            "expected_lifecycle": "running",
+        },
+        created_at=NOW.isoformat(),
+        updated_at=NOW.isoformat(),
+    )
+    ledger.record_receipt(receipt, platform="feishu", chat_id="private", proposer_id="owner")
+    with pytest.raises(IdentityError, match="destination"):
+        service.approve_control(owner, private, receipt.action_id)
+
+
+def test_apply_rejects_stale_task_version_and_cross_instance_replay(tmp_path: Path) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    with service.store.transaction() as db:
+        db.execute("UPDATE tasks SET version=8 WHERE instance_id='mac' AND task_id='task-1'")
+    with pytest.raises(SchemaError) as exc:
+        service.apply_control(owner, private, receipt.action_id)
+    assert exc.value.code == "stale_control"
+    assert _command_rows(service) == []
+
+
+@pytest.mark.parametrize(
+    ("result", "terminal"),
+    [
+        ({"ok": True, "code": "OK", "status": "paused", "version": 8}, "applied"),
+        ({"ok": False, "code": "UNSUPPORTED"}, "failed"),
+        ({"ok": False, "code": "COMMAND_REJECTED"}, "failed"),
+        ({"ok": False, "code": "INDETERMINATE"}, "failed"),
+        ({"ok": True, "status": "running", "version": 8}, "failed"),
+        ({"ok": True, "code": "UNSUPPORTED", "status": "paused"}, "failed"),
+        ({"ok": True, "code": "INDETERMINATE", "status": "paused"}, "failed"),
+        ({"ok": True, "code": "COMMAND_REJECTED", "status": "paused"}, "failed"),
+        ({"ok": True, "code": "FAILED", "status": "paused"}, "failed"),
+    ],
+)
+def test_ack_maps_receipt_terminal_and_never_applies_failure(
+    tmp_path: Path, result: dict, terminal: str
+) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    with pytest.raises(SchemaError) as cross_instance:
+        service.acknowledge_control("other-mac", command_id, result)
+    assert cross_instance.value.code == "command_not_found"
+    updated = service.acknowledge_control("mac", command_id, result)
+    assert updated.state == terminal
+    assert ledger.get_receipt(receipt.action_id).state == terminal
+    assert service.acknowledge_control("mac", command_id, result).state == terminal
+
+
+def test_concurrent_apply_reserves_one_command_by_receipt_in_sqlite(tmp_path: Path) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def apply() -> None:
+        try:
+            barrier.wait()
+            service.apply_control(owner, private, receipt.action_id)
+        except BaseException as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=apply) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    with service.store.connect() as db:
+        rows = db.execute("SELECT action_id,payload FROM commands").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["action_id"] == receipt.action_id
+
+
+def test_ledger_append_failure_retry_reuses_reserved_command(tmp_path: Path, monkeypatch) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    original = ledger.record_receipt_state
+    failed_once = False
+
+    def fail_after_reservation(*args, **kwargs):
+        nonlocal failed_once
+        if kwargs.get("detail") and not failed_once:
+            failed_once = True
+            raise OSError("simulated ledger outage")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "record_receipt_state", fail_after_reservation)
+    with pytest.raises(OSError, match="ledger outage"):
+        service.apply_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+
+    with service.store.connect() as db:
+        rows = db.execute("SELECT command_id,action_id FROM commands").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["action_id"] == receipt.action_id
+
+
+def test_ack_ledger_failure_retries_same_payload_without_duplicate_outbox(
+    tmp_path: Path, monkeypatch
+) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    result = {"ok": True, "code": "OK", "status": "paused", "version": 7}
+    original = ledger.record_receipt_state
+    failed_once = False
+
+    def fail_once(*args, **kwargs):
+        nonlocal failed_once
+        if not failed_once:
+            failed_once = True
+            raise OSError("ledger unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ledger, "record_receipt_state", fail_once)
+    with pytest.raises(OSError, match="ledger unavailable"):
+        service.acknowledge_control("mac", command_id, result)
+    assert service.acknowledge_control("mac", command_id, result).state == "applied"
+    with service.store.connect() as db:
+        assert db.execute("SELECT count(*) FROM notification_outbox").fetchone()[0] == 1
+        row = db.execute(
+            "SELECT status,ledger_synced FROM commands WHERE command_id=?", (command_id,)
+        ).fetchone()
+    assert tuple(row) == ("acked", 1)
+
+
+def test_conflicting_ack_replay_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    service, owner, private, ledger = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    monkeypatch.setattr(
+        ledger, "record_receipt_state", lambda *a, **k: (_ for _ in ()).throw(OSError("down"))
+    )
+    with pytest.raises(OSError):
+        service.acknowledge_control(
+            "mac", command_id, {"ok": True, "code": "OK", "status": "paused", "version": 7}
+        )
+    with pytest.raises(SchemaError) as exc:
+        service.acknowledge_control(
+            "mac", command_id, {"ok": False, "code": "FAILED", "status": "failed"}
+        )
+    assert exc.value.code == "conflicting_ack"
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"ok": 1, "code": "OK", "status": "paused", "version": 7},
+        {
+            "ok": True,
+            "code": {"secret": "sk-abcdefghijklmnopqrstuvwxyz"},
+            "status": "paused",
+            "version": 7,
+        },
+        {"ok": True, "code": "OK", "status": ["paused"], "version": 7},
+        {"ok": True, "code": "OK", "status": "paused", "version": True},
+        {"ok": True, "code": "X" * 65, "status": "paused", "version": 7},
+        {"ok": True, "code": "OK", "status": "paused", "version": 7, "nested": {"secret": "x"}},
+    ],
+)
+def test_ack_rejects_noncanonical_or_nested_payloads(tmp_path: Path, result: dict) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    with pytest.raises(SchemaError) as exc:
+        service.acknowledge_control("mac", command_id, result)
+    assert exc.value.code == "invalid_ack"
+    with service.store.connect() as db:
+        assert db.execute("SELECT count(*) FROM notification_outbox").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("version", [None, 6])
+def test_success_ack_requires_monotonic_integer_version(tmp_path: Path, version: object) -> None:
+    service, owner, private, _ = _service(tmp_path)
+    receipt = service.propose_control(owner, private, task_id="task-1", action="pause")
+    service.approve_control(owner, private, receipt.action_id)
+    service.apply_control(owner, private, receipt.action_id)
+    with service.store.connect() as db:
+        command_id = db.execute("SELECT command_id FROM commands").fetchone()[0]
+    result = {"ok": True, "code": "OK", "status": "paused"}
+    if version is not None:
+        result["version"] = version
+    updated = service.acknowledge_control("mac", command_id, result)
+    assert updated.state == "failed"
+
+
+def test_real_v2_database_migrates_command_ack_columns(tmp_path: Path) -> None:
+    path = tmp_path / "v2.sqlite3"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE commands(command_id TEXT PRIMARY KEY,instance_id TEXT NOT NULL,"
+            "task_id TEXT NOT NULL,status TEXT NOT NULL,payload TEXT NOT NULL,consumed_at TEXT)"
+        )
+        db.execute("PRAGMA user_version=2")
+    store = MonitorStore(path)
+    with store.connect() as db:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(commands)")}
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+    assert {"action_id", "ack_payload", "ack_hash", "ledger_synced"} <= columns
+    assert version >= 4

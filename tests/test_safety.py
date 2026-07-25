@@ -46,6 +46,8 @@ async def test_runner_rejects_too_long_message(tmp_path: Path) -> None:
         sender_id="sender",
         text="hello world",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     reply = await OSTagRunner(config).handle_event(event)
@@ -55,7 +57,9 @@ async def test_runner_rejects_too_long_message(tmp_path: Path) -> None:
 
 
 def test_audit_log_writes_jsonl(tmp_path: Path) -> None:
-    event = NormalizedEvent("feishu", "evt", "chat", "msg", "sender", "hello", True)
+    event = NormalizedEvent(
+        "feishu", "evt", "chat", "msg", "sender", "hello", True, "group", "chat"
+    )
 
     record = write_audit_log(
         tmp_path / "audit.log",
@@ -72,7 +76,9 @@ def test_audit_log_writes_jsonl(tmp_path: Path) -> None:
 
 
 def test_prod_audit_log_hashes_input_without_preview_or_secret(tmp_path: Path) -> None:
-    event = NormalizedEvent("feishu", "evt", "chat", "msg", "sender", "hello", True)
+    event = NormalizedEvent(
+        "feishu", "evt", "chat", "msg", "sender", "hello", True, "group", "chat"
+    )
 
     record = write_audit_log(
         tmp_path / "audit.log",

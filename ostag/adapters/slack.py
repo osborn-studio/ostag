@@ -84,7 +84,7 @@ class SlackAdapter:
             text=text,
         )
 
-    async def send_message(self, chat_id: str, text: str) -> None:
+    async def send_message(self, chat_id: str, text: str, *, delivery_id: str) -> None:
         if not text:
             return
         if self.config.dry_run:
@@ -106,6 +106,8 @@ def _normalize_slack_event(event: dict[str, Any], bot_name: str) -> NormalizedEv
         sender_id=event.get("user") or event.get("bot_id", ""),
         text=cleaned_text,
         mention_bot=_mentions_bot(text, bot_name) or event.get("type") == "app_mention",
+        chat_type="private" if event.get("channel_type") == "im" else "group",
+        destination_id=event.get("channel", ""),
         thread_id=event.get("thread_ts") or event.get("ts"),
         raw=event,
     )

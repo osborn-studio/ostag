@@ -1,0 +1,28 @@
+services:
+  work-monitor:
+    image: ${OSTAG_WORK_MONITOR_IMAGE:-ostag-work-monitor:local}
+    build:
+      context: ../..
+      dockerfile: deploy/work-monitor/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OSTAG_MONITOR_SERVER_DB: /var/lib/ostag/work_monitor.sqlite3
+      OSTAG_COPILOT_RELAY_SERVER_ENABLED: ${OSTAG_COPILOT_RELAY_SERVER_ENABLED:-true}
+      OSTAG_COPILOT_RELAY_WRITE_ENABLED: ${OSTAG_COPILOT_RELAY_WRITE_ENABLED:-false}
+      OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS: ${OSTAG_COPILOT_RELAY_CANARY_SESSION_IDS:-}
+    ports:
+      - "127.0.0.1:${OSTAG_MONITOR_PORT:-8000}:8000"
+    volumes:
+      - work-monitor-data:/var/lib/ostag
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  work-monitor-data:

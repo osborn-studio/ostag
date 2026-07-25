@@ -38,6 +38,8 @@ strategic direction.
   evidence, and ledger audit. Proposal-only: ambient never writes.
 - **Agent-facing CLI** — every command supports compact `--json`; errors
   carry `code`, `message`, `recovery_hint`.
+- **Remote work monitor** — signed OStag/osstack event streams feed a persistent
+  mobile Feishu/Telegram board; pause/resume/retry/cancel stay receipt-governed.
 
 ## Architecture
 
@@ -102,6 +104,11 @@ ostag memory show|remember|sync ...
 
 Full reference: [docs/cli_reference.md](docs/cli_reference.md).
 
+Work-monitor architecture, deterministic smoke, production deployment, backup,
+rollback, and the explicitly incomplete external evidence checklist are in
+[docs/ostag/work_monitor.md](docs/ostag/work_monitor.md) and
+[docs/ostag/deployment.md](docs/ostag/deployment.md).
+
 ## Governance model
 
 | Layer | Mechanism |
@@ -129,6 +136,21 @@ explicit env vars, audit and ledger redact secrets.
   explicit `OSTAG_*_UNSAFE_MODE` flags)
 - Capability declarations per connector: `ostag connector list --json`
   ([docs/connector_capabilities.md](docs/connector_capabilities.md))
+
+## Platform operating model
+
+Feishu and DingTalk should present the same OS Tag operating model to users:
+
+- **Feishu** — Feishu Base requirement pools, Feishu multidimensional-table
+  tasks, internal approval flows, and customer/business group ambient
+  monitoring with status follow-through.
+- **DingTalk** — DingTalk AI Table requirement management, AI Table task
+  objects, internal approval flows, and customer/business group ambient
+  monitoring with status follow-through.
+
+The platform-specific connector owns the system-of-record details, while the
+governance layer stays consistent: receipts, actor permissions, approval
+quorum, four-eyes rules, budgets, follow-ups, and ledger audit.
 
 ## Requirement table operations
 

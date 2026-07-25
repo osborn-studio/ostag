@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.ostag.copilot-relay</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>/opt/ostag/deploy/copilot-relay/run-worker.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/opt/ostag</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__OSTAG_RUNTIME_PATH__</string>
+    <key>OSTAG_COPILOT_CONFIG_FILE</key>
+    <string>/Users/Shared/OStag/copilot-relay.env</string>
+    <key>OSTAG_COPILOT_RELAY_SPOOL_DB</key>
+    <string>/Users/Shared/OStag/device-relay.sqlite3</string>
+    <key>OSSTACK_HOME</key>
+    <string>/Users/Shared/OStag/osstack-copilot</string>
+    <key>OSSTACK_SOCKET</key>
+    <string>/Users/Shared/OStag/osstack-copilot/daemon.sock</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/Shared/OStag/copilot-relay.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/Shared/OStag/copilot-relay.stderr.log</string>
+</dict>
+</plist>

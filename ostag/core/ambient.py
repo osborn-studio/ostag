@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
-from ostag.adapters.base import Adapter
+from ostag.adapters.base import Adapter, StructuredCardAdapter
+from ostag.adapters.feishu_cards import render_requirement_board_card
 from ostag.config import Settings
 from ostag.connectors.requirements import (
     DwsCLI,
@@ -19,6 +22,11 @@ from ostag.core.followups import FollowUpService
 from ostag.core.run_ledger import RunLedger
 from ostag.core.schemas import LedgerEvent, new_id
 from ostag.core.logging import write_audit_log
+from ostag.core.requirement_board import (
+    RequirementSnapshot,
+    analyze_daily_requirement_board,
+    format_daily_requirement_board_text,
+)
 from ostag.workflows.auto_base import LarkCLI, cell_to_text, extract_matching_records
 
 
@@ -33,23 +41,12 @@ AMBIENT_PROJECTION_FIELDS = [
     "状态",
     "优先级",
     "预计/实际完成时间",
+    "需求提出日期",
     "停滞天数",
     "需求持续时长",
 ]
 
 DONE_STATUSES = {"已完成", "完成", "done", "completed"}
-
-
-@dataclass(frozen=True)
-class RequirementSnapshot:
-    record_id: str
-    title: str
-    owner: str = ""
-    owner_ids: tuple[str, ...] = ()
-    status: str = ""
-    priority: str = ""
-    due_date: date | None = None
-    days_stale: int = 0
 
 
 @dataclass(frozen=True)
@@ -59,6 +56,10 @@ class AmbientDecision:
     proposal_only: bool = True
     record_id: str = ""
     rule: str = ""
+
+
+def _delivery_id(chat_id: str, message: str) -> str:
+    return "ambient-" + hashlib.sha256(f"{chat_id}\0{message}".encode()).hexdigest()[:32]
 
 
 @dataclass(frozen=True)
@@ -223,8 +224,8 @@ class AmbientScheduler:
         self.store = channel_brain_store or ChannelBrainStore(config)
         self.requirements = requirement_connector or _requirement_connector_for_platform(config)
         self.monitor = AmbientMonitor(self.store)
-        self.now = now or datetime.now
-        self.today = today or (lambda: self.now().date())
+        self.now = now or (lambda: datetime.now(UTC))
+        self.today = today or (lambda: self._local_now().date())
         self.followups = FollowUpService(config, RunLedger(config.run_ledger_path))
 
     async def run_forever(self) -> None:
@@ -233,9 +234,22 @@ class AmbientScheduler:
             await asyncio.sleep(max(60, self.config.ambient_interval_seconds))
 
     async def run_once(self) -> AmbientRunResult:
+        return await self._run_once()
+
+    async def run_daily_board_once(self, *, force: bool = True) -> AmbientRunResult:
+        return await self._run_once(force_daily_board=force, board_only=True)
+
+    async def _run_once(
+        self, *, force_daily_board: bool = False, board_only: bool = False
+    ) -> AmbientRunResult:
         if self.config.followup_enabled:
             try:
-                await self.followups.run_once(self.adapter.send_message)
+                async def send_followup(chat_id: str, message: str) -> None:
+                    await self.adapter.send_message(
+                        chat_id, message, delivery_id=_delivery_id(chat_id, message)
+                    )
+
+                await self.followups.run_once(send_followup)
             except Exception:  # noqa: BLE001 - follow-up sweep must never kill the scheduler
                 pass
         if not self.config.ambient_enabled:
@@ -265,9 +279,42 @@ class AmbientScheduler:
                     limit=self.config.ambient_record_limit,
                 )
                 snapshots = snapshots_from_records(data)
+                board_due = self.config.ambient_daily_board_enabled and (
+                    force_daily_board or self._daily_board_window_open()
+                )
+                if board_due:
+                    local_today = self._local_now().date()
+                    if not self._daily_board_sent(chat_id, local_today):
+                        board = analyze_daily_requirement_board(snapshots, today=local_today)
+                        card = render_requirement_board_card(
+                            board,
+                            group_name=self.config.ambient_daily_board_group_name,
+                            base_url=self.config.ambient_daily_board_base_url,
+                        )
+                        text = format_daily_requirement_board_text(board)
+                        if isinstance(self.adapter, StructuredCardAdapter):
+                            await self.adapter.send_card(
+                                chat_id,
+                                card,
+                                text,
+                                delivery_id=_delivery_id(chat_id, text),
+                            )
+                        else:
+                            await self.adapter.send_message(
+                                chat_id, text, delivery_id=_delivery_id(chat_id, text)
+                            )
+                        self._record_daily_board(chat_id, local_today)
+                        sent += 1
+                        self._audit(chat_id, text, status="ok")
+                    continue
+                if board_only:
+                    skipped += 1
+                    continue
                 digest = self._due_daily_digest(chat_id, snapshots)
                 if digest:
-                    await self.adapter.send_message(chat_id, digest)
+                    await self.adapter.send_message(
+                        chat_id, digest, delivery_id=_delivery_id(chat_id, digest)
+                    )
                     sent += 1
                     self._record_digest(chat_id)
                     self._audit(chat_id, digest, status="ok")
@@ -291,7 +338,9 @@ class AmbientScheduler:
                     message = "主动巡检建议：\n" + "\n".join(
                         f"- {decision.message}" for decision in decisions
                     )
-                await self.adapter.send_message(chat_id, message)
+                await self.adapter.send_message(
+                    chat_id, message, delivery_id=_delivery_id(chat_id, message)
+                )
                 sent += 1
                 self._record_decisions(chat_id, decisions)
                 self._audit(chat_id, message, status="ok")
@@ -299,6 +348,39 @@ class AmbientScheduler:
                 errors += 1
                 self._audit(chat_id, "", status="error", error=f"{type(exc).__name__}: {exc}")
         return AmbientRunResult(checked=checked, sent=sent, skipped=skipped, errors=errors)
+
+    def _local_now(self) -> datetime:
+        moment = self.now()
+        zone = ZoneInfo(self.config.ambient_timezone)
+        if moment.tzinfo is None:
+            return moment.replace(tzinfo=zone)
+        return moment.astimezone(zone)
+
+    def _daily_board_window_open(self) -> bool:
+        local = self._local_now()
+        minute = local.hour * 60 + local.minute
+        start = self.config.ambient_daily_board_hour * 60
+        return start <= minute < start + self.config.ambient_daily_board_window_minutes
+
+    def _daily_board_sent(self, chat_id: str, today: date) -> bool:
+        brain = self.store.load(self.config.platform, chat_id)
+        return int(brain.action_counts.get(f"daily_board:{today.isoformat()}", 0)) > 0
+
+    def _record_daily_board(self, chat_id: str, today: date) -> None:
+        brain = self.store.load(self.config.platform, chat_id)
+        counts = dict(brain.action_counts)
+        counts[f"daily_board:{today.isoformat()}"] = 1
+        self.store.save(
+            type(brain)(
+                platform=brain.platform,
+                chat_id=brain.chat_id,
+                facts=brain.facts,
+                preferences=brain.preferences,
+                policy=brain.policy,
+                action_counts=counts,
+                updated_at=brain.updated_at,
+            )
+        )
 
     def _due_daily_digest(
         self, chat_id: str, snapshots: list[RequirementSnapshot]
@@ -319,7 +401,7 @@ class AmbientScheduler:
     def _digest_kind_due(self) -> str | None:
         if not self.config.ambient_daily_digest_enabled:
             return None
-        now = self.now()
+        now = self._local_now()
         minute_of_day = now.hour * 60 + now.minute
         window = max(1, self.config.ambient_digest_window_minutes)
         morning = self.config.ambient_morning_digest_hour * 60
@@ -367,6 +449,8 @@ class AmbientScheduler:
                     sender_id="ambient_scheduler",
                     text="ambient scheduled scan",
                     mention_bot=True,
+                    chat_type="group",
+                    destination_id=chat_id,
                 ),
                 executor_id="ambient",
             )
@@ -413,6 +497,8 @@ class AmbientScheduler:
             sender_id="ambient_scheduler",
             text="ambient scheduled scan",
             mention_bot=False,
+            chat_type="group",
+            destination_id=chat_id,
         )
         write_audit_log(
             self.config.audit_log,
@@ -434,13 +520,20 @@ def snapshots_from_records(data: dict[str, Any]) -> list[RequirementSnapshot]:
             RequirementSnapshot(
                 record_id=record.record_id,
                 title=_first_text(record.fields, ("需求名称", "需求描述", "标题", "Name")),
-                owner=_first_text(record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")),
-                owner_ids=_user_ids(record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")),
+                owner=_first_text(
+                    record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")
+                ),
+                owner_ids=_user_ids(
+                    record.fields, ("需求负责人", "负责人", "owner", "Owner", "责任人")
+                ),
                 status=_first_text(record.fields, ("需求状态", "状态", "Status")),
                 priority=_first_text(record.fields, ("优先级", "Priority", "priority")),
                 due_date=_first_date(
                     record.fields,
                     ("预计/实际完成时间", "预计完成时间", "实际完成时间", "due_date", "Due Date"),
+                ),
+                proposed_date=_first_date(
+                    record.fields, ("需求提出日期", "提出日期", "created_at")
                 ),
                 days_stale=_first_int(
                     record.fields, ("停滞天数", "需求持续时长", "days_stale", "Days Stale")
@@ -448,6 +541,52 @@ def snapshots_from_records(data: dict[str, Any]) -> list[RequirementSnapshot]:
             )
         )
     return snapshots
+
+
+def format_weekly_requirement_review(
+    requirements: list[RequirementSnapshot],
+    *,
+    today: date,
+    stale_days: int = 7,
+) -> str:
+    week_start = today.fromordinal(today.toordinal() - today.weekday())
+    open_tasks = [item for item in requirements if not _is_done(item)]
+    completed_this_week = [
+        item
+        for item in requirements
+        if _is_done(item) and item.due_date is not None and week_start <= item.due_date <= today
+    ]
+    overdue = [item for item in open_tasks if item.due_date is not None and item.due_date < today]
+    unowned = [item for item in open_tasks if not item.owner]
+    missing_status = [item for item in requirements if not item.status]
+    stale = [item for item in open_tasks if item.days_stale >= stale_days]
+
+    lines = [
+        f"OS Tag 本周需求回顾（{week_start.isoformat()} 至 {today.isoformat()}）：",
+        (
+            f"总计：{len(requirements)} 项；未完成：{len(open_tasks)} 项；"
+            f"本周完成：{len(completed_this_week)} 项。"
+        ),
+        (
+            f"风险：逾期：{len(overdue)} 项；无人负责：{len(unowned)} 项；"
+            f"缺状态：{len(missing_status)} 项；停滞：{len(stale)} 项。"
+        ),
+    ]
+    sections = (
+        ("逾期需求", overdue),
+        ("无人负责", unowned),
+        ("缺状态", missing_status),
+        (f"停滞超过 {stale_days} 天", stale),
+        ("本周完成", completed_this_week),
+    )
+    for title, tasks in sections:
+        if tasks:
+            lines.append(f"{title}：")
+            lines.extend(_review_task_lines(tasks, today=today))
+    if not any((overdue, unowned, missing_status, stale)):
+        lines.append("本周没有识别到逾期、无人负责、缺状态或停滞需求。")
+    lines.append("建议：优先处理逾期和无人负责项，并在需求表补齐负责人、状态和下一步。")
+    return "\n".join(lines)
 
 
 def format_daily_digest(
@@ -458,14 +597,8 @@ def format_daily_digest(
     manager_ids: tuple[str, ...] = (),
 ) -> str:
     open_tasks = [item for item in requirements if not _is_done(item)]
-    due_tasks = [
-        item
-        for item in open_tasks
-        if item.due_date is None or item.due_date <= today
-    ]
-    completed_today = [
-        item for item in requirements if _is_done(item) and item.due_date == today
-    ]
+    due_tasks = [item for item in open_tasks if item.due_date is None or item.due_date <= today]
+    completed_today = [item for item in requirements if _is_done(item) and item.due_date == today]
     people_to_mention = _ordered_people(due_tasks + completed_today, manager_ids)
     mentions = " ".join(_mention(user_id, name) for user_id, name in people_to_mention)
 
@@ -647,6 +780,35 @@ def _task_lines(tasks: list[RequirementSnapshot], *, today: date) -> list[str]:
         lines.append("；".join(parts))
     if len(tasks) > 20:
         lines.append(f"... 还有 {len(tasks) - 20} 项未展示")
+    return lines
+
+
+def _review_task_lines(tasks: list[RequirementSnapshot], *, today: date) -> list[str]:
+    lines: list[str] = []
+    for task in tasks[:10]:
+        parts = [f"「{task.title or task.record_id}」", task.record_id]
+        if task.owner:
+            parts.append(f"负责人：{task.owner}")
+        else:
+            parts.append("负责人：未指定")
+        if task.status:
+            parts.append(f"状态：{task.status}")
+        else:
+            parts.append("状态：未设置")
+        if task.priority:
+            parts.append(f"优先级：{task.priority}")
+        if task.due_date:
+            due = task.due_date.isoformat()
+            if task.due_date < today and not _is_done(task):
+                due += " 已逾期"
+            elif task.due_date == today:
+                due += " 今日"
+            parts.append(f"截止：{due}")
+        if task.days_stale:
+            parts.append(f"停滞：{task.days_stale} 天")
+        lines.append("- " + "；".join(parts))
+    if len(tasks) > 10:
+        lines.append(f"- ... 还有 {len(tasks) - 10} 项未展示")
     return lines
 
 

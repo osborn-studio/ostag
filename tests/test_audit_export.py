@@ -29,6 +29,8 @@ def _event(platform: str, chat_id: str, text: str = "任务") -> NormalizedEvent
         sender_id="u1",
         text=text,
         mention_bot=True,
+        chat_type="group",
+        destination_id=chat_id,
     )
 
 

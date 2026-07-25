@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from ostag.adapters.base import Adapter
+from ostag.adapters.base import Adapter, StructuredCardAdapter
 from ostag.adapters.dingtalk import DingTalkAdapter, signed_webhook_url
 from ostag.adapters.feishu import FeishuAdapter
 from ostag.adapters.lark import LarkAdapter
@@ -29,6 +29,8 @@ async def test_feishu_raw_event_normalizes_to_core_event() -> None:
     assert event.chat_id == "oc_demo_chat"
     assert event.message_id == "om_demo_message"
     assert event.sender_id == "ou_demo_sender"
+    assert event.chat_type == "group"
+    assert event.destination_id == "oc_demo_chat"
     assert event.mention_bot is True
     assert "下一步" in event.text
 
@@ -72,6 +74,31 @@ async def test_feishu_post_message_normalizes_text_and_link() -> None:
     assert "https://a2ekucppds.feishu.cn/app/TqcVbKRiZa6YClshTqxcOzblncy" in event.text
 
 
+@pytest.mark.asyncio
+async def test_feishu_private_message_does_not_require_explicit_mention() -> None:
+    config = load_settings(None, audit_log=Path("logs/test-audit.log"))
+    raw = {
+        "header": {"event_id": "evt_private"},
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_demo_sender"}},
+            "message": {
+                "chat_id": "oc_private_chat",
+                "chat_type": "p2p",
+                "message_id": "om_private_message",
+                "message_type": "text",
+                "content": json.dumps({"text": "汇报下目前 osstack 的进展"}, ensure_ascii=False),
+                "mentions": [],
+            },
+        },
+    }
+
+    event = await FeishuAdapter(config).normalize_event(raw)
+
+    assert event.chat_type == "private"
+    assert event.mention_bot is True
+    assert event.text == "汇报下目前 osstack 的进展"
+
+
 def test_platform_adapters_implement_contract(tmp_path: Path) -> None:
     config = load_settings(None, audit_log=tmp_path / "audit.log")
 
@@ -93,6 +120,8 @@ async def test_slack_app_mention_normalizes_to_core_event() -> None:
     assert event.chat_id == "C123456"
     assert event.message_id == "1710000000.000100"
     assert event.sender_id == "U123456"
+    assert event.chat_type == "group"
+    assert event.destination_id == "C123456"
     assert event.mention_bot is True
     assert event.thread_id == "1710000000.000100"
     assert event.text == "Summarize the launch blockers and next action."
@@ -110,6 +139,8 @@ async def test_dingtalk_robot_message_normalizes_to_core_event() -> None:
     assert event.chat_id == "cid_demo_conversation"
     assert event.message_id == "msg_demo_message"
     assert event.sender_id == "staff_demo_sender"
+    assert event.chat_type == "group"
+    assert event.destination_id == "cid_demo_conversation"
     assert event.mention_bot is True
     assert event.text == "请总结这个项目下一步应该做什么"
 
@@ -128,6 +159,7 @@ async def test_dingtalk_direct_message_normalizes_nested_json_text() -> None:
     event = await DingTalkAdapter(config).normalize_event(raw)
 
     assert event.platform == "dingtalk"
+    assert event.chat_type == "private"
     assert event.chat_id == "cid_direct"
     assert event.message_id == "msg_direct"
     assert event.sender_id == "staff_demo_sender"
@@ -180,9 +212,12 @@ async def test_non_mention_message_is_ignored(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_path: Path) -> None:
+async def test_feishu_live_start_runs_blocking_sdk_in_thread(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     started = []
     threaded = []
+    client_options = []
 
     class FakeProcessor:
         def __init__(self, callback):
@@ -203,7 +238,7 @@ async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_pa
 
     class FakeClient:
         def __init__(self, *_args, **_kwargs):
-            pass
+            client_options.append(_kwargs)
 
         def start(self):
             started.append(True)
@@ -214,7 +249,7 @@ async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_pa
 
     fake_lark = types.SimpleNamespace(
         EventDispatcherHandler=FakeEventDispatcherHandler,
-        LogLevel=types.SimpleNamespace(INFO="INFO"),
+        LogLevel=types.SimpleNamespace(INFO="INFO", ERROR="ERROR"),
         ws=types.SimpleNamespace(Client=FakeClient),
     )
     fake_dispatcher = types.SimpleNamespace(P2ImMessageReceiveV1Processor=FakeProcessor)
@@ -235,6 +270,8 @@ async def test_feishu_live_start_runs_blocking_sdk_in_thread(monkeypatch, tmp_pa
 
     assert started == [True]
     assert threaded
+    assert client_options[0]["log_level"] == "ERROR"
+    assert "ticket" not in capsys.readouterr().out.casefold()
 
 
 @pytest.mark.asyncio
@@ -267,6 +304,8 @@ async def test_feishu_reply_includes_required_message_type(monkeypatch, tmp_path
         sender_id="ou_demo",
         text="hello",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
     )
 
     await adapter.reply(event, "live validation ok")
@@ -274,6 +313,36 @@ async def test_feishu_reply_includes_required_message_type(monkeypatch, tmp_path
     payload = json.loads(captured["body"].decode())
     assert payload["msg_type"] == "text"
     assert json.loads(payload["content"]) == {"text": "live validation ok"}
+
+
+@pytest.mark.asyncio
+async def test_feishu_send_card_uses_interactive_message(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    async def fake_token():
+        return "tenant-token"
+
+    async def fake_to_thread(func, req):
+        captured["url"] = req.full_url
+        captured["body"] = req.data
+        return {"code": 0}
+
+    config = load_settings(None, audit_log=tmp_path / "audit.log", dry_run=False,
+                           feishu_app_id="cli_test", feishu_app_secret="secret_test")
+    adapter = FeishuAdapter(config)
+    monkeypatch.setattr(adapter, "_tenant_access_token", fake_token)
+    monkeypatch.setattr("ostag.adapters.feishu.asyncio.to_thread", fake_to_thread)
+    card = {"schema": "2.0", "body": {"elements": []}}
+
+    await adapter.send_card("oc_demo", card, "fallback", delivery_id="daily-board-1")
+
+    payload = json.loads(captured["body"].decode())
+    assert payload["receive_id"] == "oc_demo"
+    assert payload["msg_type"] == "interactive"
+    assert json.loads(payload["content"]) == card
+    assert "receive_id_type=chat_id" in captured["url"]
+    assert "uuid=daily-board-1" in captured["url"]
+    assert isinstance(adapter, StructuredCardAdapter)
 
 
 @pytest.mark.asyncio
@@ -297,6 +366,8 @@ async def test_dingtalk_reply_uses_session_webhook(monkeypatch, tmp_path: Path) 
         sender_id="staff",
         text="hello",
         mention_bot=True,
+        chat_type="group",
+        destination_id="chat",
         raw={"sessionWebhook": "https://oapi.dingtalk.com/robot/sendBySession?session=demo"},
     )
 
@@ -310,9 +381,7 @@ async def test_dingtalk_reply_uses_session_webhook(monkeypatch, tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_dingtalk_proactive_send_falls_back_to_dws_bot(
-    monkeypatch, tmp_path: Path
-) -> None:
+async def test_dingtalk_proactive_send_falls_back_to_dws_bot(monkeypatch, tmp_path: Path) -> None:
     captured = {}
 
     class FakeProcess:
@@ -341,7 +410,7 @@ async def test_dingtalk_proactive_send_falls_back_to_dws_bot(
         fake_create_subprocess_exec,
     )
 
-    await adapter.send_message("cid_demo", "OS Tag 18 点需求复盘")
+    await adapter.send_message("cid_demo", "OS Tag 18 点需求复盘", delivery_id="digest-1")
 
     assert captured["args"] == (
         "dws",
@@ -390,9 +459,41 @@ async def test_dingtalk_proactive_send_normalizes_at_tags(monkeypatch, tmp_path:
         fake_create_subprocess_exec,
     )
 
-    await adapter.send_message("cid_demo", '<at user_id="ou_manager">管理者</at> 早上好')
+    await adapter.send_message(
+        "cid_demo", '<at user_id="ou_manager">管理者</at> 早上好', delivery_id="digest-2"
+    )
 
     assert captured["args"][11] == "@管理者 早上好"
+
+
+@pytest.mark.asyncio
+async def test_dingtalk_proactive_card_posts_native_payload(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    async def capture(url, payload):
+        captured["url"] = url
+        captured["payload"] = payload
+
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        dry_run=False,
+        platform="dingtalk",
+        dingtalk_robot_webhook="https://oapi.dingtalk.com/robot/send?access_token=test",
+        dingtalk_robot_secret="secret",
+    )
+    adapter = DingTalkAdapter(config)
+    monkeypatch.setattr(adapter, "_post_json", capture)
+    payload = {
+        "msgtype": "markdown",
+        "markdown": {"title": "今日作战看板", "text": "任务"},
+        "at": {"atUserIds": ["owner"], "isAtAll": False},
+    }
+
+    await adapter.send_card("cid_demo", payload, "fallback", delivery_id="digest-card-1")
+
+    assert captured["url"].startswith("https://oapi.dingtalk.com/robot/send")
+    assert captured["payload"] == payload
 
 
 def test_dingtalk_signed_webhook_url_uses_timestamp_and_secret() -> None:
