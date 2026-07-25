@@ -1,0 +1,42 @@
+{
+  "task_id": "v03-upgrade-p0-baseline",
+  "capability": "code.test",
+  "prompt": "OStag v0.3 upgrade Phase 0: verify repository baseline (pytest, ruff, deterministic two-device acceptance with crossed_routes=0) and confirm docs/upgrade/v0.3-baseline.md exists. Builder is Claude (external); this loop is the verification harness of record.",
+  "priority": 95,
+  "source": "task_queue",
+  "context": {
+    "handoff": "/Users/osborn/Desktop/inbox/ostag_v0.3_upgrade_task.md",
+    "phase": "P0",
+    "branch": "docs/v0.3-p0-baseline"
+  },
+  "evaluation": [
+    {
+      "id": "pytest-full",
+      "mode": "command",
+      "description": "Full pytest suite passes (774 baseline).",
+      "command": "uv run pytest -q",
+      "required": true
+    },
+    {
+      "id": "ruff-clean",
+      "mode": "command",
+      "description": "Ruff static analysis passes.",
+      "command": "uv run ruff check .",
+      "required": true
+    },
+    {
+      "id": "two-device-acceptance",
+      "mode": "command",
+      "description": "Deterministic dual-device fixture acceptance reports crossed_routes=0.",
+      "command": "uv run python scripts/multi_device_copilot_acceptance.py --fixtures tests/fixtures/multi-device | grep -q 'crossed_routes=0'",
+      "required": true
+    },
+    {
+      "id": "baseline-doc-exists",
+      "mode": "command",
+      "description": "Phase 0 baseline report exists.",
+      "command": "test -s docs/upgrade/v0.3-baseline.md",
+      "required": true
+    }
+  ]
+}
