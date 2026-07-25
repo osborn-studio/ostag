@@ -10,7 +10,11 @@ uv run --locked python -m compileall ostag
 uv run ruff check ostag tests
 collection_output="$(mktemp)"
 trap 'rm -f "$collection_output"' EXIT
-uv run pytest --collect-only -q >"$collection_output"
+if ! uv run pytest --collect-only -q >"$collection_output" 2>&1; then
+  echo "pytest collection failed:" >&2
+  cat "$collection_output" >&2
+  exit 1
+fi
 missing_tests="$(comm -23 \
   <(find tests -maxdepth 1 -type f -name 'test_*.py' -print | sort) \
   <(sed -n 's/^\(tests\/test_[^:]*\.py\)::.*$/\1/p' "$collection_output" | sort -u))"
