@@ -685,3 +685,54 @@ def test_migration_v24_is_additive_from_v23_fixture(tmp_path: Path) -> None:
         ).fetchone()
         assert thread["work_thread_key"] == "macbook/task-1"
     assert RoutingDecisionStore(store).record(OWNER, decision()) is True
+
+
+# -- round-2 residual regressions ---------------------------------------------
+
+
+class TestDerivationSafety:
+    def test_derivation_failure_never_replaces_router_outcome(self, env, monkeypatch):
+        """An sqlite error during the post-hoc read must neither replace a
+        successful result nor mask a router exception."""
+        explainer, decisions, _ = env
+
+        def boom(*_a, **_k):
+            raise sqlite3.OperationalError("database is locked")
+
+        monkeypatch.setattr(explainer, "_session_considered", boom)
+        result, explanation = explainer.handle_text(
+            OWNER, "请立即 deploy", decision_id="rd_da", decided_at=NOW
+        )
+        assert result.state == "requires_approval"  # router outcome intact
+        assert explanation.reason_code == "explanation_error"
+        assert decisions.get("rd_da").reason_code == "explanation_error"
+        with pytest.raises(RelayRoutingError):  # original exception, not sqlite
+            explainer.handle_text(STRANGER, "hi", decision_id="rd_db", decided_at=NOW)
+
+    def test_quoted_approval_candidate_is_labeled_quoted_session(self, env):
+        explainer, _, _ = env
+        result, explanation = explainer.handle_text(
+            OWNER, "请立即 deploy", quote_message_id="om_decision_7",
+            decision_id="rd_qa", decided_at=NOW,
+        )
+        assert result.state == "requires_approval"
+        assert explanation.candidates[0].reasons[0].code == "quoted_session"
+
+    def test_failed_confirmation_keeps_proposal_routing_context(self, env):
+        explainer, decisions, _ = env
+        proposal_result, _ = explainer.handle_text(
+            OWNER, "新任务：写文档", event_id="evt_fp", decision_id="rd_fp", decided_at=NOW
+        )
+        with pytest.raises(RelayRoutingError):
+            explainer.confirm_task_proposal(
+                OWNER, proposal_result.outbound,
+                confirmed_at="2026-07-15T00:00:00Z",  # long past expiry
+                decision_id="rd_fc", decided_at=NOW,
+            )
+        explanation = decisions.get("rd_fc")
+        assert explanation.reason_code == "proposal_expired"
+        assert explanation.run_id == "run_1"  # from the proposal binding
+        candidate = explanation.candidates[0]
+        assert candidate.executor_id == "sess_1"
+        assert candidate.reasons[0].code == "proposal_target"
+        assert explanation.selected is None

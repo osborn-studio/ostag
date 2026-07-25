@@ -109,19 +109,24 @@ class RouteExplainer:
                 principal, text, quote_message_id=quote_message_id, event_id=event_id
             )
         except (RelayRoutingError, PermissionError) as exc:
-            self._record_safe(
+            error = exc  # except-name is unbound after the block; lambdas need a local
+            self._derive_and_record_safe(
                 principal,
-                self._explain_error(
-                    principal, exc, quote_message_id,
+                lambda: self._explain_error(
+                    principal, error, quote_message_id,
                     decision_id=decision_id, decided_at=decided_at,
                 ),
+                decision_id, decided_at,
             )
             raise
-        decision = self._explain_result(
-            principal, result, quote_message_id,
-            decision_id=decision_id, decided_at=decided_at,
+        decision = self._derive_and_record_safe(
+            principal,
+            lambda: self._explain_result(
+                principal, result, quote_message_id,
+                decision_id=decision_id, decided_at=decided_at,
+            ),
+            decision_id, decided_at,
         )
-        self._record_safe(principal, decision)
         return result, decision
 
     def request_snapshot(
@@ -135,19 +140,24 @@ class RouteExplainer:
         try:
             result = self.service.request_snapshot(principal, event_id=event_id)
         except (RelayRoutingError, PermissionError) as exc:
-            self._record_safe(
+            error = exc
+            self._derive_and_record_safe(
                 principal,
-                self._explain_error(
-                    principal, exc, None, decision_id=decision_id, decided_at=decided_at
+                lambda: self._explain_error(
+                    principal, error, None, decision_id=decision_id, decided_at=decided_at
                 ),
+                decision_id, decided_at,
             )
             raise
-        decision = self._explain_result(
-            principal, result, None,
-            decision_id=decision_id, decided_at=decided_at,
-            success_code="snapshot_requested",
+        decision = self._derive_and_record_safe(
+            principal,
+            lambda: self._explain_result(
+                principal, result, None,
+                decision_id=decision_id, decided_at=decided_at,
+                success_code="snapshot_requested",
+            ),
+            decision_id, decided_at,
         )
-        self._record_safe(principal, decision)
         return result, decision
 
     def confirm_task_proposal(
@@ -164,22 +174,28 @@ class RouteExplainer:
                 principal, proposal, confirmed_at=confirmed_at
             )
         except (RelayRoutingError, PermissionError) as exc:
-            self._record_safe(
+            error = exc
+            self._derive_and_record_safe(
                 principal,
-                self._explain_error(
-                    principal, exc, None,
+                # The considered session is the PROPOSAL's binding — known
+                # routing context that must not be discarded on failure.
+                lambda: self._explain_error(
+                    principal, error, None,
                     decision_id=decision_id, decided_at=decided_at,
-                    derive_candidates=False,  # the considered session is the
-                    # proposal's binding, not the principal's current session
+                    binding=getattr(proposal, "binding", None),
                 ),
+                decision_id, decided_at,
             )
             raise
-        decision = self._explain_result(
-            principal, result, None,
-            decision_id=decision_id, decided_at=decided_at,
-            success_code="proposal_confirmed",
+        decision = self._derive_and_record_safe(
+            principal,
+            lambda: self._explain_result(
+                principal, result, None,
+                decision_id=decision_id, decided_at=decided_at,
+                success_code="proposal_confirmed",
+            ),
+            decision_id, decided_at,
         )
-        self._record_safe(principal, decision)
         return result, decision
 
     # -- derivation (all post-hoc, all read-only) ------------------------------
@@ -243,7 +259,9 @@ class RouteExplainer:
                     (
                         self._candidate_from_session(
                             session,
-                            code="current_session",
+                            code=(
+                                "quoted_session" if quote_message_id else "current_session"
+                            ),
                             message="The session that would receive this instruction.",
                         ),
                     )
@@ -284,7 +302,7 @@ class RouteExplainer:
         *,
         decision_id: str,
         decided_at: str,
-        derive_candidates: bool = True,
+        binding: SessionBinding | None = None,
     ) -> RoutingDecision:
         message = str(error)
         if isinstance(error, PermissionError):
@@ -295,11 +313,25 @@ class RouteExplainer:
                 "routing_error",
             )
         try:
-            session = (
-                self._session_considered(principal, quote_message_id)
-                if derive_candidates
-                else None
-            )
+            if binding is not None:
+                # Known routing context (e.g. a proposal's binding): keep it —
+                # the failure is about the attempt, not the target's identity.
+                candidate = self._candidate_from_binding(
+                    binding,
+                    code="proposal_target",
+                    message="The session the failed attempt targeted.",
+                )
+                return RoutingDecision(
+                    id=decision_id,
+                    run_id=binding.run_id or decision_id,
+                    reason_code=reason_code,
+                    reason=f"The router rejected this message: {_clean(message)}",
+                    decided_at=decided_at,
+                    candidates=(candidate,),
+                    selected=None,
+                    policy_snapshot_id=f"ostag:{binding.instance_id}:unversioned",
+                )
+            session = self._session_considered(principal, quote_message_id)
             candidates: tuple[RoutingCandidate, ...] = ()
             if session is not None and reason_code in (
                 "access_denied",
@@ -407,6 +439,36 @@ class RouteExplainer:
             candidates=(),
             selected=None,
         )
+
+    def _derive_and_record_safe(
+        self,
+        principal: Principal,
+        derive,
+        decision_id: str,
+        decided_at: str,
+    ) -> RoutingDecision:
+        """The COMPLETE explanation pipeline — derivation and recording — is
+        best-effort: no exception here (schema, sqlite, anything) may replace
+        the routing result or mask a router exception (Phase 3 shadow-hook
+        contract). A failed derivation records an ``explanation_error``
+        decision built from pure values."""
+        try:
+            decision = derive()
+        except Exception:  # noqa: BLE001 - derivation must not affect routing
+            decision = RoutingDecision(
+                id=decision_id,
+                run_id=decision_id,
+                reason_code="explanation_error",
+                reason=(
+                    "The explanation could not be derived; the actual routing "
+                    "outcome is unchanged."
+                ),
+                decided_at=decided_at,
+                candidates=(),
+                selected=None,
+            )
+        self._record_safe(principal, decision)
+        return decision
 
     def _record_safe(self, principal: Principal, decision: RoutingDecision) -> None:
         """Best-effort: a recording failure must never change the routing
