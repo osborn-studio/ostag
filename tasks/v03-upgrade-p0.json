@@ -27,8 +27,8 @@
     {
       "id": "two-device-acceptance",
       "mode": "command",
-      "description": "Deterministic dual-device fixture acceptance reports crossed_routes=0.",
-      "command": "uv run python scripts/multi_device_copilot_acceptance.py --fixtures tests/fixtures/multi-device | grep -q 'crossed_routes=0'",
+      "description": "Deterministic dual-device fixture acceptance exits 0 AND reports status=passed with crossed_routes=0 (pipefail preserves the script's own exit status).",
+      "command": "bash -o pipefail -c \"uv run python scripts/multi_device_copilot_acceptance.py --fixtures tests/fixtures/multi-device | grep -q 'status=passed .*crossed_routes=0'\"",
       "required": true
     },
     {
