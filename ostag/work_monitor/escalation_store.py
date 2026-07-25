@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 
 from ostag.core.completion import ActorRef
+from ostag.core.access_snapshot import _require_utc_datetime
 from ostag.core.escalation import (
     AUDIENCE_VIEWS,
     EscalationAcknowledgement,
@@ -164,6 +165,7 @@ class EscalationStore:
                 message=f"Cannot transition a HumanEscalation to {to_state!r}",
                 recovery_hint="Use acknowledged, resolved, expired, or superseded.",
             )
+        _require_utc_datetime(at, "at", "EscalationTransition")
         with self.store.transaction() as connection:
             row = connection.execute(
                 "SELECT escalation_json, active_dedupe_key FROM human_escalations "
@@ -414,6 +416,7 @@ class EscalationStore:
         """Expire every overdue open/acknowledged escalation. Best-effort per
         candidate: one concurrent terminal decision must not stop the sweep.
         Returns (scanned, expired)."""
+        _require_utc_datetime(at, "at", "EscalationExpireSweep")
         query = (
             "SELECT escalation_json FROM human_escalations WHERE instance_id=? "
             "AND state IN ('open','acknowledged')"
@@ -443,13 +446,15 @@ class EscalationStore:
                 )
                 if changed:
                     expired += 1
-            except SchemaError:
-                pass  # independent best-effort transitions, as upstream
+            except Exception:  # noqa: BLE001 - each candidate is independent (upstream
+                pass  # isolates every failure; one bad row must not stop the sweep)
         return scanned, expired
 
     # -- reads ----------------------------------------------------------------
 
     def get(self, instance_id: str, escalation_id: str) -> HumanEscalation:
+        """Internal, UNREDACTED read; not identity-gated. External consumers
+        go through ``personal_views`` / ``admin_views`` (gated + sanitized)."""
         with self.store.connect() as connection:
             row = connection.execute(
                 "SELECT escalation_json FROM human_escalations "
@@ -467,6 +472,7 @@ class EscalationStore:
     def list_for_thread(
         self, instance_id: str, work_thread_key: str
     ) -> tuple[HumanEscalation, ...]:
+        """Internal, UNREDACTED read; not identity-gated (see ``get``)."""
         with self.store.connect() as connection:
             rows = connection.execute(
                 "SELECT escalation_json FROM human_escalations WHERE instance_id=? "
@@ -544,7 +550,7 @@ class EscalationStore:
     def _render(instance_id: str, escalation: HumanEscalation) -> dict:
         """Sanitized, single-line-safe projection for boards/messages."""
         rendered = {
-            "instanceId": instance_id,
+            "instanceId": _clean(instance_id, 80),
             "id": _clean(escalation.id, 80),
             "workThreadKey": _clean(escalation.work_thread_key, 120),
             "class": escalation.escalation_class,

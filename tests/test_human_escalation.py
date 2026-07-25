@@ -173,6 +173,68 @@ class TestHumanEscalationModel:
             HumanEscalation.from_dict(data)
         assert excinfo.value.code == "missing_field"
 
+    def test_superseded_by_id_only_valid_for_superseded_state(self):
+        with pytest.raises(SchemaError):
+            escalation(superseded_by_id="esc_2")  # state=open
+
+    def test_terminal_reason_only_valid_for_terminal_states(self):
+        with pytest.raises(SchemaError):
+            escalation(terminal_reason="why")  # state=open
+        with pytest.raises(SchemaError):
+            escalation(
+                state="resolved",
+                terminal_reason="why",
+                resolution=EscalationResolution(actor=HUMAN, resolved_at=LATER),
+            )
+
+    def test_attribution_at_or_after_deadline_is_invalid_at_model_layer(self):
+        """Closes the open() bypass: a pre-attributed escalation cannot carry
+        human attribution at or past its own deadline."""
+        with pytest.raises(SchemaError):
+            escalation(
+                state="acknowledged",
+                expires_at=DEADLINE,
+                acknowledgement=EscalationAcknowledgement(actor=HUMAN, acknowledged_at=DEADLINE),
+            )
+        with pytest.raises(SchemaError):
+            escalation(
+                state="resolved",
+                expires_at=DEADLINE,
+                resolution=EscalationResolution(actor=HUMAN, resolved_at=AFTER_DEADLINE),
+            )
+        ok = escalation(
+            state="acknowledged",
+            expires_at=DEADLINE,
+            acknowledgement=EscalationAcknowledgement(actor=HUMAN, acknowledged_at=LATER),
+        )
+        assert ok.state == "acknowledged"
+
+    def test_metadata_false_is_rejected_not_coerced(self):
+        hint = ActionHint(kind="none").to_dict()
+        hint["metadata"] = False
+        with pytest.raises(SchemaError):
+            ActionHint.from_dict(hint)
+
+    def test_explicit_empty_options_list_is_rejected(self):
+        data = escalation().to_dict()
+        data["options"] = []
+        with pytest.raises(SchemaError):
+            HumanEscalation.from_dict(data)
+
+    def test_actor_typing_at_escalation_boundary(self):
+        with pytest.raises(SchemaError):  # a raw dict is not an ActorRef
+            EscalationAcknowledgement(actor={"actorId": "a"}, acknowledged_at=LATER)
+        with pytest.raises(SchemaError):  # non-string actor fields rejected
+            EscalationResolution(actor=ActorRef(actor_id=True), resolved_at=LATER)
+        bad = escalation(
+            state="acknowledged",
+            acknowledgement=EscalationAcknowledgement(actor=HUMAN, acknowledged_at=LATER),
+        ).to_dict()
+        bad["acknowledgement"]["actor"] = ["not", "an", "object"]
+        with pytest.raises(SchemaError) as excinfo:
+            HumanEscalation.from_dict(bad)
+        assert excinfo.value.code == "invalid_type"
+
     def test_escalation_input_feed_active_semantics(self):
         assert escalation().to_escalation_input().active is True
         expired = escalation(state="expired", expires_at=DEADLINE, terminal_reason="deadline")
@@ -405,6 +467,36 @@ class TestTransitions:
 
 
 class TestExpireSweep:
+    def test_transition_and_sweep_validate_at_upfront(self, env):
+        _, store = env
+        store.open("macbook", escalation())
+        with pytest.raises(SchemaError):
+            store.transition(
+                "macbook", "esc_1", "superseded", at="not-a-timestamp", superseded_by_id="x"
+            )
+        with pytest.raises(SchemaError):
+            store.expire_sweep("macbook", at="not-a-timestamp")
+
+    def test_sweep_survives_arbitrary_per_candidate_failures(self, env, monkeypatch):
+        _, store = env
+        store.open("macbook", escalation(expires_at=DEADLINE))
+        store.open(
+            "macbook", escalation(id="esc_2", expires_at=DEADLINE, dedupe_key="k2")
+        )
+        original = store.transition
+        calls = {"n": 0}
+
+        def flaky(instance_id, escalation_id, to_state, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("simulated non-schema failure")
+            return original(instance_id, escalation_id, to_state, **kwargs)
+
+        monkeypatch.setattr(store, "transition", flaky)
+        scanned, expired = store.expire_sweep("macbook", at=AFTER_DEADLINE)
+        assert scanned == 2
+        assert expired == 1  # the second candidate still expired
+
     def test_sweep_expires_only_overdue(self, env):
         _, store = env
         store.open("macbook", escalation(expires_at=DEADLINE))

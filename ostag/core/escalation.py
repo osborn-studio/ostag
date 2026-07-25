@@ -80,6 +80,25 @@ def _invalid(message: str, hint: str) -> SchemaError:
     return SchemaError(code="invalid_escalation", message=message, recovery_hint=hint)
 
 
+def _validate_actor(actor: ActorRef, name: str, schema: str) -> None:
+    """Phase 4 boundary strengthening of the Phase 1 ActorRef: attributed
+    actors must carry typed, non-empty string ids (ActorRef itself only
+    checks truthiness, which lets non-string values through)."""
+    _require_instance(actor, ActorRef, name, schema)
+    _require_str(actor.actor_id, f"{name}.actor_id", schema)
+    _optional_str(actor.handle, f"{name}.handle", schema)
+
+
+def _actor_from_wire(value: object, name: str, schema: str) -> ActorRef:
+    if not isinstance(value, dict):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{name} must be an object",
+            recovery_hint=f"Provide '{name}' as an actor object.",
+        )
+    return ActorRef.from_dict(value)
+
+
 @dataclass(frozen=True)
 class HumanEscalationOption:
     id: str
@@ -142,13 +161,14 @@ class ActionHint:
         )
         _require_wire_keys(data, frozenset({"kind"}), "ActionHint")
         selected = data.get("selectedIntentIds", ())
+        metadata = data.get("metadata")
         return cls(
             kind=data.get("kind", ""),
             target_id=data.get("targetId", ""),
             selected_intent_ids=_require_str_tuple(
                 selected, "selectedIntentIds", "ActionHint"
             ),
-            metadata=data.get("metadata", {}) or {},
+            metadata={} if metadata is None else metadata,
         )
 
 
@@ -158,7 +178,7 @@ class EscalationAcknowledgement:
     acknowledged_at: str
 
     def __post_init__(self) -> None:
-        _require_instance(self.actor, ActorRef, "actor", "EscalationAcknowledgement")
+        _validate_actor(self.actor, "actor", "EscalationAcknowledgement")
         _require_utc_datetime(
             self.acknowledged_at, "acknowledged_at", "EscalationAcknowledgement"
         )
@@ -172,7 +192,7 @@ class EscalationAcknowledgement:
         _validate_keys(data, keys, "EscalationAcknowledgement")
         _require_wire_keys(data, keys, "EscalationAcknowledgement")
         return cls(
-            actor=ActorRef.from_dict(data.get("actor", {})),
+            actor=_actor_from_wire(data.get("actor"), "actor", "EscalationAcknowledgement"),
             acknowledged_at=data.get("acknowledgedAt", ""),
         )
 
@@ -185,7 +205,7 @@ class EscalationResolution:
     reason: str = ""
 
     def __post_init__(self) -> None:
-        _require_instance(self.actor, ActorRef, "actor", "EscalationResolution")
+        _validate_actor(self.actor, "actor", "EscalationResolution")
         _require_utc_datetime(self.resolved_at, "resolved_at", "EscalationResolution")
         _optional_str(self.option_id, "option_id", "EscalationResolution")
         _optional_str(self.reason, "reason", "EscalationResolution")
@@ -207,7 +227,7 @@ class EscalationResolution:
         )
         _require_wire_keys(data, frozenset({"actor", "resolvedAt"}), "EscalationResolution")
         return cls(
-            actor=ActorRef.from_dict(data.get("actor", {})),
+            actor=_actor_from_wire(data.get("actor"), "actor", "EscalationResolution"),
             resolved_at=data.get("resolvedAt", ""),
             option_id=data.get("optionId", ""),
             reason=data.get("reason", ""),
@@ -349,6 +369,35 @@ class HumanEscalation:
                 "Human escalation resolvedAt cannot precede acknowledgedAt.",
                 "Resolve at or after the acknowledgement time.",
             )
+        if self.superseded_by_id and self.state != "superseded":
+            raise _invalid(
+                "Human escalation supersededById is only valid for the superseded state.",
+                "Remove supersededById or set state to superseded.",
+            )
+        if self.terminal_reason and self.state not in ("expired", "superseded"):
+            raise _invalid(
+                "Human escalation terminalReason is only valid for expired or superseded states.",
+                "Remove terminalReason or use a terminal state.",
+            )
+        # OStag strengthening (declared): the deadline rule must hold at the
+        # model layer too, or open() with a pre-attributed escalation could
+        # bypass transition()'s coercion. Attribution at or after the
+        # deadline is never valid.
+        if self.expires_at:
+            deadline = _instant(self.expires_at)
+            if (
+                self.acknowledgement is not None
+                and _instant(self.acknowledgement.acknowledged_at) >= deadline
+            ):
+                raise _invalid(
+                    "Human escalation cannot be acknowledged at or after expiresAt.",
+                    "A late acknowledgement must be recorded as expired instead.",
+                )
+            if self.resolution is not None and _instant(self.resolution.resolved_at) >= deadline:
+                raise _invalid(
+                    "Human escalation cannot be resolved at or after expiresAt.",
+                    "A late resolution must be recorded as expired instead.",
+                )
 
     @property
     def terminal(self) -> bool:
@@ -438,6 +487,11 @@ class HumanEscalation:
             "HumanEscalation",
         )
         options = data.get("options", ())
+        if "options" in data and not data["options"]:
+            raise _invalid(
+                "Human escalation options, when present, must offer at least one option.",
+                "Omit the options field or provide at least one option (upstream .min(1)).",
+            )
         acknowledgement = data.get("acknowledgement")
         resolution = data.get("resolution")
         next_action = data.get("nextAction")
