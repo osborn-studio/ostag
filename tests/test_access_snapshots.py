@@ -138,6 +138,43 @@ class TestSnapshotModel:
         with pytest.raises(SchemaError):
             snapshot(captured_at="2026-07-26T10:00:00+08:00")
 
+    def test_lenient_fromisoformat_forms_are_rejected(self):
+        # datetime.fromisoformat accepts all of these; the strict UTC grammar
+        # (T separator, dot fraction, Z/+00:00) must not.
+        for value in (
+            "2026-07-26 10:00:00+00:00",  # space separator
+            "2026-07-26X10:00:00+00:00",  # arbitrary separator
+            "2026-W30-7T10:00:00+00:00",  # week date
+            "2026-07-26T10:00:00,5+00:00",  # comma fraction
+            "2026-07-26T10:00:00",  # missing offset
+        ):
+            with pytest.raises(SchemaError):
+                snapshot(captured_at=value)
+        assert snapshot(captured_at="2026-07-26T10:00:00.123456Z").captured_at
+
+    def test_non_string_scalars_are_rejected(self):
+        with pytest.raises(SchemaError):
+            AgentPrincipal(id=42, kind="custom")
+        with pytest.raises(SchemaError):
+            PrincipalRef(platform=1, actor_id="a")
+        with pytest.raises(SchemaError):
+            PrincipalRef(platform="ostag", actor_id="a", handle=7)
+        with pytest.raises(SchemaError):
+            snapshot(policy_snapshot_id=99)
+        with pytest.raises(SchemaError):
+            OstagBinding(instance_id="mac", session_version="3")
+
+    def test_nested_fields_must_be_model_instances_not_dicts(self):
+        for field_name, value in (
+            ("agent_principal", {"id": "codex", "kind": "provider_agent"}),
+            ("requested_by", {"platform": "ostag", "actorId": "x"}),
+            ("constraints", {}),
+            ("ostag_binding", {"instanceId": "mac"}),
+        ):
+            with pytest.raises(SchemaError) as excinfo:
+                snapshot(**{field_name: value})
+            assert excinfo.value.code == "invalid_type"
+
     def test_missing_required_wire_keys_are_rejected(self):
         # Upstream schema.ts marks these required (no .optional()).
         for key in ("projectTargets", "connectionRefs", "permissions", "constraints"):

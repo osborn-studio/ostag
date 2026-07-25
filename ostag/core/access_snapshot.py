@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from ostag.core.completion import _require, _require_choice, _require_datetime, _validate_keys
+from ostag.core.completion import _require_choice, _validate_keys
 from ostag.core.schemas import SchemaError
 
 AGENT_PRINCIPAL_KINDS = ("opentag_agent", "provider_agent", "custom")
@@ -42,6 +43,65 @@ def _prune(value: dict[str, Any]) -> dict[str, Any]:
 def _instant(value: str) -> datetime:
     """Parse an already-validated UTC timestamp for comparison."""
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _require_str(value: object, name: str, schema: str) -> None:
+    """Upstream fields are ``z.string().min(1)`` — reject non-strings too,
+    not just empties (an integer id must not pass as truthy)."""
+    if not isinstance(value, str) or not value:
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{name} must be a non-empty string",
+            recovery_hint=f"Provide '{name}' as a non-empty string.",
+        )
+
+
+def _optional_str(value: object, name: str, schema: str) -> None:
+    if not isinstance(value, str):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{name} must be a string",
+            recovery_hint=f"Provide '{name}' as a string (or omit it).",
+        )
+
+
+# Strict UTC grammar: T-separated, optional dot fraction, Z or +00:00 only.
+# Deliberately narrower than datetime.fromisoformat (which accepts any
+# single-character separator, week dates, and comma fractions).
+_UTC_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|\+00:00)$")
+
+
+def _require_utc_datetime(value: object, name: str, schema: str, *, optional: bool = False) -> None:
+    if optional and value == "":
+        return
+    _require_str(value, name, schema)
+    assert isinstance(value, str)
+    if not _UTC_DATETIME.match(value):
+        raise SchemaError(
+            code="invalid_datetime",
+            message=f"{schema}.{name}={value!r} is not a UTC timestamp "
+            "(YYYY-MM-DDTHH:MM:SS[.ffffff] with Z or +00:00)",
+            recovery_hint="Use e.g. 2026-07-26T10:00:00+00:00.",
+        )
+    try:
+        _instant(value)
+    except ValueError:
+        raise SchemaError(
+            code="invalid_datetime",
+            message=f"{schema}.{name}={value!r} is not a valid calendar timestamp",
+            recovery_hint="Use a real date/time, e.g. 2026-07-26T10:00:00+00:00.",
+        ) from None
+
+
+def _require_instance(value: object, expected: type, name: str, schema: str) -> None:
+    """Nested fields must be the model type — a raw dict must not slip through
+    the constructor and later escape as an AttributeError."""
+    if not isinstance(value, expected):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{name} must be a {expected.__name__}",
+            recovery_hint=f"Build '{name}' via {expected.__name__} / from_dict.",
+        )
 
 
 def _require_str_tuple(value: object, name: str, schema: str) -> tuple[str, ...]:
@@ -98,7 +158,7 @@ class AgentPrincipal:
     kind: str
 
     def __post_init__(self) -> None:
-        _require(self.id, "id", "AgentPrincipal")
+        _require_str(self.id, "id", "AgentPrincipal")
         _require_choice(self.kind, AGENT_PRINCIPAL_KINDS, "kind", "AgentPrincipal")
 
     def to_dict(self) -> dict[str, Any]:
@@ -119,8 +179,9 @@ class PrincipalRef:
     handle: str = ""
 
     def __post_init__(self) -> None:
-        _require(self.platform, "platform", "PrincipalRef")
-        _require(self.actor_id, "actor_id", "PrincipalRef")
+        _require_str(self.platform, "platform", "PrincipalRef")
+        _require_str(self.actor_id, "actor_id", "PrincipalRef")
+        _optional_str(self.handle, "handle", "PrincipalRef")
 
     def to_dict(self) -> dict[str, Any]:
         return _prune({"platform": self.platform, "actorId": self.actor_id, "handle": self.handle})
@@ -142,9 +203,9 @@ class PermissionGrantRef:
     expires_at: str = ""
 
     def __post_init__(self) -> None:
-        _require(self.scope, "scope", "PermissionGrantRef")
-        _require(self.reason, "reason", "PermissionGrantRef")
-        _require_datetime(self.expires_at, "expires_at", "PermissionGrantRef", optional=True)
+        _require_str(self.scope, "scope", "PermissionGrantRef")
+        _require_str(self.reason, "reason", "PermissionGrantRef")
+        _require_utc_datetime(self.expires_at, "expires_at", "PermissionGrantRef", optional=True)
 
     def to_dict(self) -> dict[str, Any]:
         return _prune({"scope": self.scope, "reason": self.reason, "expiresAt": self.expires_at})
@@ -168,10 +229,10 @@ class ConnectionRef:
     declared_capabilities: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        _require(self.id, "id", "ConnectionRef")
-        _require(self.provider, "provider", "ConnectionRef")
+        _require_str(self.id, "id", "ConnectionRef")
+        _require_str(self.provider, "provider", "ConnectionRef")
         _require_choice(self.custody, CONNECTION_CUSTODY, "custody", "ConnectionRef")
-        _require(self.broker_ref, "broker_ref", "ConnectionRef")
+        _require_str(self.broker_ref, "broker_ref", "ConnectionRef")
         _require_str_tuple(self.declared_capabilities, "declared_capabilities", "ConnectionRef")
 
     def to_dict(self) -> dict[str, Any]:
@@ -265,7 +326,19 @@ class OstagBinding:
     session_version: int = 0
 
     def __post_init__(self) -> None:
-        _require(self.instance_id, "instance_id", "OstagBinding")
+        _require_str(self.instance_id, "instance_id", "OstagBinding")
+        for name in ("runtime_id", "session_id", "turn_id"):
+            _optional_str(getattr(self, name), name, "OstagBinding")
+        if (
+            isinstance(self.session_version, bool)
+            or not isinstance(self.session_version, int)
+            or self.session_version < 0
+        ):
+            raise SchemaError(
+                code="invalid_type",
+                message="OstagBinding.session_version must be a non-negative integer",
+                recovery_hint="Provide sessionVersion as an integer >= 0 (0 = unset).",
+            )
 
     def to_dict(self) -> dict[str, Any]:
         payload = _prune(
@@ -292,7 +365,7 @@ class OstagBinding:
             runtime_id=data.get("runtimeId", ""),
             session_id=data.get("sessionId", ""),
             turn_id=data.get("turnId", ""),
-            session_version=int(data.get("sessionVersion", 0)),
+            session_version=data.get("sessionVersion", 0),
         )
 
 
@@ -312,8 +385,20 @@ class AgentAccessProfileSnapshot:
     revoked_at: str = ""
 
     def __post_init__(self) -> None:
-        _require(self.id, "id", "AgentAccessProfileSnapshot")
-        _require(self.policy_snapshot_id, "policy_snapshot_id", "AgentAccessProfileSnapshot")
+        _require_str(self.id, "id", "AgentAccessProfileSnapshot")
+        _require_str(self.policy_snapshot_id, "policy_snapshot_id", "AgentAccessProfileSnapshot")
+        _require_instance(
+            self.agent_principal, AgentPrincipal, "agent_principal", "AgentAccessProfileSnapshot"
+        )
+        _require_instance(
+            self.requested_by, PrincipalRef, "requested_by", "AgentAccessProfileSnapshot"
+        )
+        _require_instance(
+            self.constraints, AccessConstraints, "constraints", "AgentAccessProfileSnapshot"
+        )
+        _require_instance(
+            self.ostag_binding, OstagBinding, "ostag_binding", "AgentAccessProfileSnapshot"
+        )
         _require_str_tuple(self.project_targets, "project_targets", "AgentAccessProfileSnapshot")
         for name, expected, items in (
             ("connection_refs", ConnectionRef, self.connection_refs),
@@ -328,11 +413,11 @@ class AgentAccessProfileSnapshot:
                     f"{expected.__name__}",
                     recovery_hint=f"Build '{name}' from {expected.__name__} values.",
                 )
-        _require_datetime(self.captured_at, "captured_at", "AgentAccessProfileSnapshot")
-        _require_datetime(
+        _require_utc_datetime(self.captured_at, "captured_at", "AgentAccessProfileSnapshot")
+        _require_utc_datetime(
             self.expires_at, "expires_at", "AgentAccessProfileSnapshot", optional=True
         )
-        _require_datetime(
+        _require_utc_datetime(
             self.revoked_at, "revoked_at", "AgentAccessProfileSnapshot", optional=True
         )
         # Upstream superRefine invariants. Compare parsed instants, never the
