@@ -736,3 +736,31 @@ class TestDerivationSafety:
         assert candidate.executor_id == "sess_1"
         assert candidate.reasons[0].code == "proposal_target"
         assert explanation.selected is None
+
+
+class TestFallbackNeverThrows:
+    def test_invalid_decided_at_still_passes_router_outcome_through(self, env):
+        """r3 residual: even an invalid caller-supplied timestamp (e.g. a
+        naive clock) must not replace the router outcome — the fallback
+        degrades to an epoch stamp instead of raising."""
+        explainer, decisions, _ = env
+        result, explanation = explainer.handle_text(
+            OWNER, "继续", event_id="evt_naive",
+            decision_id="rd_naive", decided_at="2026-07-14T01:00:00",  # no offset
+        )
+        assert result.state == "queued"  # router outcome intact
+        assert explanation.reason_code == "explanation_error"
+        assert explanation.decided_at == "1970-01-01T00:00:00+00:00"
+        assert decisions.get("rd_naive").reason_code == "explanation_error"
+        # Router errors also pass through with the same broken stamp.
+        with pytest.raises(RelayRoutingError):
+            explainer.handle_text(
+                STRANGER, "hi", decision_id="rd_naive2",
+                decided_at="2026-07-14T01:00:00",
+            )
+
+    def test_explanation_error_fallback_is_total(self):
+        assert RouteExplainer._explanation_error(42, object()) is not None  # degrades
+        assert (
+            RouteExplainer._explanation_error("rd_ok", NOW).decided_at == NOW
+        )  # valid inputs kept

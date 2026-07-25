@@ -446,29 +446,48 @@ class RouteExplainer:
         derive,
         decision_id: str,
         decided_at: str,
-    ) -> RoutingDecision:
+    ) -> RoutingDecision | None:
         """The COMPLETE explanation pipeline — derivation and recording — is
         best-effort: no exception here (schema, sqlite, anything) may replace
         the routing result or mask a router exception (Phase 3 shadow-hook
-        contract). A failed derivation records an ``explanation_error``
-        decision built from pure values."""
+        contract). A failed derivation degrades to an ``explanation_error``
+        decision; if even the caller-supplied id/timestamp are invalid, the
+        fallback degrades further to pure constants, and as a last resort the
+        explanation is dropped (None) — routing is untouched in every case."""
         try:
             decision = derive()
         except Exception:  # noqa: BLE001 - derivation must not affect routing
-            decision = RoutingDecision(
-                id=decision_id,
-                run_id=decision_id,
-                reason_code="explanation_error",
-                reason=(
-                    "The explanation could not be derived; the actual routing "
-                    "outcome is unchanged."
-                ),
-                decided_at=decided_at,
-                candidates=(),
-                selected=None,
-            )
-        self._record_safe(principal, decision)
+            decision = self._explanation_error(decision_id, decided_at)
+        if decision is not None:
+            self._record_safe(principal, decision)
         return decision
+
+    @staticmethod
+    def _explanation_error(decision_id: str, decided_at: str) -> RoutingDecision | None:
+        """Guaranteed non-throwing fallback: tries the caller-supplied stamp,
+        then a valid epoch stamp, then pure constants; never raises."""
+        reason = (
+            "The explanation could not be derived; the actual routing "
+            "outcome is unchanged."
+        )
+        for candidate_id, candidate_at in (
+            (decision_id, decided_at),
+            (decision_id, "1970-01-01T00:00:00+00:00"),
+            ("rd_invalid", "1970-01-01T00:00:00+00:00"),
+        ):
+            try:
+                return RoutingDecision(
+                    id=candidate_id,
+                    run_id=candidate_id,
+                    reason_code="explanation_error",
+                    reason=reason,
+                    decided_at=candidate_at,
+                    candidates=(),
+                    selected=None,
+                )
+            except Exception:  # noqa: BLE001 - keep degrading, never raise
+                continue
+        return None
 
     def _record_safe(self, principal: Principal, decision: RoutingDecision) -> None:
         """Best-effort: a recording failure must never change the routing
