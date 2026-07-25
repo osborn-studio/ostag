@@ -150,7 +150,7 @@ def _governed_contract(extra_gates=()) -> CompletionContract:
 def _delivery_artifact(version: str = "v1", artifact_id: str = "art_1") -> CompletionArtifact:
     return CompletionArtifact(
         id=artifact_id,
-        kind="change_request",
+        kind="pull_request",
         recorded_at=T1,
         target=ArtifactTarget(
             key="delivery", provider="github", resource_ref="pr/7", resource_version=version
@@ -449,7 +449,7 @@ def _waiver(expires_at: str = "", waiver_id: str = "waiver_1") -> CompletionWaiv
         cycle=1,
         actor=ActorRef(actor_id="owner", handle="@owner"),
         reason="pilot exception",
-        policy_scope="workspace",
+        policy_scope="work_item_override",
         gate_ids=("tests",),
         waived_at=T1,
         expires_at=expires_at,
@@ -458,7 +458,7 @@ def _waiver(expires_at: str = "", waiver_id: str = "waiver_1") -> CompletionWaiv
 
 def test_active_waiver_waives_gate_and_marks_human() -> None:
     assessment = evaluate_completion(
-        _governed_input(evidence=(), waivers=(_waiver(expires_at=T2 + "z"),))
+        _governed_input(evidence=(), waivers=(_waiver(expires_at="2026-07-26T12:30:00+00:00"),))
     )
     assert assessment.gate_results[0].state == "waived"
     assert assessment.state == "waived"
@@ -573,3 +573,62 @@ def test_work_loop_view_projection() -> None:
     satisfied = evaluate_completion(_governed_input())
     done_view = derive_work_loop_view(contract, runs, satisfied)
     assert done_view.next_action == "No completion action is required."
+
+
+def test_artifact_gate_minimum_and_missing() -> None:
+    from ostag.core.completion import ArtifactGate
+
+    contract = CompletionContract(
+        id="contract_a",
+        version=1,
+        work_thread_id="macmini/task_g",
+        cycle=1,
+        mode="governed",
+        gates=(ArtifactGate(id="patches", target_key="delivery", artifact_kind="patch", minimum=2),),
+        max_automatic_retries=0,
+        on_satisfied="report_only",
+        created_at=T0,
+        target_selectors=(CompletionTargetSelector(key="delivery"),),
+    )
+
+    def patch_artifact(artifact_id: str) -> CompletionArtifact:
+        return CompletionArtifact(
+            id=artifact_id,
+            kind="patch",
+            recorded_at=T1,
+            target=ArtifactTarget(
+                key="delivery", provider="github", resource_ref="pr/7", resource_version="v1"
+            ),
+        )
+
+    short = evaluate_completion(
+        _governed_input(contract=contract, artifacts=(patch_artifact("p1"),), evidence=())
+    )
+    gate = {r.gate_id: r for r in short.gate_results}["patches"]
+    assert gate.state == "missing"
+    assert gate.reason_code == "artifact_missing"
+
+    enough = evaluate_completion(
+        _governed_input(
+            contract=contract,
+            artifacts=(patch_artifact("p1"), patch_artifact("p2")),
+            evidence=(),
+        )
+    )
+    gate = {r.gate_id: r for r in enough.gate_results}["patches"]
+    assert gate.state == "passed"
+    assert gate.evidence_ids == ("p1", "p2")
+
+
+def test_digest_known_vector_locks_ostag_determinism() -> None:
+    """Native divergence: this digest is OStag-local (code-point ordering), and
+    this vector pins it so it can never drift silently."""
+    digest = completion_input_digest(
+        CompletionEvaluationInput(contract=_compat_contract(), evaluated_at=T1)
+    )
+    assert digest == completion_input_digest(
+        CompletionEvaluationInput(contract=_compat_contract(), evaluated_at=T1)
+    )
+    assert digest.startswith("sha256:")
+    # pinned vector: recompute only if the wire contract deliberately changes
+    assert digest == "sha256:2c836ee735120b370b759d3c01108956cec1cfc284c66f8463c72799b18ad5ff"

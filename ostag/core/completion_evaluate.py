@@ -6,11 +6,13 @@ evaluation time is injected (``evaluated_at``) or derived from the latest
 input timestamp exactly as upstream does. Identical canonical inputs produce
 identical ``inputDigest`` values.
 
-Porting assumptions (declared in the mapping note): entity ids and ISO-8601
-UTC timestamps are ASCII, so Python's default string ordering matches
-upstream's ``localeCompare``/lexicographic sorts; digests hash the canonical
-wire-form JSON (sorted keys, compact separators) which mirrors
-``JSON.stringify`` over key-sorted objects.
+Declared divergence (mapping note): all sorts and digest key ordering use
+Python code-point (byte-wise) string ordering, NOT JavaScript
+``localeCompare`` ICU collation — e.g. ``ev_1`` vs ``ev-2`` order differently
+across the two. Digest values are therefore an OStag-local idempotency key:
+deterministic and stable within OStag, but NOT byte-comparable with digests
+computed by the upstream TypeScript implementation. Timestamp comparisons
+assume a uniform ISO-8601 UTC format, which the models validate.
 """
 
 from __future__ import annotations

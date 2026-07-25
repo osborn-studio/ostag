@@ -10,6 +10,14 @@ from ostag.core.event import NormalizedEvent
 from ostag.core.run_ledger import RunLedger
 from ostag.core.runner import OSTagRunner
 
+FIXED_NOW = "2026-07-26T09:00:00+00:00"
+
+
+@pytest.fixture(autouse=True)
+def _frozen_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Inject the clock for every runner-compat test (handoff 0.4: no wall clocks)."""
+    monkeypatch.setattr("ostag.core.runner.utc_now_iso", lambda: FIXED_NOW)
+
 
 def _event(text: str = "请总结项目") -> NormalizedEvent:
     return NormalizedEvent(
@@ -52,6 +60,7 @@ async def test_successful_run_mirrors_satisfied_compat_assessment(tmp_path: Path
     assert len(mirrored) == 1
     assessment = mirrored[0]["payload"]["assessment"]
     assert assessment["state"] == "satisfied"
+    assert assessment["assessedAt"] == FIXED_NOW
     assert assessment["evidenceBacked"] is False
     assert assessment["assessedBy"] == "ostag"
     assert assessment["inputDigest"].startswith("sha256:")

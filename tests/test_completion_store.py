@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -51,6 +52,7 @@ def _assessment(
     digest: str = DIGEST_A,
     supersedes: str = "",
     state: str = "satisfied",
+    accepted: bool = False,
 ) -> CompletionAssessment:
     return CompletionAssessment(
         id=f"assessment_{work_thread.replace('/', '_')}_{sequence}",
@@ -76,6 +78,7 @@ def _assessment(
         assessed_at=NOW,
         assessed_by="ostag",
         supersedes_assessment_id=supersedes,
+        accepted_at=NOW if accepted else "",
     )
 
 
@@ -121,6 +124,7 @@ def test_migration_v21_is_additive_from_pre_upgrade_fixture(tmp_path: Path) -> N
         "completion_waivers",
         "completion_assessments",
         "completion_threads",
+        "completion_governance_events",
     }
 
 
@@ -133,7 +137,7 @@ def test_contract_insert_or_verify_immutable(tmp_path: Path) -> None:
     with pytest.raises(SchemaError) as excinfo:
         store.record_contract("macmini", mutated)
     assert excinfo.value.code == "immutable_record"
-    assert store.get_contract("macmini", contract.id).work_thread_id == "macmini/task_1"
+    assert store.get_contract("macmini", contract.id, 1).work_thread_id == "macmini/task_1"
 
 
 def test_evidence_insert_or_verify_immutable(tmp_path: Path) -> None:
@@ -160,6 +164,7 @@ def test_evidence_insert_or_verify_immutable(tmp_path: Path) -> None:
 
 def test_waiver_round_trip(tmp_path: Path) -> None:
     store = _store(tmp_path)
+    store.record_contract("macmini", _contract())
     waiver = CompletionWaiver(
         id="waiver_1",
         contract_id="contract_macmini_task_1",
@@ -167,7 +172,7 @@ def test_waiver_round_trip(tmp_path: Path) -> None:
         cycle=1,
         actor=ActorRef(actor_id="owner", handle="@owner"),
         reason="pilot",
-        policy_scope="workspace",
+        policy_scope="work_item_override",
         gate_ids=("execution",),
         waived_at=NOW,
         run_id="run_1",
@@ -261,9 +266,83 @@ def test_instance_isolation_no_cross_instance_reads(tmp_path: Path) -> None:
     assert store.current_assessment("macbook", "macmini/task_1") is None
     assert store.list_evidence("macbook", "macmini/task_1", 1) == ()
     with pytest.raises(SchemaError):
-        store.get_contract("macbook", "contract_macmini_task_1")
+        store.get_contract("macbook", "contract_macmini_task_1", 1)
 
     # and the same work-thread key under another instance is an independent thread
     store.record_contract("macbook", _contract())
     outcome = store.append_assessment("macbook", _assessment(), None)
     assert outcome.outcome == "recorded"
+
+
+def test_contract_v2_recordable_under_same_id(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    v1 = _contract()
+    assert store.record_contract("macmini", v1) is True
+    v2 = CompletionContract.from_dict({**v1.to_dict(), "version": 2})
+    assert store.record_contract("macmini", v2) is True  # (id, version) identity
+    assert store.get_contract("macmini", v1.id, 2).version == 2
+
+
+def test_waiver_immutability_and_orphan_rejection(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    waiver = CompletionWaiver(
+        id="waiver_x",
+        contract_id="contract_macmini_task_1",
+        contract_version=1,
+        cycle=1,
+        actor=ActorRef(actor_id="owner"),
+        reason="pilot",
+        policy_scope="work_item_override",
+        gate_ids=("execution",),
+        waived_at=NOW,
+    )
+    # orphan: contract snapshot not recorded yet
+    with pytest.raises(SchemaError) as excinfo:
+        store.record_waiver("macmini", waiver)
+    assert excinfo.value.code == "not_found"
+
+    store.record_contract("macmini", _contract())
+    assert store.record_waiver("macmini", waiver) is True
+    assert store.record_waiver("macmini", waiver) is False  # idempotent replay
+    mutated = CompletionWaiver.from_dict({**waiver.to_dict(), "reason": "edited"})
+    with pytest.raises(SchemaError) as excinfo:
+        store.record_waiver("macmini", mutated)
+    assert excinfo.value.code == "immutable_record"
+    # cycle mismatch vs contract snapshot
+    wrong_cycle = CompletionWaiver.from_dict(
+        {**waiver.to_dict(), "id": "waiver_y", "cycle": 2}
+    )
+    with pytest.raises(SchemaError) as excinfo:
+        store.record_waiver("macmini", wrong_cycle)
+    assert excinfo.value.code == "invalid_reference"
+
+
+def test_append_writes_governance_events_and_first_accept_metric(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.record_contract("macmini", _contract())
+    store.append_assessment("macmini", _assessment(accepted=True), None)
+
+    with store.store.connect() as conn:
+        rows = conn.execute(
+            "SELECT event_type, subject_id, payload_json FROM completion_governance_events "
+            "WHERE instance_id='macmini' ORDER BY rowid"
+        ).fetchall()
+    types = [row["event_type"] for row in rows]
+    assert types == ["completion_assessment.appended", "success_metric.observed"]
+    metric = json.loads(rows[1]["payload_json"])
+    assert metric["metric"] == "time_to_verified_completion_ms"
+    assert metric["value"] >= 0
+
+    # a second accepted assessment does NOT emit another success metric
+    head = store.current_assessment("macmini", "macmini/task_1")
+    store.append_assessment(
+        "macmini",
+        _assessment(sequence=2, digest=DIGEST_B, supersedes=head.id, accepted=True),
+        head.id,
+    )
+    with store.store.connect() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) AS n FROM completion_governance_events "
+            "WHERE instance_id='macmini' AND event_type='success_metric.observed'"
+        ).fetchone()["n"]
+    assert count == 1

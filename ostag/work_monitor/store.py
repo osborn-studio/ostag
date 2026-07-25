@@ -229,14 +229,16 @@ MIGRATIONS = (
     # personal/admin authorization boundary (baseline decision 6.3).
     Migration(
         statements=(
-            "CREATE TABLE IF NOT EXISTS completion_contracts (instance_id TEXT NOT NULL,contract_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,contract_version INTEGER NOT NULL,cycle INTEGER NOT NULL,mode TEXT NOT NULL,contract_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(instance_id,contract_id))",
+            "CREATE TABLE IF NOT EXISTS completion_contracts (instance_id TEXT NOT NULL,contract_id TEXT NOT NULL,contract_version INTEGER NOT NULL,work_thread_key TEXT NOT NULL,cycle INTEGER NOT NULL,mode TEXT NOT NULL,contract_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(instance_id,contract_id,contract_version))",
             "CREATE INDEX IF NOT EXISTS completion_contracts_thread ON completion_contracts(instance_id,work_thread_key)",
             "CREATE TABLE IF NOT EXISTS completion_evidence (instance_id TEXT NOT NULL,evidence_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,cycle INTEGER NOT NULL,evidence_json TEXT NOT NULL,observed_at TEXT NOT NULL,received_at TEXT NOT NULL,PRIMARY KEY(instance_id,evidence_id))",
             "CREATE INDEX IF NOT EXISTS completion_evidence_thread ON completion_evidence(instance_id,work_thread_key,cycle)",
             "CREATE TABLE IF NOT EXISTS completion_waivers (instance_id TEXT NOT NULL,waiver_id TEXT NOT NULL,contract_id TEXT NOT NULL,contract_version INTEGER NOT NULL,cycle INTEGER NOT NULL,run_id TEXT NOT NULL DEFAULT '',actor_id TEXT NOT NULL,actor_handle TEXT NOT NULL DEFAULT '',reason TEXT NOT NULL,scope TEXT NOT NULL,policy_scope TEXT NOT NULL,gate_ids_json TEXT NOT NULL,waived_at TEXT NOT NULL,expires_at TEXT NOT NULL DEFAULT '',PRIMARY KEY(instance_id,waiver_id))",
             "CREATE INDEX IF NOT EXISTS completion_waivers_contract ON completion_waivers(instance_id,contract_id,contract_version,cycle)",
             "CREATE TABLE IF NOT EXISTS completion_assessments (instance_id TEXT NOT NULL,assessment_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,contract_id TEXT NOT NULL,contract_version INTEGER NOT NULL,cycle INTEGER NOT NULL,sequence INTEGER NOT NULL,supersedes_assessment_id TEXT NOT NULL DEFAULT '',input_digest TEXT NOT NULL,state TEXT NOT NULL,assessment_json TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(instance_id,assessment_id),UNIQUE(instance_id,work_thread_key,cycle,sequence),UNIQUE(instance_id,work_thread_key,cycle,input_digest))",
-            "CREATE TABLE IF NOT EXISTS completion_threads (instance_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,current_assessment_id TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL,PRIMARY KEY(instance_id,work_thread_key))",
+            "CREATE TABLE IF NOT EXISTS completion_threads (instance_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,current_assessment_id TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(instance_id,work_thread_key))",
+            "CREATE TABLE IF NOT EXISTS completion_governance_events (instance_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,event_type TEXT NOT NULL,subject_id TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS completion_governance_events_thread ON completion_governance_events(instance_id,work_thread_key,created_at)",
         )
     ),
 )

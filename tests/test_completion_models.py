@@ -103,13 +103,81 @@ def test_contract_requires_at_least_one_gate() -> None:
         _governed_contract(gates=())
 
 
-def test_gate_from_dict_dispatches_all_kinds() -> None:
-    human = gate_from_dict(
-        {"id": "accept", "kind": "human_acceptance", "requiredRole": "owner"}
-    )
+def test_gate_from_dict_dispatches_all_five_kinds_round_trip() -> None:
+    gates = [
+        {"id": "a", "kind": "artifact", "targetKey": "t", "artifactKind": "patch", "minimum": 1},
+        {
+            "id": "v",
+            "kind": "verification",
+            "targetKey": "t",
+            "evidenceKind": "ci.tests",
+            "requiredOutcome": "passed",
+            "minimumAssurance": "verified",
+            "requiredObservations": ["unit"],
+        },
+        {
+            "id": "e",
+            "kind": "external_state",
+            "targetKey": "t",
+            "provider": "github",
+            "requiredState": "merged",
+            "minimumAssurance": "reported",
+        },
+        {"id": "m", "kind": "material_action", "actionFamily": "deploy", "requiredOutcome": "succeeded"},
+        {"id": "h", "kind": "human_acceptance", "requiredRole": "owner"},
+    ]
+    for payload in gates:
+        gate = gate_from_dict(payload)
+        assert gate.to_dict() == payload or {
+            k: v for k, v in gate.to_dict().items() if k != "requiredObservations"
+        } == {k: v for k, v in payload.items() if k != "requiredObservations"}
+        assert gate_from_dict(gate.to_dict()) == gate
+    human = gate_from_dict({"id": "accept", "kind": "human_acceptance", "requiredRole": "owner"})
     assert isinstance(human, HumanAcceptanceGate)
     with pytest.raises(SchemaError):
         gate_from_dict({"id": "x", "kind": "mystery"})
+    with pytest.raises(SchemaError) as excinfo:
+        gate_from_dict({"id": "h2", "kind": "human_acceptance", "requiredRole": "owner", "bogus": 1})
+    assert excinfo.value.code == "unknown_field"
+
+
+def test_wire_strictness_enums_and_datetimes() -> None:
+    # unknown fields rejected (upstream .strict())
+    with pytest.raises(SchemaError) as excinfo:
+        CompletionContract.from_dict({**_governed_contract().to_dict(), "surprise": True})
+    assert excinfo.value.code == "unknown_field"
+    # artifact kind vocabulary enforced
+    from ostag.core.completion import ArtifactTarget, CompletionArtifact
+
+    with pytest.raises(SchemaError) as excinfo:
+        CompletionArtifact(id="art", kind="change_request", recorded_at=NOW)
+    assert excinfo.value.code == "invalid_choice"
+    ok = CompletionArtifact(
+        id="art",
+        kind="pull_request",
+        recorded_at=NOW,
+        target=ArtifactTarget(key="d", provider="github", resource_ref="pr/1", resource_version="v1"),
+    )
+    assert ok.to_dict()["kind"] == "pull_request"
+    # policy scope vocabulary enforced
+    with pytest.raises(SchemaError):
+        CompletionWaiver(
+            id="w",
+            contract_id="c",
+            contract_version=1,
+            cycle=1,
+            actor=ActorRef(actor_id="a"),
+            reason="r",
+            policy_scope="workspace",
+            gate_ids=("g",),
+            waived_at=NOW,
+        )
+    # timestamps must be timezone-aware ISO-8601
+    with pytest.raises(SchemaError) as excinfo:
+        _governed_contract(created_at="yesterday")
+    assert excinfo.value.code == "invalid_datetime"
+    with pytest.raises(SchemaError):
+        _governed_contract(created_at="2026-07-26T10:00:00")  # naive, no tz
 
 
 def test_waiver_requires_unique_gate_ids_and_serializes_run_id() -> None:
@@ -121,7 +189,7 @@ def test_waiver_requires_unique_gate_ids_and_serializes_run_id() -> None:
             cycle=1,
             actor=ActorRef(actor_id="owner"),
             reason="pilot",
-            policy_scope="workspace",
+            policy_scope="work_item_override",
             gate_ids=("tests", "tests"),
             waived_at=NOW,
         )
@@ -132,7 +200,7 @@ def test_waiver_requires_unique_gate_ids_and_serializes_run_id() -> None:
         cycle=1,
         actor=ActorRef(actor_id="owner", handle="@owner"),
         reason="pilot",
-        policy_scope="workspace",
+        policy_scope="work_item_override",
         gate_ids=("tests",),
         waived_at=NOW,
         run_id="run_9",
@@ -180,3 +248,58 @@ def test_assessment_validates_digest_and_assessed_by() -> None:
     restored = CompletionAssessment.from_dict(assessment.to_dict())
     assert restored == assessment
     assert restored.to_dict()["assessedBy"] == "ostag"
+
+
+def test_assessment_superrefine_invariants() -> None:
+    from ostag.core.completion import ResolvedCompletionTarget
+
+    base = dict(
+        id="assessment_1",
+        work_thread_id="macmini/task_1",
+        contract_id="contract_1",
+        contract_version=1,
+        cycle=1,
+        sequence=1,
+        input_digest=DIGEST,
+        target_bindings=(),
+        state="satisfied",
+        evidence_backed=True,
+        gate_results=(_gate_result(),),
+        assessed_at=NOW,
+        assessed_by="ostag",
+    )
+    binding = ResolvedCompletionTarget(
+        key="d", provider="github", resource_ref="pr/1", resource_version="v1", artifact_id="a1"
+    )
+    with pytest.raises(SchemaError):  # duplicate binding keys
+        CompletionAssessment(**{**base, "target_bindings": (binding, binding)})
+    with pytest.raises(SchemaError):  # duplicate gate result ids
+        CompletionAssessment(**{**base, "gate_results": (_gate_result(), _gate_result())})
+    with pytest.raises(SchemaError):  # waived requires waiver
+        CompletionAssessment(**{**base, "state": "waived"})
+    waiver = CompletionWaiver(
+        id="w1",
+        contract_id="contract_1",
+        contract_version=1,
+        cycle=1,
+        actor=ActorRef(actor_id="owner"),
+        reason="r",
+        policy_scope="work_item_override",
+        gate_ids=("tests",),
+        waived_at=NOW,
+    )
+    with pytest.raises(SchemaError):  # waiver implies human assessor
+        CompletionAssessment(**{**base, "state": "waived", "waiver": waiver})
+    with pytest.raises(SchemaError):  # waiver must target assessed contract
+        CompletionAssessment(
+            **{
+                **base,
+                "state": "waived",
+                "assessed_by": "human",
+                "waiver": CompletionWaiver.from_dict({**waiver.to_dict(), "contractId": "other"}),
+            }
+        )
+    ok = CompletionAssessment(
+        **{**base, "state": "waived", "assessed_by": "human", "waiver": waiver}
+    )
+    assert ok.state == "waived"

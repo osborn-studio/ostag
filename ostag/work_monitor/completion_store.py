@@ -49,25 +49,27 @@ class CompletionStore:
         with self.store.transaction() as connection:
             row = connection.execute(
                 "SELECT contract_json FROM completion_contracts "
-                "WHERE instance_id=? AND contract_id=?",
-                (instance_id, contract.id),
+                "WHERE instance_id=? AND contract_id=? AND contract_version=?",
+                (instance_id, contract.id, contract.version),
             ).fetchone()
             if row is not None:
                 if row["contract_json"] != payload:
                     raise SchemaError(
                         code="immutable_record",
-                        message=f"CompletionContract {contract.id} is immutable",
+                        message=(
+                            f"CompletionContract {contract.id} v{contract.version} is immutable"
+                        ),
                         recovery_hint="Create a new contract version instead of editing.",
                     )
                 return False
             connection.execute(
-                "INSERT INTO completion_contracts(instance_id,contract_id,work_thread_key,"
-                "contract_version,cycle,mode,contract_json,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO completion_contracts(instance_id,contract_id,contract_version,"
+                "work_thread_key,cycle,mode,contract_json,created_at) VALUES(?,?,?,?,?,?,?,?)",
                 (
                     instance_id,
                     contract.id,
-                    contract.work_thread_id,
                     contract.version,
+                    contract.work_thread_id,
                     contract.cycle,
                     contract.mode,
                     payload,
@@ -76,22 +78,27 @@ class CompletionStore:
             )
             connection.execute(
                 "INSERT OR IGNORE INTO completion_threads(instance_id,work_thread_key,"
-                "current_assessment_id,updated_at) VALUES(?,?,'',?)",
-                (instance_id, contract.work_thread_id, contract.created_at),
+                "current_assessment_id,created_at,updated_at) VALUES(?,?,'',?,?)",
+                (instance_id, contract.work_thread_id, contract.created_at, contract.created_at),
             )
             return True
 
-    def get_contract(self, instance_id: str, contract_id: str) -> CompletionContract:
+    def get_contract(
+        self, instance_id: str, contract_id: str, contract_version: int
+    ) -> CompletionContract:
         with self.store.connect() as connection:
             row = connection.execute(
                 "SELECT contract_json FROM completion_contracts "
-                "WHERE instance_id=? AND contract_id=?",
-                (instance_id, contract_id),
+                "WHERE instance_id=? AND contract_id=? AND contract_version=?",
+                (instance_id, contract_id, contract_version),
             ).fetchone()
         if row is None:
             raise SchemaError(
                 code="not_found",
-                message=f"CompletionContract {contract_id} not found for {instance_id}",
+                message=(
+                    f"CompletionContract {contract_id} v{contract_version} not found "
+                    f"for {instance_id}"
+                ),
                 recovery_hint="Record the contract before evaluating it.",
             )
         return CompletionContract.from_dict(json.loads(row["contract_json"]))
@@ -146,13 +153,57 @@ class CompletionStore:
     # -- waivers --------------------------------------------------------------
 
     def record_waiver(self, instance_id: str, waiver: CompletionWaiver) -> bool:
+        """Insert-or-verify an immutable waiver bound to an existing contract snapshot."""
         with self.store.transaction() as connection:
             row = connection.execute(
-                "SELECT waiver_id FROM completion_waivers WHERE instance_id=? AND waiver_id=?",
+                "SELECT * FROM completion_waivers WHERE instance_id=? AND waiver_id=?",
                 (instance_id, waiver.id),
             ).fetchone()
             if row is not None:
+                same = (
+                    row["contract_id"] == waiver.contract_id
+                    and row["contract_version"] == waiver.contract_version
+                    and row["cycle"] == waiver.cycle
+                    and row["run_id"] == waiver.run_id
+                    and row["actor_id"] == waiver.actor.actor_id
+                    and row["actor_handle"] == waiver.actor.handle
+                    and row["reason"] == waiver.reason
+                    and row["scope"] == waiver.scope
+                    and row["policy_scope"] == waiver.policy_scope
+                    and tuple(json.loads(row["gate_ids_json"])) == waiver.gate_ids
+                    and row["waived_at"] == waiver.waived_at
+                    and row["expires_at"] == waiver.expires_at
+                )
+                if not same:
+                    raise SchemaError(
+                        code="immutable_record",
+                        message=f"CompletionWaiver {waiver.id} is immutable",
+                        recovery_hint="Issue a new waiver id instead of editing one.",
+                    )
                 return False
+            contract_row = connection.execute(
+                "SELECT cycle FROM completion_contracts WHERE instance_id=? "
+                "AND contract_id=? AND contract_version=?",
+                (instance_id, waiver.contract_id, waiver.contract_version),
+            ).fetchone()
+            if contract_row is None:
+                raise SchemaError(
+                    code="not_found",
+                    message=(
+                        f"CompletionWaiver {waiver.id} references unknown contract "
+                        f"{waiver.contract_id} v{waiver.contract_version}"
+                    ),
+                    recovery_hint="Record the contract snapshot before waiving its gates.",
+                )
+            if int(contract_row["cycle"]) != waiver.cycle:
+                raise SchemaError(
+                    code="invalid_reference",
+                    message=(
+                        f"CompletionWaiver {waiver.id} cycle {waiver.cycle} does not match "
+                        f"contract cycle {contract_row['cycle']}"
+                    ),
+                    recovery_hint="Issue the waiver for the contract's current cycle.",
+                )
             connection.execute(
                 "INSERT INTO completion_waivers(instance_id,waiver_id,contract_id,"
                 "contract_version,cycle,run_id,actor_id,actor_handle,reason,scope,"
@@ -333,6 +384,15 @@ class CompletionStore:
                     assessment.assessed_at,
                 ),
             )
+            previous_current_state = ""
+            if head:
+                previous_row = connection.execute(
+                    "SELECT state FROM completion_assessments "
+                    "WHERE instance_id=? AND assessment_id=?",
+                    (instance_id, head),
+                ).fetchone()
+                if previous_row is not None:
+                    previous_current_state = previous_row["state"]
             updated = connection.execute(
                 "UPDATE completion_threads SET current_assessment_id=?,updated_at=? "
                 "WHERE instance_id=? AND work_thread_key=? AND current_assessment_id=?",
@@ -349,6 +409,81 @@ class CompletionStore:
                     code="conflict",
                     message="CompletionAssessment head compare-and-swap failed",
                     recovery_hint="Re-read the thread head and retry the append.",
+                )
+            # Upstream steps 8-9: governance events inside the same transaction.
+            connection.execute(
+                "INSERT INTO completion_governance_events(instance_id,work_thread_key,"
+                "event_type,subject_id,payload_json,created_at) VALUES(?,?,?,?,?,?)",
+                (
+                    instance_id,
+                    assessment.work_thread_id,
+                    "completion_assessment.appended",
+                    assessment.id,
+                    json.dumps(
+                        {
+                            "contractId": assessment.contract_id,
+                            "contractVersion": assessment.contract_version,
+                            "cycle": assessment.cycle,
+                            "sequence": assessment.sequence,
+                            "state": assessment.state,
+                            "inputDigest": assessment.input_digest,
+                            "supersedesAssessmentId": assessment.supersedes_assessment_id
+                            or None,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    assessment.assessed_at,
+                ),
+            )
+            accepted = assessment.state in ("satisfied", "waived")
+            was_accepted = previous_current_state in ("satisfied", "waived")
+            if accepted and not was_accepted and assessment.accepted_at:
+                thread_created_row = connection.execute(
+                    "SELECT created_at FROM completion_threads "
+                    "WHERE instance_id=? AND work_thread_key=?",
+                    (instance_id, assessment.work_thread_id),
+                ).fetchone()
+                elapsed_ms = 0
+                if thread_created_row is not None:
+                    from datetime import datetime
+
+                    try:
+                        accepted_at = datetime.fromisoformat(
+                            assessment.accepted_at.replace("Z", "+00:00")
+                        )
+                        created_at = datetime.fromisoformat(
+                            str(thread_created_row["created_at"]).replace("Z", "+00:00")
+                        )
+                        elapsed_ms = max(
+                            0, int((accepted_at - created_at).total_seconds() * 1000)
+                        )
+                    except ValueError:
+                        elapsed_ms = 0
+                connection.execute(
+                    "INSERT INTO completion_governance_events(instance_id,work_thread_key,"
+                    "event_type,subject_id,payload_json,created_at) VALUES(?,?,?,?,?,?)",
+                    (
+                        instance_id,
+                        assessment.work_thread_id,
+                        "success_metric.observed",
+                        assessment.id,
+                        json.dumps(
+                            {
+                                "metric": "time_to_verified_completion_ms",
+                                "value": elapsed_ms,
+                                "acceptedAt": assessment.accepted_at,
+                                "contractId": assessment.contract_id,
+                                "contractVersion": assessment.contract_version,
+                                "cycle": assessment.cycle,
+                                "state": assessment.state,
+                                "evidenceBacked": assessment.evidence_backed,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        assessment.accepted_at,
+                    ),
                 )
             return AppendOutcome(outcome="recorded", assessment=assessment)
 

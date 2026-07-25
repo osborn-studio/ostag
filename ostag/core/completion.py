@@ -48,6 +48,28 @@ RUN_CONCLUSIONS = (
 MATERIAL_ACTION_OUTCOMES = ("succeeded", "failed", "unknown")
 ASSESSED_BY = ("ostag", "human")  # native divergence: upstream uses "opentag"
 
+POLICY_SCOPES = (
+    "organization_default",
+    "adapter_surface_default",
+    "work_context_owner_container",
+    "work_item_override",
+    "primary_anchor_override",
+)
+ARTIFACT_KINDS = (
+    "root_cause_note",
+    "suggested_changes_snapshot",
+    "verification_summary",
+    "patch",
+    "report",
+    "screenshot",
+    "log_summary",
+    "pull_request",
+    "risk_note",
+    "follow_up_task",
+    "audit_trail",
+    "decision_record",
+)
+
 COMPLETION_REASON_CODES = (
     "artifact_requirement_satisfied",
     "artifact_missing",
@@ -120,6 +142,36 @@ def _prune(value: dict[str, Any]) -> dict[str, Any]:
     return {key: item for key, item in value.items() if item not in (None, "", (), [])}
 
 
+def _require_datetime(value: str, name: str, schema: str, *, optional: bool = False) -> None:
+    """ISO-8601 timestamp with an explicit timezone (native-lenient offset form)."""
+    if optional and value == "":
+        return
+    _require(value, name, schema)
+    from datetime import datetime
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+    if parsed is None or parsed.tzinfo is None:
+        raise SchemaError(
+            code="invalid_datetime",
+            message=f"{schema}.{name}={value!r} is not a timezone-aware ISO-8601 timestamp",
+            recovery_hint="Use e.g. 2026-07-26T10:00:00+00:00 (or ...Z).",
+        )
+
+
+def _validate_keys(data: dict[str, Any], allowed: frozenset[str], schema: str) -> None:
+    """Reject unknown wire fields (upstream schemas are .strict())."""
+    unknown = set(data) - allowed
+    if unknown:
+        raise SchemaError(
+            code="unknown_field",
+            message=f"{schema} does not accept field(s): {', '.join(sorted(unknown))}",
+            recovery_hint=f"Allowed fields: {', '.join(sorted(allowed))}.",
+        )
+
+
 @dataclass(frozen=True)
 class ActorRef:
     """Compact actor attribution (native simplification of upstream ActorIdentity)."""
@@ -135,6 +187,7 @@ class ActorRef:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ActorRef":
+        _validate_keys(data, frozenset({"actorId", "handle"}), "ActorRef")
         return cls(actor_id=data.get("actorId", ""), handle=data.get("handle", ""))
 
     @property
@@ -167,6 +220,9 @@ class CompletionTargetSelector:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionTargetSelector":
+        _validate_keys(
+            data, frozenset({"key", "kind", "lineage", "cardinality"}), "CompletionTargetSelector"
+        )
         return cls(
             key=data.get("key", ""),
             kind=data.get("kind", "change_request"),
@@ -198,6 +254,11 @@ class ResolvedCompletionTarget:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ResolvedCompletionTarget":
+        _validate_keys(
+            data,
+            frozenset({"key", "provider", "resourceRef", "resourceVersion", "artifactId"}),
+            "ResolvedCompletionTarget",
+        )
         return cls(
             key=data.get("key", ""),
             provider=data.get("provider", ""),
@@ -228,6 +289,11 @@ class ArtifactTarget:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ArtifactTarget":
+        _validate_keys(
+            data,
+            frozenset({"key", "provider", "resourceRef", "resourceVersion"}),
+            "ArtifactTarget",
+        )
         return cls(
             key=data.get("key", ""),
             provider=data.get("provider", ""),
@@ -247,8 +313,8 @@ class CompletionArtifact:
 
     def __post_init__(self) -> None:
         _require(self.id, "id", "CompletionArtifact")
-        _require(self.kind, "kind", "CompletionArtifact")
-        _require(self.recorded_at, "recorded_at", "CompletionArtifact")
+        _require_choice(self.kind, ARTIFACT_KINDS, "kind", "CompletionArtifact")
+        _require_datetime(self.recorded_at, "recorded_at", "CompletionArtifact")
 
     def to_dict(self) -> dict[str, Any]:
         payload = _prune(
@@ -266,6 +332,11 @@ class CompletionArtifact:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionArtifact":
+        _validate_keys(
+            data,
+            frozenset({"id", "kind", "sourceRunId", "uri", "target", "recordedAt"}),
+            "CompletionArtifact",
+        )
         target = data.get("target")
         return cls(
             id=data.get("id", ""),
@@ -420,9 +491,33 @@ CompletionGate = (
 )
 
 
+_GATE_ALLOWED_KEYS = {
+    "artifact": frozenset({"id", "kind", "targetKey", "artifactKind", "minimum"}),
+    "verification": frozenset(
+        {
+            "id",
+            "kind",
+            "targetKey",
+            "evidenceKind",
+            "requiredObservations",
+            "requiredOutcome",
+            "minimumAssurance",
+        }
+    ),
+    "external_state": frozenset(
+        {"id", "kind", "targetKey", "provider", "requiredState", "minimumAssurance"}
+    ),
+    "material_action": frozenset(
+        {"id", "kind", "targetKey", "actionFamily", "requiredOutcome"}
+    ),
+    "human_acceptance": frozenset({"id", "kind", "targetKey", "requiredRole"}),
+}
+
+
 def gate_from_dict(data: dict[str, Any]) -> CompletionGate:
     kind = data.get("kind", "")
     _require_choice(kind, COMPLETION_GATE_KINDS, "kind", "CompletionGate")
+    _validate_keys(data, _GATE_ALLOWED_KEYS[kind], f"CompletionGate[{kind}]")
     if kind == "artifact":
         return ArtifactGate(
             id=data.get("id", ""),
@@ -468,7 +563,7 @@ class PolicyRef:
     version: str = ""
 
     def __post_init__(self) -> None:
-        _require(self.scope, "scope", "PolicyRef")
+        _require_choice(self.scope, POLICY_SCOPES, "scope", "PolicyRef")
         _require(self.ref, "ref", "PolicyRef")
 
     def to_dict(self) -> dict[str, Any]:
@@ -476,6 +571,7 @@ class PolicyRef:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "PolicyRef":
+        _validate_keys(data, frozenset({"scope", "ref", "version"}), "PolicyRef")
         return cls(
             scope=data.get("scope", ""),
             ref=data.get("ref", ""),
@@ -507,7 +603,7 @@ class CompletionContract:
             self.max_automatic_retries, "max_automatic_retries", "CompletionContract"
         )
         _require_choice(self.on_satisfied, ON_SATISFIED, "on_satisfied", "CompletionContract")
-        _require(self.created_at, "created_at", "CompletionContract")
+        _require_datetime(self.created_at, "created_at", "CompletionContract")
         if not self.gates:
             raise SchemaError(
                 code="missing_field",
@@ -565,6 +661,25 @@ class CompletionContract:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionContract":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "id",
+                    "version",
+                    "workThreadId",
+                    "cycle",
+                    "mode",
+                    "targetSelectors",
+                    "resolvedFrom",
+                    "gates",
+                    "maxAutomaticRetries",
+                    "onSatisfied",
+                    "createdAt",
+                }
+            ),
+            "CompletionContract",
+        )
         return cls(
             id=data.get("id", ""),
             version=data.get("version", 0),
@@ -607,6 +722,9 @@ class EvidenceSubject:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvidenceSubject":
+        _validate_keys(
+            data, frozenset({"provider", "resourceRef", "resourceVersion"}), "EvidenceSubject"
+        )
         return cls(
             provider=data.get("provider", ""),
             resource_ref=data.get("resourceRef", ""),
@@ -632,6 +750,9 @@ class EvidenceClaim:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvidenceClaim":
+        _validate_keys(
+            data, frozenset({"predicate", "outcome", "observations"}), "EvidenceClaim"
+        )
         return cls(
             predicate=data.get("predicate", ""),
             outcome=data.get("outcome", ""),
@@ -664,6 +785,19 @@ class EvidenceProvenance:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EvidenceProvenance":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "adapter",
+                    "adapterVersion",
+                    "payloadDigest",
+                    "sourceEventId",
+                    "providerDeliveryId",
+                }
+            ),
+            "EvidenceProvenance",
+        )
         return cls(
             adapter=data.get("adapter", ""),
             adapter_version=data.get("adapterVersion", ""),
@@ -694,8 +828,8 @@ class CompletionEvidenceFact:
         _require_choice(
             self.assurance, EVIDENCE_ASSURANCES, "assurance", "CompletionEvidenceFact"
         )
-        _require(self.observed_at, "observed_at", "CompletionEvidenceFact")
-        _require(self.received_at, "received_at", "CompletionEvidenceFact")
+        _require_datetime(self.observed_at, "observed_at", "CompletionEvidenceFact")
+        _require_datetime(self.received_at, "received_at", "CompletionEvidenceFact")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -713,6 +847,24 @@ class CompletionEvidenceFact:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionEvidenceFact":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "id",
+                    "workThreadId",
+                    "cycle",
+                    "kind",
+                    "assurance",
+                    "subject",
+                    "claim",
+                    "provenance",
+                    "observedAt",
+                    "receivedAt",
+                }
+            ),
+            "CompletionEvidenceFact",
+        )
         return cls(
             id=data.get("id", ""),
             work_thread_id=data.get("workThreadId", ""),
@@ -738,7 +890,7 @@ class CompletionRunResult:
     def __post_init__(self) -> None:
         _require(self.run_id, "run_id", "CompletionRunResult")
         _require_choice(self.conclusion, RUN_CONCLUSIONS, "conclusion", "CompletionRunResult")
-        _require(self.recorded_at, "recorded_at", "CompletionRunResult")
+        _require_datetime(self.recorded_at, "recorded_at", "CompletionRunResult")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -749,6 +901,9 @@ class CompletionRunResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionRunResult":
+        _validate_keys(
+            data, frozenset({"runId", "conclusion", "recordedAt"}), "CompletionRunResult"
+        )
         return cls(
             run_id=data.get("runId", ""),
             conclusion=data.get("conclusion", ""),
@@ -771,7 +926,7 @@ class MaterialActionReceiptFact:
         _require_choice(
             self.outcome, MATERIAL_ACTION_OUTCOMES, "outcome", "MaterialActionReceiptFact"
         )
-        _require(self.observed_at, "observed_at", "MaterialActionReceiptFact")
+        _require_datetime(self.observed_at, "observed_at", "MaterialActionReceiptFact")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -783,6 +938,11 @@ class MaterialActionReceiptFact:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MaterialActionReceiptFact":
+        _validate_keys(
+            data,
+            frozenset({"id", "actionFamily", "outcome", "observedAt"}),
+            "MaterialActionReceiptFact",
+        )
         return cls(
             id=data.get("id", ""),
             action_family=data.get("actionFamily", ""),
@@ -808,7 +968,7 @@ class CompletionGateResult:
             self.reason_code, COMPLETION_REASON_CODES, "reason_code", "CompletionGateResult"
         )
         _require(self.reason, "reason", "CompletionGateResult")
-        _require(self.evaluated_at, "evaluated_at", "CompletionGateResult")
+        _require_datetime(self.evaluated_at, "evaluated_at", "CompletionGateResult")
 
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -825,6 +985,21 @@ class CompletionGateResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionGateResult":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "gateId",
+                    "targetKey",
+                    "state",
+                    "evidenceIds",
+                    "reasonCode",
+                    "reason",
+                    "evaluatedAt",
+                }
+            ),
+            "CompletionGateResult",
+        )
         return cls(
             gate_id=data.get("gateId", ""),
             state=data.get("state", ""),
@@ -857,9 +1032,10 @@ class CompletionWaiver:
         _require_positive(self.contract_version, "contract_version", "CompletionWaiver")
         _require_positive(self.cycle, "cycle", "CompletionWaiver")
         _require(self.reason, "reason", "CompletionWaiver")
-        _require(self.policy_scope, "policy_scope", "CompletionWaiver")
+        _require_choice(self.policy_scope, POLICY_SCOPES, "policy_scope", "CompletionWaiver")
         _require_choice(self.scope, ("selected_gates",), "scope", "CompletionWaiver")
-        _require(self.waived_at, "waived_at", "CompletionWaiver")
+        _require_datetime(self.waived_at, "waived_at", "CompletionWaiver")
+        _require_datetime(self.expires_at, "expires_at", "CompletionWaiver", optional=True)
         if not self.gate_ids:
             raise SchemaError(
                 code="missing_field",
@@ -894,6 +1070,26 @@ class CompletionWaiver:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionWaiver":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "id",
+                    "runId",
+                    "contractId",
+                    "contractVersion",
+                    "cycle",
+                    "actor",
+                    "reason",
+                    "scope",
+                    "policyScope",
+                    "gateIds",
+                    "waivedAt",
+                    "expiresAt",
+                }
+            ),
+            "CompletionWaiver",
+        )
         return cls(
             id=data.get("id", ""),
             contract_id=data.get("contractId", ""),
@@ -925,7 +1121,8 @@ class EscalationInput:
         _require(self.id, "id", "EscalationInput")
         _require(self.state, "state", "EscalationInput")
         _require(self.reason, "reason", "EscalationInput")
-        _require(self.opened_at, "opened_at", "EscalationInput")
+        _require_datetime(self.opened_at, "opened_at", "EscalationInput")
+        _require_datetime(self.resolved_at, "resolved_at", "EscalationInput", optional=True)
 
     @property
     def active(self) -> bool:
@@ -945,6 +1142,11 @@ class EscalationInput:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "EscalationInput":
+        _validate_keys(
+            data,
+            frozenset({"id", "blocking", "state", "reason", "openedAt", "resolvedAt"}),
+            "EscalationInput",
+        )
         return cls(
             id=data.get("id", ""),
             blocking=bool(data.get("blocking", False)),
@@ -984,7 +1186,8 @@ class CompletionAssessment:
         _require_positive(self.sequence, "sequence", "CompletionAssessment")
         _require_choice(self.state, COMPLETION_STATES, "state", "CompletionAssessment")
         _require_choice(self.assessed_by, ASSESSED_BY, "assessed_by", "CompletionAssessment")
-        _require(self.assessed_at, "assessed_at", "CompletionAssessment")
+        _require_datetime(self.assessed_at, "assessed_at", "CompletionAssessment")
+        _require_datetime(self.accepted_at, "accepted_at", "CompletionAssessment", optional=True)
         if not (
             self.input_digest.startswith("sha256:")
             and len(self.input_digest) == len("sha256:") + 64
@@ -1000,6 +1203,43 @@ class CompletionAssessment:
                 code="missing_field",
                 message="CompletionAssessment.gate_results must contain at least one result",
                 recovery_hint="Include the evaluated gate results.",
+            )
+        # Upstream superRefine invariants (schema.ts 762-810):
+        binding_keys = [binding.key for binding in self.target_bindings]
+        if len(set(binding_keys)) != len(binding_keys):
+            raise SchemaError(
+                code="duplicate_key",
+                message="Resolved completion target key must be unique",
+                recovery_hint="Each target binding key may appear once.",
+            )
+        result_ids = [result.gate_id for result in self.gate_results]
+        if len(set(result_ids)) != len(result_ids):
+            raise SchemaError(
+                code="duplicate_key",
+                message="Completion gate result must be unique",
+                recovery_hint="Each gateId may appear once in gateResults.",
+            )
+        if self.state == "waived" and self.waiver is None:
+            raise SchemaError(
+                code="invalid_assessment",
+                message="A waived completion assessment requires waiver attribution",
+                recovery_hint="Attach the active waiver to the assessment.",
+            )
+        if self.waiver is not None and self.assessed_by != "human":
+            raise SchemaError(
+                code="invalid_assessment",
+                message="A completion waiver must be assessed by a human",
+                recovery_hint="Set assessedBy to 'human' when a waiver applies.",
+            )
+        if self.waiver is not None and (
+            self.waiver.contract_id != self.contract_id
+            or self.waiver.contract_version != self.contract_version
+            or self.waiver.cycle != self.cycle
+        ):
+            raise SchemaError(
+                code="invalid_assessment",
+                message="A completion waiver must target the assessed contract version and cycle",
+                recovery_hint="Use a waiver issued for this contract id/version/cycle.",
             )
 
     def to_dict(self) -> dict[str, Any]:
@@ -1030,6 +1270,31 @@ class CompletionAssessment:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "CompletionAssessment":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "id",
+                    "workThreadId",
+                    "triggeredByRunId",
+                    "contractId",
+                    "contractVersion",
+                    "cycle",
+                    "sequence",
+                    "inputDigest",
+                    "targetBindings",
+                    "state",
+                    "evidenceBacked",
+                    "gateResults",
+                    "assessedAt",
+                    "assessedBy",
+                    "supersedesAssessmentId",
+                    "acceptedAt",
+                    "waiver",
+                }
+            ),
+            "CompletionAssessment",
+        )
         waiver = data.get("waiver")
         return cls(
             id=data.get("id", ""),
