@@ -138,6 +138,50 @@ class TestSnapshotModel:
         with pytest.raises(SchemaError):
             snapshot(captured_at="2026-07-26T10:00:00+08:00")
 
+    def test_missing_required_wire_keys_are_rejected(self):
+        # Upstream schema.ts marks these required (no .optional()).
+        for key in ("projectTargets", "connectionRefs", "permissions", "constraints"):
+            data = snapshot().to_dict()
+            del data[key]
+            with pytest.raises(SchemaError) as excinfo:
+                AgentAccessProfileSnapshot.from_dict(data)
+            assert excinfo.value.code == "missing_field"
+
+    def test_string_project_targets_do_not_decompose_into_characters(self):
+        data = snapshot().to_dict()
+        data["projectTargets"] = "ostag"  # a bare string, not a list
+        with pytest.raises(SchemaError) as excinfo:
+            AgentAccessProfileSnapshot.from_dict(data)
+        assert excinfo.value.code == "invalid_type"
+        with pytest.raises(SchemaError):
+            snapshot(project_targets="ostag")  # constructor path too
+
+    def test_non_string_and_empty_array_elements_are_rejected(self):
+        data = snapshot().to_dict()
+        data["projectTargets"] = ["ostag", 7]
+        with pytest.raises(SchemaError):
+            AgentAccessProfileSnapshot.from_dict(data)
+        with pytest.raises(SchemaError):
+            ConnectionRef(
+                id="c", provider="p", custody="agent", broker_ref="b",
+                declared_capabilities=("ok", ""),
+            )
+        with pytest.raises(SchemaError):
+            AccessConstraints(allowed_executor_ids=(1, 2))
+
+    def test_connection_ref_and_object_lists_are_typed(self):
+        ref = snapshot().to_dict()
+        ref["connectionRefs"] = ["not-an-object"]
+        with pytest.raises(SchemaError):
+            AgentAccessProfileSnapshot.from_dict(ref)
+        conn = ConnectionRef(
+            id="c", provider="p", custody="agent", broker_ref="b"
+        ).to_dict()
+        del conn["declaredCapabilities"]
+        with pytest.raises(SchemaError) as excinfo:
+            ConnectionRef.from_dict(conn)
+        assert excinfo.value.code == "missing_field"
+
     def test_digest_is_stable_and_content_sensitive(self):
         a = snapshot()
         assert a.content_digest() == snapshot().content_digest()
@@ -308,15 +352,59 @@ class TestProjectorShadowCapture:
         assert result.applied_sequences == (1,)
         assert monitor.get_task("macbook", "task-1").status == "todo"
 
+    def test_reconcile_recovers_capture_lost_to_hook_failure(self, env, monkeypatch):
+        """A failed hook loses the capture and the replay is a duplicate —
+        reconcile() must recover it from the durable events table."""
+        monitor, store = env
+        monkeypatch.setattr(
+            store, "capture_from_task_event", lambda _e: (_ for _ in ()).throw(RuntimeError())
+        )
+        projector = Projector(monitor, access_snapshots=store)
+        projector.apply(event("macbook", 1, "task-1"))
+        assert projector.apply(event("macbook", 1, "task-1")).duplicate is True
+        monkeypatch.undo()
+        with pytest.raises(SchemaError):
+            store.get("macbook", "aps_task-1")
+        assert store.reconcile() == 1
+        assert store.get("macbook", "aps_task-1").agent_principal.id == "codex"
+        assert store.reconcile() == 0  # idempotent
+
+    def test_reconcile_recovers_after_restart_without_hook(self, env):
+        """Simulates a crash between commit and capture: events are durable,
+        snapshots are missing, and a fresh store reconciles them."""
+        monitor, store = env
+        Projector(monitor).apply(event("macbook", 1, "task-1"))  # no hook = lost capture
+        fresh = AccessSnapshotStore(monitor)
+        assert fresh.reconcile() == 1
+        assert fresh.get("macbook", "aps_task-1").ostag_binding.instance_id == "macbook"
+
+    def test_reconcile_skips_buffered_unprojected_events(self, env):
+        monitor, store = env
+        projector = Projector(monitor)  # hookless: every capture is missing
+        assert projector.apply(event("macbook", 2, "task-2")).buffered is True
+        assert store.reconcile() == 0  # still pending → not projected → skipped
+        projector.apply(event("macbook", 1, "task-1"))  # drains sequence 2
+        assert store.reconcile() == 2
+        assert store.get("macbook", "aps_task-2") is not None
+
+    def test_reconcile_scoped_to_instance(self, env):
+        monitor, store = env
+        Projector(monitor).apply(event("macbook", 1, "task-1"))
+        Projector(monitor).apply(event("macmini", 1, "task-9"))
+        assert store.reconcile("macbook") == 1
+        with pytest.raises(SchemaError):
+            store.get("macmini", "aps_task-9")
+
     def test_projector_without_hook_is_unchanged(self, env):
         monitor, _ = env
         projector = Projector(monitor)
         result = projector.apply(event("macbook", 1, "task-1"))
         assert result.applied_sequences == (1,)
 
-    def test_hooked_projection_is_byte_identical_to_unhooked(self, tmp_path):
+    def test_hooked_projection_is_equivalent_to_unhooked(self, tmp_path):
         """Shadow capture must not perturb projection: identical event corpus →
-        identical ApplyResults and identical events/tasks/pending tables."""
+        identical ApplyResults and logically identical events/tasks/pending/
+        instances table contents (row-for-row equality, not file-level bytes)."""
         corpus = [
             event("macbook", 1, "task-1"),
             event("macbook", 3, "task-3"),  # gap → buffered
@@ -356,8 +444,9 @@ def test_migration_v22_is_additive_from_v21_fixture(tmp_path: Path) -> None:
             for statement in migration.statements:
                 try:
                     connection.execute(statement)
-                except sqlite3.OperationalError:
-                    pass  # duplicate-column idempotency mirrors MonitorStore._migrate
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc):
+                        raise  # only ADD COLUMN idempotency is expected here
         connection.execute(
             "INSERT INTO tasks(instance_id,task_id,title,project,status,agent,progress,"
             "duration_seconds,summary,occurred_at) VALUES('macmini','t1','旧任务','p',"

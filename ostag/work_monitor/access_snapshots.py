@@ -79,6 +79,12 @@ class AccessSnapshotStore:
             return True
 
     def get(self, instance_id: str, snapshot_id: str) -> AgentAccessProfileSnapshot:
+        """Internal, UNREDACTED read (includes broker refs and grant reasons).
+
+        Not identity-gated and never to be exposed over HTTP or a board
+        surface — external consumers go through ``personal_views`` /
+        ``admin_views``, which are gated and redacted.
+        """
         with self.store.connect() as connection:
             row = connection.execute(
                 "SELECT snapshot_json FROM access_profile_snapshots "
@@ -141,6 +147,38 @@ class AccessSnapshotStore:
         ]
 
     # -- shadow capture -------------------------------------------------------
+
+    def reconcile(self, instance_id: str | None = None) -> int:
+        """Recover captures lost after the projection commit.
+
+        The post-projection hook is best-effort: a capture exception or a
+        crash between the commit and the hook loses the snapshot, and the
+        event replay is then classified as a duplicate (so the hook never
+        fires again). Reconciliation re-derives snapshots from the durable
+        ``events`` table: every projected ``task.created`` event must have a
+        snapshot row. Events still buffered in ``pending_events`` (not yet
+        projected) are skipped, keeping capture keyed to projection. Returns
+        the number of snapshots created. Idempotent.
+        """
+        from ostag.work_monitor.store import decode_event
+
+        query = (
+            "SELECT e.payload FROM events e WHERE e.kind='task.created' "
+            "AND NOT EXISTS (SELECT 1 FROM pending_events p "
+            "WHERE p.instance_id=e.instance_id AND p.sequence=e.sequence)"
+        )
+        params: tuple = ()
+        if instance_id is not None:
+            query += " AND e.instance_id=?"
+            params = (instance_id,)
+        query += " ORDER BY e.instance_id, e.sequence"
+        with self.store.connect() as connection:
+            payloads = [str(row["payload"]) for row in connection.execute(query, params)]
+        created = 0
+        for payload in payloads:
+            if self.capture_from_task_event(decode_event(payload)):
+                created += 1
+        return created
 
     def capture_from_task_event(self, event: MonitorEvent) -> bool:
         """Shadow capture on ``task.created``; deterministic snapshot id.

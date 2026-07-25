@@ -162,10 +162,15 @@ def create_app(
             )
             runtime.service = WorkMonitorService(store, identities)
             # Phase 3 shadow hook: best-effort access-profile capture after
-            # projection commits; never on the routing path.
-            runtime.projector = Projector(
-                store, access_snapshots=AccessSnapshotStore(store, identities)
-            )
+            # projection commits; never on the routing path. Startup
+            # reconciliation recovers captures lost to a crash or a failed
+            # hook (also best-effort — it must not block serving).
+            snapshots = AccessSnapshotStore(store, identities)
+            runtime.projector = Projector(store, access_snapshots=snapshots)
+            try:
+                snapshots.reconcile()
+            except Exception:  # noqa: BLE001 - shadow recovery must not block startup
+                pass
         if auth is None:
             auth = ServerAuth(
                 dict(configured.monitor_instance_secrets),

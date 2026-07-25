@@ -44,6 +44,54 @@ def _instant(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _require_str_tuple(value: object, name: str, schema: str) -> tuple[str, ...]:
+    """Upstream arrays are lists of non-empty strings; a bare string or other
+    iterable must not silently decompose into elements."""
+    if not isinstance(value, (list, tuple)):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{name} must be a list of strings",
+            recovery_hint=f"Provide '{name}' as a JSON array of non-empty strings.",
+        )
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise SchemaError(
+                code="invalid_type",
+                message=f"{schema}.{name} elements must be non-empty strings",
+                recovery_hint=f"Remove empty or non-string entries from '{name}'.",
+            )
+    return tuple(value)
+
+
+def _require_wire_keys(data: dict[str, Any], required: frozenset[str], schema: str) -> None:
+    """Upstream schemas require these keys to be present on the wire."""
+    if not isinstance(data, dict):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema} payload must be an object",
+            recovery_hint=f"Provide {schema} as a JSON object.",
+        )
+    missing = required - set(data)
+    if missing:
+        raise SchemaError(
+            code="missing_field",
+            message=f"{schema} is missing required field(s): {', '.join(sorted(missing))}",
+            recovery_hint=f"Provide: {', '.join(sorted(required))}.",
+        )
+
+
+def _require_object_list(value: object, name: str, schema: str) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, (list, tuple)) or any(
+        not isinstance(item, dict) for item in value
+    ):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{name} must be a list of objects",
+            recovery_hint=f"Provide '{name}' as a JSON array of objects.",
+        )
+    return tuple(value)
+
+
 @dataclass(frozen=True)
 class AgentPrincipal:
     id: str
@@ -124,6 +172,7 @@ class ConnectionRef:
         _require(self.provider, "provider", "ConnectionRef")
         _require_choice(self.custody, CONNECTION_CUSTODY, "custody", "ConnectionRef")
         _require(self.broker_ref, "broker_ref", "ConnectionRef")
+        _require_str_tuple(self.declared_capabilities, "declared_capabilities", "ConnectionRef")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -141,12 +190,19 @@ class ConnectionRef:
             frozenset({"id", "provider", "custody", "brokerRef", "declaredCapabilities"}),
             "ConnectionRef",
         )
+        _require_wire_keys(
+            data,
+            frozenset({"id", "provider", "custody", "brokerRef", "declaredCapabilities"}),
+            "ConnectionRef",
+        )
         return cls(
             id=data.get("id", ""),
             provider=data.get("provider", ""),
             custody=data.get("custody", ""),
             broker_ref=data.get("brokerRef", ""),
-            declared_capabilities=tuple(data.get("declaredCapabilities", ())),
+            declared_capabilities=_require_str_tuple(
+                data.get("declaredCapabilities"), "declaredCapabilities", "ConnectionRef"
+            ),
         )
 
 
@@ -164,6 +220,8 @@ class AccessConstraints:
             _require_choice(
                 self.maximum_risk_tier, ACTION_RISK_TIERS, "maximum_risk_tier", "AccessConstraints"
             )
+        _require_str_tuple(self.allowed_executor_ids, "allowed_executor_ids", "AccessConstraints")
+        _require_str_tuple(self.allowed_runner_ids, "allowed_runner_ids", "AccessConstraints")
 
     def to_dict(self) -> dict[str, Any]:
         return _prune(
@@ -187,8 +245,12 @@ class AccessConstraints:
         return cls(
             locality=data.get("locality", ""),
             maximum_risk_tier=data.get("maximumRiskTier", ""),
-            allowed_executor_ids=tuple(data.get("allowedExecutorIds", ())),
-            allowed_runner_ids=tuple(data.get("allowedRunnerIds", ())),
+            allowed_executor_ids=_require_str_tuple(
+                data.get("allowedExecutorIds", ()), "allowedExecutorIds", "AccessConstraints"
+            ),
+            allowed_runner_ids=_require_str_tuple(
+                data.get("allowedRunnerIds", ()), "allowedRunnerIds", "AccessConstraints"
+            ),
         )
 
 
@@ -252,6 +314,20 @@ class AgentAccessProfileSnapshot:
     def __post_init__(self) -> None:
         _require(self.id, "id", "AgentAccessProfileSnapshot")
         _require(self.policy_snapshot_id, "policy_snapshot_id", "AgentAccessProfileSnapshot")
+        _require_str_tuple(self.project_targets, "project_targets", "AgentAccessProfileSnapshot")
+        for name, expected, items in (
+            ("connection_refs", ConnectionRef, self.connection_refs),
+            ("permissions", PermissionGrantRef, self.permissions),
+        ):
+            if not isinstance(items, tuple) or any(
+                not isinstance(item, expected) for item in items
+            ):
+                raise SchemaError(
+                    code="invalid_type",
+                    message=f"AgentAccessProfileSnapshot.{name} must be a tuple of "
+                    f"{expected.__name__}",
+                    recovery_hint=f"Build '{name}' from {expected.__name__} values.",
+                )
         _require_datetime(self.captured_at, "captured_at", "AgentAccessProfileSnapshot")
         _require_datetime(
             self.expires_at, "expires_at", "AgentAccessProfileSnapshot", optional=True
@@ -317,6 +393,26 @@ class AgentAccessProfileSnapshot:
             ),
             "AgentAccessProfileSnapshot",
         )
+        # Upstream requires these on the wire (schema.ts fields without
+        # .optional()); to_dict always emits them, so round-trips stay safe.
+        _require_wire_keys(
+            data,
+            frozenset(
+                {
+                    "id",
+                    "agentPrincipal",
+                    "requestedBy",
+                    "projectTargets",
+                    "connectionRefs",
+                    "permissions",
+                    "constraints",
+                    "policySnapshotId",
+                    "capturedAt",
+                    "ostagBinding",
+                }
+            ),
+            "AgentAccessProfileSnapshot",
+        )
         return cls(
             id=data.get("id", ""),
             agent_principal=AgentPrincipal.from_dict(data.get("agentPrincipal", {})),
@@ -324,12 +420,20 @@ class AgentAccessProfileSnapshot:
             policy_snapshot_id=data.get("policySnapshotId", ""),
             captured_at=data.get("capturedAt", ""),
             ostag_binding=OstagBinding.from_dict(data.get("ostagBinding", {})),
-            project_targets=tuple(data.get("projectTargets", ())),
+            project_targets=_require_str_tuple(
+                data.get("projectTargets"), "projectTargets", "AgentAccessProfileSnapshot"
+            ),
             connection_refs=tuple(
-                ConnectionRef.from_dict(ref) for ref in data.get("connectionRefs", ())
+                ConnectionRef.from_dict(ref)
+                for ref in _require_object_list(
+                    data.get("connectionRefs"), "connectionRefs", "AgentAccessProfileSnapshot"
+                )
             ),
             permissions=tuple(
-                PermissionGrantRef.from_dict(grant) for grant in data.get("permissions", ())
+                PermissionGrantRef.from_dict(grant)
+                for grant in _require_object_list(
+                    data.get("permissions"), "permissions", "AgentAccessProfileSnapshot"
+                )
             ),
             constraints=AccessConstraints.from_dict(data.get("constraints", {})),
             expires_at=data.get("expiresAt", ""),
