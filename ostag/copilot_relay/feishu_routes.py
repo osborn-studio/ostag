@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from uuid import uuid4
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -53,6 +54,7 @@ class CopilotFeishuController:
         canary_session_ids: frozenset[str] = frozenset(),
         status_service: OsstackStatusBoardService | None = None,
         status_board_enabled: bool = False,
+        route_explainer=None,
     ) -> None:
         self.service = service
         self.store = service.store
@@ -61,6 +63,59 @@ class CopilotFeishuController:
         self.canary_session_ids = canary_session_ids
         self.status_service = status_service
         self.status_board_enabled = status_board_enabled
+        # Phase 5: optional read-only explanation layer. When absent, every
+        # call goes straight to the service — behavior is identical either
+        # way (proven by the corpus equivalence tests).
+        self.route_explainer = route_explainer
+
+    # -- Phase 5 routing indirection (read-only explanations) -----------------
+
+    def _decision_stamp(self, event_id: str | None, suffix: str = "") -> tuple[str, str]:
+        identifier = event_id or uuid4().hex
+        return f"rd_{identifier}{suffix}", self.clock().isoformat()
+
+    def _routed_handle_text(
+        self, principal, text, *, quote_message_id=None, event_id=None, suffix=""
+    ) -> RelayResult:
+        if self.route_explainer is None:
+            return self.service.handle_text(
+                principal, text, quote_message_id=quote_message_id, event_id=event_id
+            )
+        decision_id, decided_at = self._decision_stamp(event_id, suffix)
+        result, _ = self.route_explainer.handle_text(
+            principal, text, quote_message_id=quote_message_id, event_id=event_id,
+            decision_id=decision_id, decided_at=decided_at,
+        )
+        return result
+
+    def _routed_answer_decision(
+        self, principal, decision_message_id, answer, *, event_id=None
+    ) -> RelayResult:
+        # answer_decision is handle_text with a quoted decision message.
+        return self._routed_handle_text(
+            principal, answer, quote_message_id=decision_message_id, event_id=event_id
+        )
+
+    def _routed_snapshot(self, principal, *, event_id=None) -> RelayResult:
+        if self.route_explainer is None:
+            return self.service.request_snapshot(principal, event_id=event_id)
+        decision_id, decided_at = self._decision_stamp(event_id, "_snapshot")
+        result, _ = self.route_explainer.request_snapshot(
+            principal, event_id=event_id, decision_id=decision_id, decided_at=decided_at
+        )
+        return result
+
+    def _routed_confirm(self, principal, proposal, *, confirmed_at, event_id=None) -> RelayResult:
+        if self.route_explainer is None:
+            return self.service.confirm_task_proposal(
+                principal, proposal, confirmed_at=confirmed_at
+            )
+        decision_id, decided_at = self._decision_stamp(event_id, "_confirm")
+        result, _ = self.route_explainer.confirm_task_proposal(
+            principal, proposal, confirmed_at=confirmed_at,
+            decision_id=decision_id, decided_at=decided_at,
+        )
+        return result
 
     @staticmethod
     def callback_value(callback_id: str) -> dict[str, str]:
@@ -143,7 +198,7 @@ class CopilotFeishuController:
             return self._picker(principal, destination)
         try:
             if text in {"/最新回复", "最新回复"}:
-                result = self.service.request_snapshot(principal, event_id=event.event_id)
+                result = self._routed_snapshot(principal, event_id=event.event_id)
                 return FeishuRelayResponse(
                     "已请求最新回复，收到本地安全快照后会发送给你。",
                     relay_message_id=result.outbound.message_id if result.outbound else None,
@@ -155,7 +210,7 @@ class CopilotFeishuController:
                 )
                 if quote_relay_id is None:
                     return FeishuRelayResponse("引用消息不是有效的 Copilot 决策，请查看当前任务。")
-            result = self.service.handle_text(
+            result = self._routed_handle_text(
                 principal,
                 text,
                 quote_message_id=quote_relay_id,
@@ -178,8 +233,8 @@ class CopilotFeishuController:
                         runtime_id=target.runtime_id,
                         selected_at=self.clock().isoformat().replace("+00:00", "Z"),
                     )
-                    result = self.service.handle_text(
-                        principal, text, event_id=event.event_id
+                    result = self._routed_handle_text(
+                        principal, text, event_id=event.event_id, suffix="_r2"
                     )
                     return self._result(result, principal, destination)
                 return self._picker(principal, destination)
@@ -335,7 +390,9 @@ class CopilotFeishuController:
                     "已切换当前任务。", self._current_card(session, principal, destination)
                 )
             if action == "snapshot":
-                result = self.service.request_snapshot(principal)
+                result = self._routed_snapshot(
+                    principal, event_id=f"callback_{callback_id}"
+                )
                 return FeishuRelayResponse(
                     "已请求最新回复，收到后会发送给你。",
                     relay_message_id=result.outbound.message_id if result.outbound else None,
@@ -350,7 +407,7 @@ class CopilotFeishuController:
                     for choice in source.payload["choices"]
                     if choice["choice_id"] == choice_id
                 )
-                result = self.service.answer_decision(
+                result = self._routed_answer_decision(
                     principal, message_id, label, event_id=f"callback_{callback_id}"
                 )
                 return self._result(result, principal, destination)
@@ -385,7 +442,7 @@ class CopilotFeishuController:
                     for choice in source.payload["choices"]
                     if choice["choice_id"] == target["choice_id"]
                 )
-                result = self.service.answer_decision(
+                result = self._routed_answer_decision(
                     principal,
                     source.message_id,
                     label,
@@ -396,10 +453,11 @@ class CopilotFeishuController:
                 proposal = self.store.proposal_envelope(reference)
                 if proposal is None:
                     raise RelayRoutingError("proposal not found")
-                result = self.service.confirm_task_proposal(
+                result = self._routed_confirm(
                     principal,
                     proposal,
                     confirmed_at=self.clock().isoformat().replace("+00:00", "Z"),
+                    event_id=f"callback_{callback_id}",
                 )
                 return FeishuRelayResponse(
                     "新任务已确认，等待本地 osstack 创建。",

@@ -41,6 +41,34 @@ def _invalid(message: str, hint: str) -> SchemaError:
     return SchemaError(code="invalid_routing_decision", message=message, recovery_hint=hint)
 
 
+def _as_object(data: object, schema: str) -> dict[str, Any]:
+    """Wire roots and nested objects must be JSON objects; anything else
+    (null, false, lists) is rejected as SchemaError, never a TypeError."""
+    if not isinstance(data, dict):
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema} payload must be an object",
+            recovery_hint=f"Provide {schema} as a JSON object.",
+        )
+    return data
+
+
+def _optional_wire_str(data: dict[str, Any], key: str, schema: str) -> str:
+    """Upstream `.optional()` string fields are not nullable and keep their
+    min(1)/enum validation when present: an ABSENT key means unset; a present
+    key must be a non-empty string."""
+    if key not in data:
+        return ""
+    value = data[key]
+    if not isinstance(value, str) or not value:
+        raise SchemaError(
+            code="invalid_type",
+            message=f"{schema}.{key}, when present, must be a non-empty string",
+            recovery_hint=f"Omit '{key}' or provide a non-empty string.",
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class RoutingCandidateReason:
     code: str
@@ -55,6 +83,7 @@ class RoutingCandidateReason:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoutingCandidateReason":
+        data = _as_object(data, "RoutingCandidateReason")
         keys = frozenset({"code", "message"})
         _validate_keys(data, keys, "RoutingCandidateReason")
         _require_wire_keys(data, keys, "RoutingCandidateReason")
@@ -83,6 +112,7 @@ class RoutingCapacity:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoutingCapacity":
+        data = _as_object(data, "RoutingCapacity")
         keys = frozenset({"active", "limit"})
         _validate_keys(data, keys, "RoutingCapacity")
         _require_wire_keys(data, keys, "RoutingCapacity")
@@ -153,6 +183,7 @@ class RoutingCandidate:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoutingCandidate":
+        data = _as_object(data, "RoutingCandidate")
         _validate_keys(
             data,
             frozenset(
@@ -165,7 +196,6 @@ class RoutingCandidate:
             frozenset({"runnerId", "executorId", "eligible", "reasons"}),
             "RoutingCandidate",
         )
-        capacity = data.get("capacity")
         return cls(
             runner_id=data.get("runnerId", ""),
             executor_id=data.get("executorId", ""),
@@ -176,9 +206,13 @@ class RoutingCandidate:
                     data.get("reasons"), "reasons", "RoutingCandidate"
                 )
             ),
-            locality=data.get("locality", ""),
-            readiness=data.get("readiness", ""),
-            capacity=RoutingCapacity.from_dict(capacity) if capacity is not None else None,
+            locality=_optional_wire_str(data, "locality", "RoutingCandidate"),
+            readiness=_optional_wire_str(data, "readiness", "RoutingCandidate"),
+            capacity=(
+                RoutingCapacity.from_dict(_as_object(data["capacity"], "RoutingCapacity"))
+                if "capacity" in data
+                else None
+            ),
         )
 
 
@@ -196,6 +230,7 @@ class SelectedRoute:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SelectedRoute":
+        data = _as_object(data, "SelectedRoute")
         keys = frozenset({"runnerId", "executorId"})
         _validate_keys(data, keys, "SelectedRoute")
         _require_wire_keys(data, keys, "SelectedRoute")
@@ -272,6 +307,7 @@ class RoutingDecision:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoutingDecision":
+        data = _as_object(data, "RoutingDecision")
         _validate_keys(
             data,
             frozenset(
@@ -294,7 +330,6 @@ class RoutingDecision:
             frozenset({"id", "runId", "candidates", "reasonCode", "reason", "decidedAt"}),
             "RoutingDecision",
         )
-        selected = data.get("selected")
         return cls(
             id=data.get("id", ""),
             run_id=data.get("runId", ""),
@@ -307,7 +342,15 @@ class RoutingDecision:
                     data.get("candidates"), "candidates", "RoutingDecision"
                 )
             ),
-            selected=SelectedRoute.from_dict(selected) if selected is not None else None,
-            policy_snapshot_id=data.get("policySnapshotId", ""),
-            access_profile_snapshot_id=data.get("accessProfileSnapshotId", ""),
+            # Upstream .optional() is not nullable: a PRESENT selected must be
+            # a valid object; only an absent key means "no selection".
+            selected=(
+                SelectedRoute.from_dict(_as_object(data["selected"], "SelectedRoute"))
+                if "selected" in data
+                else None
+            ),
+            policy_snapshot_id=_optional_wire_str(data, "policySnapshotId", "RoutingDecision"),
+            access_profile_snapshot_id=_optional_wire_str(
+                data, "accessProfileSnapshotId", "RoutingDecision"
+            ),
         )
