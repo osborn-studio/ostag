@@ -18,6 +18,7 @@ from ostag.config import Settings, load_settings
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
 
+from .access_snapshots import AccessSnapshotStore
 from .identity import Destination, IdentityError, IdentityStore
 from .models import MonitorEvent
 from .projection import Projector
@@ -160,7 +161,11 @@ def create_app(
                 store.path, enrollment_secret=configured.monitor_enrollment_secret
             )
             runtime.service = WorkMonitorService(store, identities)
-            runtime.projector = Projector(store)
+            # Phase 3 shadow hook: best-effort access-profile capture after
+            # projection commits; never on the routing path.
+            runtime.projector = Projector(
+                store, access_snapshots=AccessSnapshotStore(store, identities)
+            )
         if auth is None:
             auth = ServerAuth(
                 dict(configured.monitor_instance_secrets),

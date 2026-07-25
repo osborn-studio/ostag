@@ -1,0 +1,364 @@
+"""Agent access-profile snapshots (Phase 3, shadow mode).
+
+Ported from OpenTag Phase 2 (`amplifthq/opentag` @ ``cc1f4fb``, read at the
+containing head ``de70cca``): ``AgentAccessProfileSnapshotSchema``,
+``AgentPrincipalSchema``, ``PolicySnapshotProvenance`` reference, and the
+``ConnectionRef``/constraint vocabularies in ``packages/core/src/schema.ts``.
+
+Shadow-only this cycle: snapshots are captured at intake, persisted
+immutably with a content digest, and exposed read-only — they are **never**
+consulted to reject intake, filter candidates, select a route, or alter
+fallback (see the Phase 3 mapping note).
+
+Declared native mappings (mapping note): ``requestedBy`` is OStag's compact
+``{platform, actorId, handle?}`` principal reference (upstream
+``ActorIdentity``); ``permissions[].scope`` is a free string (upstream binds
+it to ``PermissionScope``); the ``ostagBinding`` block is a native extension
+carrying the existing Device/Runtime/Session/Turn/Version identity, with
+``runner ↔ device/runtime host`` and ``executor ↔ agent adapter``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
+
+from ostag.core.completion import _require, _require_choice, _require_datetime, _validate_keys
+from ostag.core.schemas import SchemaError
+
+AGENT_PRINCIPAL_KINDS = ("opentag_agent", "provider_agent", "custom")
+CONNECTION_CUSTODY = ("agent", "opentag", "operator")
+LOCALITY = ("local_required", "private_required", "hosted_allowed")
+ACTION_RISK_TIERS = ("low", "medium", "high", "critical")
+
+
+def _prune(value: dict[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if item not in (None, "", (), [], {})}
+
+
+def _instant(value: str) -> datetime:
+    """Parse an already-validated UTC timestamp for comparison."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+@dataclass(frozen=True)
+class AgentPrincipal:
+    id: str
+    kind: str
+
+    def __post_init__(self) -> None:
+        _require(self.id, "id", "AgentPrincipal")
+        _require_choice(self.kind, AGENT_PRINCIPAL_KINDS, "kind", "AgentPrincipal")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "kind": self.kind}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentPrincipal":
+        _validate_keys(data, frozenset({"id", "kind"}), "AgentPrincipal")
+        return cls(id=data.get("id", ""), kind=data.get("kind", ""))
+
+
+@dataclass(frozen=True)
+class PrincipalRef:
+    """Native compact form of upstream ActorIdentity (mapping note)."""
+
+    platform: str
+    actor_id: str
+    handle: str = ""
+
+    def __post_init__(self) -> None:
+        _require(self.platform, "platform", "PrincipalRef")
+        _require(self.actor_id, "actor_id", "PrincipalRef")
+
+    def to_dict(self) -> dict[str, Any]:
+        return _prune({"platform": self.platform, "actorId": self.actor_id, "handle": self.handle})
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PrincipalRef":
+        _validate_keys(data, frozenset({"platform", "actorId", "handle"}), "PrincipalRef")
+        return cls(
+            platform=data.get("platform", ""),
+            actor_id=data.get("actorId", ""),
+            handle=data.get("handle", ""),
+        )
+
+
+@dataclass(frozen=True)
+class PermissionGrantRef:
+    scope: str
+    reason: str
+    expires_at: str = ""
+
+    def __post_init__(self) -> None:
+        _require(self.scope, "scope", "PermissionGrantRef")
+        _require(self.reason, "reason", "PermissionGrantRef")
+        _require_datetime(self.expires_at, "expires_at", "PermissionGrantRef", optional=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _prune({"scope": self.scope, "reason": self.reason, "expiresAt": self.expires_at})
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "PermissionGrantRef":
+        _validate_keys(data, frozenset({"scope", "reason", "expiresAt"}), "PermissionGrantRef")
+        return cls(
+            scope=data.get("scope", ""),
+            reason=data.get("reason", ""),
+            expires_at=data.get("expiresAt", ""),
+        )
+
+
+@dataclass(frozen=True)
+class ConnectionRef:
+    id: str
+    provider: str
+    custody: str
+    broker_ref: str
+    declared_capabilities: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require(self.id, "id", "ConnectionRef")
+        _require(self.provider, "provider", "ConnectionRef")
+        _require_choice(self.custody, CONNECTION_CUSTODY, "custody", "ConnectionRef")
+        _require(self.broker_ref, "broker_ref", "ConnectionRef")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "custody": self.custody,
+            "brokerRef": self.broker_ref,
+            "declaredCapabilities": list(self.declared_capabilities),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ConnectionRef":
+        _validate_keys(
+            data,
+            frozenset({"id", "provider", "custody", "brokerRef", "declaredCapabilities"}),
+            "ConnectionRef",
+        )
+        return cls(
+            id=data.get("id", ""),
+            provider=data.get("provider", ""),
+            custody=data.get("custody", ""),
+            broker_ref=data.get("brokerRef", ""),
+            declared_capabilities=tuple(data.get("declaredCapabilities", ())),
+        )
+
+
+@dataclass(frozen=True)
+class AccessConstraints:
+    locality: str = ""
+    maximum_risk_tier: str = ""
+    allowed_executor_ids: tuple[str, ...] = ()
+    allowed_runner_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.locality:
+            _require_choice(self.locality, LOCALITY, "locality", "AccessConstraints")
+        if self.maximum_risk_tier:
+            _require_choice(
+                self.maximum_risk_tier, ACTION_RISK_TIERS, "maximum_risk_tier", "AccessConstraints"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return _prune(
+            {
+                "locality": self.locality,
+                "maximumRiskTier": self.maximum_risk_tier,
+                "allowedExecutorIds": list(self.allowed_executor_ids),
+                "allowedRunnerIds": list(self.allowed_runner_ids),
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AccessConstraints":
+        _validate_keys(
+            data,
+            frozenset(
+                {"locality", "maximumRiskTier", "allowedExecutorIds", "allowedRunnerIds"}
+            ),
+            "AccessConstraints",
+        )
+        return cls(
+            locality=data.get("locality", ""),
+            maximum_risk_tier=data.get("maximumRiskTier", ""),
+            allowed_executor_ids=tuple(data.get("allowedExecutorIds", ())),
+            allowed_runner_ids=tuple(data.get("allowedRunnerIds", ())),
+        )
+
+
+@dataclass(frozen=True)
+class OstagBinding:
+    """Native extension: the existing precise routing identity, frozen at intake."""
+
+    instance_id: str
+    runtime_id: str = ""
+    session_id: str = ""
+    turn_id: str = ""
+    session_version: int = 0
+
+    def __post_init__(self) -> None:
+        _require(self.instance_id, "instance_id", "OstagBinding")
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = _prune(
+            {
+                "instanceId": self.instance_id,
+                "runtimeId": self.runtime_id,
+                "sessionId": self.session_id,
+                "turnId": self.turn_id,
+            }
+        )
+        if self.session_version:
+            payload["sessionVersion"] = self.session_version
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "OstagBinding":
+        _validate_keys(
+            data,
+            frozenset({"instanceId", "runtimeId", "sessionId", "turnId", "sessionVersion"}),
+            "OstagBinding",
+        )
+        return cls(
+            instance_id=data.get("instanceId", ""),
+            runtime_id=data.get("runtimeId", ""),
+            session_id=data.get("sessionId", ""),
+            turn_id=data.get("turnId", ""),
+            session_version=int(data.get("sessionVersion", 0)),
+        )
+
+
+@dataclass(frozen=True)
+class AgentAccessProfileSnapshot:
+    id: str
+    agent_principal: AgentPrincipal
+    requested_by: PrincipalRef
+    policy_snapshot_id: str
+    captured_at: str
+    ostag_binding: OstagBinding
+    project_targets: tuple[str, ...] = ()
+    connection_refs: tuple[ConnectionRef, ...] = ()
+    permissions: tuple[PermissionGrantRef, ...] = ()
+    constraints: AccessConstraints = field(default_factory=AccessConstraints)
+    expires_at: str = ""
+    revoked_at: str = ""
+
+    def __post_init__(self) -> None:
+        _require(self.id, "id", "AgentAccessProfileSnapshot")
+        _require(self.policy_snapshot_id, "policy_snapshot_id", "AgentAccessProfileSnapshot")
+        _require_datetime(self.captured_at, "captured_at", "AgentAccessProfileSnapshot")
+        _require_datetime(
+            self.expires_at, "expires_at", "AgentAccessProfileSnapshot", optional=True
+        )
+        _require_datetime(
+            self.revoked_at, "revoked_at", "AgentAccessProfileSnapshot", optional=True
+        )
+        # Upstream superRefine invariants. Compare parsed instants, never the
+        # raw strings: valid UTC forms (Z / +00:00 / space-separated) are not
+        # lexically equivalent (Phase 2 review lesson).
+        captured = _instant(self.captured_at)
+        if self.expires_at and _instant(self.expires_at) <= captured:
+            raise SchemaError(
+                code="invalid_snapshot",
+                message="Agent access profile expiresAt must be later than capturedAt",
+                recovery_hint="Use an expiry strictly after the capture time.",
+            )
+        if self.revoked_at and _instant(self.revoked_at) < captured:
+            raise SchemaError(
+                code="invalid_snapshot",
+                message="Agent access profile revokedAt cannot precede capturedAt",
+                recovery_hint="Revocation time must not be earlier than capture time.",
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "agentPrincipal": self.agent_principal.to_dict(),
+            "requestedBy": self.requested_by.to_dict(),
+            "projectTargets": list(self.project_targets),
+            "connectionRefs": [ref.to_dict() for ref in self.connection_refs],
+            "permissions": [grant.to_dict() for grant in self.permissions],
+            "constraints": self.constraints.to_dict(),
+            "policySnapshotId": self.policy_snapshot_id,
+            "capturedAt": self.captured_at,
+            "ostagBinding": self.ostag_binding.to_dict(),
+        }
+        if self.expires_at:
+            payload["expiresAt"] = self.expires_at
+        if self.revoked_at:
+            payload["revokedAt"] = self.revoked_at
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentAccessProfileSnapshot":
+        _validate_keys(
+            data,
+            frozenset(
+                {
+                    "id",
+                    "agentPrincipal",
+                    "requestedBy",
+                    "projectTargets",
+                    "connectionRefs",
+                    "permissions",
+                    "constraints",
+                    "policySnapshotId",
+                    "capturedAt",
+                    "expiresAt",
+                    "revokedAt",
+                    "ostagBinding",
+                }
+            ),
+            "AgentAccessProfileSnapshot",
+        )
+        return cls(
+            id=data.get("id", ""),
+            agent_principal=AgentPrincipal.from_dict(data.get("agentPrincipal", {})),
+            requested_by=PrincipalRef.from_dict(data.get("requestedBy", {})),
+            policy_snapshot_id=data.get("policySnapshotId", ""),
+            captured_at=data.get("capturedAt", ""),
+            ostag_binding=OstagBinding.from_dict(data.get("ostagBinding", {})),
+            project_targets=tuple(data.get("projectTargets", ())),
+            connection_refs=tuple(
+                ConnectionRef.from_dict(ref) for ref in data.get("connectionRefs", ())
+            ),
+            permissions=tuple(
+                PermissionGrantRef.from_dict(grant) for grant in data.get("permissions", ())
+            ),
+            constraints=AccessConstraints.from_dict(data.get("constraints", {})),
+            expires_at=data.get("expiresAt", ""),
+            revoked_at=data.get("revokedAt", ""),
+        )
+
+    def content_digest(self) -> str:
+        canonical = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        return f"sha256:{hashlib.sha256(canonical.encode('utf-8')).hexdigest()}"
+
+    def redacted_view(self) -> dict[str, Any]:
+        """Board/audit-safe projection: no broker refs, no grant reasons."""
+        return _prune(
+            {
+                "id": self.id,
+                "agentPrincipal": self.agent_principal.to_dict(),
+                "requestedBy": _prune(
+                    {
+                        "platform": self.requested_by.platform,
+                        "actorId": self.requested_by.actor_id,
+                    }
+                ),
+                "projectTargets": list(self.project_targets),
+                "permissionScopes": [grant.scope for grant in self.permissions],
+                "constraints": self.constraints.to_dict(),
+                "capturedAt": self.captured_at,
+                "expiresAt": self.expires_at,
+                "revokedAt": self.revoked_at,
+                "ostagBinding": self.ostag_binding.to_dict(),
+                "contentDigest": self.content_digest(),
+            }
+        )
