@@ -275,9 +275,13 @@ class AccessConstraints:
     allowed_runner_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.locality:
+        # Type-check BEFORE the empty-string "unset" sentinel: a falsey
+        # non-string (None, 0, False) must not slip past a truthiness guard.
+        _optional_str(self.locality, "locality", "AccessConstraints")
+        _optional_str(self.maximum_risk_tier, "maximum_risk_tier", "AccessConstraints")
+        if self.locality != "":
             _require_choice(self.locality, LOCALITY, "locality", "AccessConstraints")
-        if self.maximum_risk_tier:
+        if self.maximum_risk_tier != "":
             _require_choice(
                 self.maximum_risk_tier, ACTION_RISK_TIERS, "maximum_risk_tier", "AccessConstraints"
             )

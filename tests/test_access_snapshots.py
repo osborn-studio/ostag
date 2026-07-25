@@ -164,6 +164,20 @@ class TestSnapshotModel:
         with pytest.raises(SchemaError):
             OstagBinding(instance_id="mac", session_version="3")
 
+    def test_falsey_non_string_constraint_fields_are_rejected(self):
+        # Truthiness guards must not let falsey non-strings pass the
+        # empty-string "unset" sentinel — constructor and wire paths.
+        for value in (None, 0, False, [], {}):
+            with pytest.raises(SchemaError):
+                AccessConstraints(locality=value)
+            with pytest.raises(SchemaError):
+                AccessConstraints(maximum_risk_tier=value)
+        with pytest.raises(SchemaError):
+            AccessConstraints.from_dict({"locality": None})
+        with pytest.raises(SchemaError):
+            AccessConstraints.from_dict({"maximumRiskTier": 0})
+        assert AccessConstraints().locality == ""  # unset stays valid
+
     def test_nested_fields_must_be_model_instances_not_dicts(self):
         for field_name, value in (
             ("agent_principal", {"id": "codex", "kind": "provider_agent"}),
