@@ -29,13 +29,38 @@ from ostag.core.identity import Principal
 from ostag.work_monitor.identity import IdentityStore
 from ostag.work_monitor.store import MonitorStore
 
-_TESTS_PASSED_CODES = frozenset({"verification_passed"})
-_DEPLOY_VERIFIED_CODES = frozenset({"external_state_satisfied"})
-_PROD_ACCEPTED_CODES = frozenset({"human_acceptance_recorded"})
+_BADGE_FAMILIES = {
+    "verification": "tests",
+    "external_state": "deploy",
+    "human_acceptance": "accept",
+}
 
 
 def _clean(text: str, limit: int = 200) -> str:
-    return sanitize_user_text(text)[:limit]
+    """Sanitize externally influenced text for single-line board rendering."""
+    flat = " ".join(sanitize_user_text(text).split())
+    return flat[:limit]
+
+
+def _parse_ts(value: str):
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _is_expired(expires_at: str, now: str) -> bool:
+    """Timestamp comparison by parsed value — valid UTC forms are not lexically
+    equivalent (e.g. space-separated vs T-separated), so never compare strings."""
+    if not expires_at:
+        return False
+    expiry = _parse_ts(expires_at)
+    moment = _parse_ts(now)
+    if expiry is None or moment is None:
+        return False
+    return expiry <= moment
 
 
 @dataclass(frozen=True)
@@ -151,6 +176,26 @@ class CompletionBoardService:
         task = self.monitor_store.get_task(instance_id, task_id)
         execution_status = task.status if task is not None else ""
         codes = {result.reason_code for result in assessment.gate_results}
+        # Badge families come from the CONTRACT's gate kinds; a family badge is
+        # green only when every gate of that family has result state "passed"
+        # (a waived or failed sibling gate must not light the badge).
+        family_gate_ids: dict[str, set[str]] = {"tests": set(), "deploy": set(), "accept": set()}
+        try:
+            contract = self.completion_store.get_contract(
+                instance_id, assessment.contract_id, assessment.contract_version
+            )
+            for gate in contract.gates:
+                family = _BADGE_FAMILIES.get(gate.kind)
+                if family:
+                    family_gate_ids[family].add(gate.id)
+        except SchemaError:
+            pass  # contract snapshot unavailable: badges stay off, gaps still render
+        state_by_gate = {result.gate_id: result.state for result in assessment.gate_results}
+
+        def family_passed(family: str) -> bool:
+            ids = family_gate_ids[family]
+            return bool(ids) and all(state_by_gate.get(gate_id) == "passed" for gate_id in ids)
+
         waived_states = {result.gate_id for result in assessment.gate_results if result.state == "waived"}
         waiver = None
         if assessment.waiver is not None:
@@ -158,10 +203,10 @@ class CompletionBoardService:
             waiver = WaiverBadge(
                 actor=_clean(assessment.waiver.actor.display, 80),
                 reason=_clean(assessment.waiver.reason),
-                gate_ids=tuple(sorted(waived_states) or assessment.waiver.gate_ids),
-                waived_at=assessment.waiver.waived_at,
-                expires_at=expires_at,
-                expired=bool(expires_at) and expires_at <= now,
+                gate_ids=tuple(_clean(g, 60) for g in (sorted(waived_states) or assessment.waiver.gate_ids)),
+                waived_at=_clean(assessment.waiver.waived_at, 40),
+                expires_at=_clean(expires_at, 40),
+                expired=_is_expired(expires_at, now),
             )
         return CompletionBoardRow(
             instance_id=instance_id,
@@ -172,17 +217,17 @@ class CompletionBoardService:
             or (assessment.evidence_backed and assessment.state in ("satisfied", "waived")),
             completion=assessment.state,
             evidence_backed=assessment.evidence_backed,
-            tests_passed=bool(codes & _TESTS_PASSED_CODES),
-            deploy_verified=bool(codes & _DEPLOY_VERIFIED_CODES),
-            prod_accepted=bool(codes & _PROD_ACCEPTED_CODES),
+            tests_passed=family_passed("tests"),
+            deploy_verified=family_passed("deploy"),
+            prod_accepted=family_passed("accept"),
             missing_gate_ids=tuple(
-                r.gate_id for r in assessment.gate_results if r.state == "missing"
+                _clean(r.gate_id, 60) for r in assessment.gate_results if r.state == "missing"
             ),
             failed_gate_ids=tuple(
-                r.gate_id for r in assessment.gate_results if r.state == "failed"
+                _clean(r.gate_id, 60) for r in assessment.gate_results if r.state == "failed"
             ),
             blocked_gate_ids=tuple(
-                r.gate_id for r in assessment.gate_results if r.state == "unknown"
+                _clean(r.gate_id, 60) for r in assessment.gate_results if r.state == "unknown"
             ),
             waiver=waiver,
             next_action=_clean(_next_action(assessment)),
@@ -214,7 +259,7 @@ def render_completion_board_text(rows: tuple[CompletionBoardRow, ...]) -> str:
     blocks: list[str] = []
     for row in rows:
         lines = [
-            f"{row.work_thread_key}（completion: {row.completion}"
+            f"{_clean(row.work_thread_key, 120)}（completion: {row.completion}"
             f"{'，证据背书' if row.evidence_backed else '，兼容模式'}）",
             f"  Agent 已完成：{_MARK[row.agent_done]}"
             + (f"（执行状态 {row.execution_status}）" if row.execution_status else ""),

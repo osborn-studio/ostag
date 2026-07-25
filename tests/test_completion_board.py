@@ -10,9 +10,32 @@ from ostag.core.completion import (
     CompletionAssessment,
     CompletionContract,
     CompletionGateResult,
+    CompletionTargetSelector,
     CompletionWaiver,
+    ExternalStateGate,
+    HumanAcceptanceGate,
     MaterialActionGate,
+    VerificationGate,
 )
+
+
+def _governed_gates():
+    return (
+        VerificationGate(
+            id="tests",
+            target_key="delivery",
+            evidence_kind="ci.tests",
+            minimum_assurance="verified",
+        ),
+        ExternalStateGate(
+            id="deploy",
+            target_key="delivery",
+            provider="github",
+            required_state="merged",
+            minimum_assurance="verified",
+        ),
+        HumanAcceptanceGate(id="accept", required_role="owner"),
+    )
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
 from ostag.work_monitor.completion_board import (
@@ -60,19 +83,24 @@ def _seed_thread(
     waiver: CompletionWaiver | None = None,
     evidence_backed: bool = False,
     assessed_by: str = "ostag",
+    contract_gates=None,
 ) -> str:
     work_thread = f"{instance_id}/{task_id}"
+    gates = contract_gates or (
+        MaterialActionGate(id="execution", action_family="executor.run"),
+    )
+    needs_selector = any(getattr(gate, "target_key", "") == "delivery" for gate in gates)
     contract = CompletionContract(
         id=f"contract_{instance_id}_{task_id}",
         version=1,
         work_thread_id=work_thread,
         cycle=1,
         mode="execution_compat" if not evidence_backed else "governed",
-        gates=(MaterialActionGate(id="execution", action_family="executor.run"),),
+        gates=gates,
         max_automatic_retries=0,
         on_satisfied="report_only",
         created_at=NOW,
-        target_selectors=(),
+        target_selectors=(CompletionTargetSelector(key="delivery"),) if needs_selector else (),
     )
     completion.record_contract(instance_id, contract)
     if waiver is not None:
@@ -174,6 +202,14 @@ def test_state_matrix_rows(env) -> None:
         state="pending",
         evidence_backed=True,
         gate_results=(gate("missing", "verification_missing", "tests"),),
+        contract_gates=(
+            VerificationGate(
+                id="tests",
+                target_key="delivery",
+                evidence_kind="ci.tests",
+                minimum_assurance="verified",
+            ),
+        ),
     )
     _seed_thread(
         completion,
@@ -234,7 +270,13 @@ def test_evidence_rows_reflect_gate_codes(env) -> None:
         ),
     )
     _seed_thread(
-        completion, "macmini", "full", state="satisfied", evidence_backed=True, gate_results=results
+        completion,
+        "macmini",
+        "full",
+        state="satisfied",
+        evidence_backed=True,
+        gate_results=results,
+        contract_gates=_governed_gates(),
     )
     service = CompletionBoardService(monitor, completion, identities)
     row = service.personal_rows(BOB, now=NOW)[0]
@@ -361,3 +403,128 @@ def test_empty_board_renders_placeholder(env) -> None:
     monitor, completion, identities = env
     service = CompletionBoardService(monitor, completion, identities)
     assert render_completion_board_text(service.personal_rows(ALICE, now=NOW)) == "暂无受治理的完成记录。"
+
+
+def test_mixed_family_gates_do_not_light_badge(env) -> None:
+    """One passed + one failed verification gate must NOT render 测试已通过 ✅."""
+    monitor, completion, identities = env
+    gates = (
+        VerificationGate(
+            id="tests_unit",
+            target_key="delivery",
+            evidence_kind="ci.unit",
+            minimum_assurance="verified",
+        ),
+        VerificationGate(
+            id="tests_e2e",
+            target_key="delivery",
+            evidence_kind="ci.e2e",
+            minimum_assurance="verified",
+        ),
+    )
+    results = (
+        CompletionGateResult(
+            gate_id="tests_unit",
+            state="passed",
+            evidence_ids=("ev_1",),
+            reason_code="verification_passed",
+            reason="ok",
+            evaluated_at=NOW,
+        ),
+        CompletionGateResult(
+            gate_id="tests_e2e",
+            state="failed",
+            evidence_ids=("ev_2",),
+            reason_code="verification_failed",
+            reason="e2e red",
+            evaluated_at=NOW,
+        ),
+    )
+    _seed_thread(
+        completion,
+        "macmini",
+        "mixed",
+        state="unsatisfied",
+        evidence_backed=True,
+        gate_results=results,
+        contract_gates=gates,
+    )
+    service = CompletionBoardService(monitor, completion, identities)
+    row = service.personal_rows(BOB, now=NOW)[0]
+
+    assert row.tests_passed is False
+    assert row.failed_gate_ids == ("tests_e2e",)
+    text = render_completion_board_text((row,))
+    assert "测试已通过：—" in text
+    assert "失败 tests_e2e" in text
+
+
+def test_waiver_expiry_compares_parsed_time_not_strings(env) -> None:
+    """Space-separated and T-separated UTC forms must compare by value."""
+    monitor, completion, identities = env
+    waiver = CompletionWaiver(
+        id="waiver_fmt",
+        contract_id="contract_macmini_fmt",
+        contract_version=1,
+        cycle=1,
+        actor=ActorRef(actor_id="owner"),
+        reason="format test",
+        policy_scope="work_item_override",
+        gate_ids=("execution",),
+        waived_at=NOW,
+        expires_at="2026-07-27 23:00:00+00:00",  # space-separated, still 23:00 UTC
+    )
+    _seed_thread(
+        completion,
+        "macmini",
+        "fmt",
+        state="waived",
+        evidence_backed=True,
+        assessed_by="human",
+        waiver=waiver,
+        gate_results=(
+            CompletionGateResult(
+                gate_id="execution",
+                state="waived",
+                evidence_ids=(),
+                reason_code="gate_waived",
+                reason="waived",
+                evaluated_at=NOW,
+            ),
+        ),
+    )
+    service = CompletionBoardService(monitor, completion, identities)
+    # lexically "2026-07-27 2..." < "2026-07-27T0...", but by value expiry is later
+    row = service.personal_rows(BOB, now="2026-07-27T01:00:00+00:00")[0]
+    assert row.waiver.expired is False
+    row_after = service.personal_rows(BOB, now="2026-07-28T00:00:00+00:00")[0]
+    assert row_after.waiver.expired is True
+
+
+def test_hostile_gate_and_thread_identifiers_are_sanitized(env) -> None:
+    monitor, completion, identities = env
+    hostile_gate = "tests\nxoxb-123-abc\u202e"
+    _seed_thread(
+        completion,
+        "macmini",
+        "hostile",
+        state="pending",
+        evidence_backed=True,
+        gate_results=(
+            CompletionGateResult(
+                gate_id=hostile_gate,
+                state="missing",
+                evidence_ids=(),
+                reason_code="verification_missing",
+                reason="r",
+                evaluated_at=NOW,
+            ),
+        ),
+    )
+    service = CompletionBoardService(monitor, completion, identities)
+    row = service.personal_rows(BOB, now=NOW)[0]
+    text = render_completion_board_text((row,))
+
+    assert "xoxb-123-abc" not in text  # secret redacted
+    assert "\u202e" not in text  # bidi control stripped
+    assert "\n" not in "".join(row.missing_gate_ids)  # single-line identifiers
