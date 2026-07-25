@@ -14,3 +14,9 @@ tmp/
 LOOP-STATE.json
 STATE.md
 tasks/archive/
+
+# Local tool artifacts (claude-mem / osstack loop context) — never commit
+AGENTS.md
+LOOP-STATE.json
+STATE.md
+loop-lessons/
