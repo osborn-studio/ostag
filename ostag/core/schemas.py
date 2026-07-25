@@ -78,6 +78,7 @@ LEDGER_EVENT_TYPES = (
     "continuation_cancelled",
     "ambient_decision",
     "cost_recorded",
+    "completion_assessed",
     "security_event",
     "notification_enqueue",
     "notification_deliver",

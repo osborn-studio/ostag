@@ -1,0 +1,50 @@
+{
+  "task_id": "v03-upgrade-p1-completion-governance",
+  "capability": "code.test",
+  "prompt": "OStag v0.3 upgrade Phase 1: completion contract + evidence-based assessment ported from OpenTag v0.7.0 (758fb5a6). Builder is Claude; this loop is the verification harness of record.",
+  "priority": 95,
+  "source": "task_queue",
+  "context": {
+    "handoff": "/Users/osborn/Desktop/inbox/ostag_v0.3_upgrade_task.md",
+    "phase": "P1",
+    "branch": "feat/v0.3-p1-completion-governance",
+    "mapping_note": "docs/upgrade/v0.3-p1-completion-mapping.md"
+  },
+  "evaluation": [
+    {
+      "id": "completion-unit-tests",
+      "mode": "command",
+      "description": "All completion-governance tests pass (models, evaluator, store, runner compat).",
+      "command": "uv run pytest tests/test_completion_models.py tests/test_completion_evaluate.py tests/test_completion_store.py tests/test_completion_runner_compat.py -q",
+      "required": true
+    },
+    {
+      "id": "pytest-full",
+      "mode": "command",
+      "description": "Full suite green (no legacy regression; baseline was 774).",
+      "command": "uv run pytest -q",
+      "required": true
+    },
+    {
+      "id": "ruff-clean",
+      "mode": "command",
+      "description": "Static analysis passes.",
+      "command": "uv run ruff check .",
+      "required": true
+    },
+    {
+      "id": "two-device-acceptance",
+      "mode": "command",
+      "description": "Dual-device fixture acceptance exits 0 with status=passed crossed_routes=0.",
+      "command": "bash -o pipefail -c \"uv run python scripts/multi_device_copilot_acceptance.py --fixtures tests/fixtures/multi-device | grep -q 'status=passed .*crossed_routes=0'\"",
+      "required": true
+    },
+    {
+      "id": "mapping-note-exists",
+      "mode": "command",
+      "description": "Phase 1 mapping note documents source pins and divergences.",
+      "command": "test -s docs/upgrade/v0.3-p1-completion-mapping.md",
+      "required": true
+    }
+  ]
+}

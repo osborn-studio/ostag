@@ -22,7 +22,7 @@ from ostag.core.prompt import PromptContext, build_chat_prompt
 from ostag.core.receipts import parse_receipt_command
 from ostag.core.run_ledger import RunLedger
 from ostag.core.safety import check_message_length, sanitize_user_text
-from ostag.core.schemas import ContextPacket, LedgerEvent, Run, SchemaError, new_id
+from ostag.core.schemas import ContextPacket, LedgerEvent, Run, SchemaError, new_id, utc_now_iso
 from ostag.mfs.client import MFSClient
 from ostag.workflows.auto_base import AutoBaseWorkflow
 from ostag.work_monitor.service import WorkMonitorService, parse_monitor_command
@@ -60,7 +60,63 @@ class OSTagRunner:
 
     def _finish(self, run: Run, reply: str, *, ok: bool, detail: str = "") -> str:
         self.run_ledger.record_status(run.run_id, "succeeded" if ok else "failed", detail=detail)
+        self._mirror_completion_assessment(run, ok=ok)
         return reply
+
+    def _mirror_completion_assessment(self, run: Run, *, ok: bool) -> None:
+        """Best-effort execution_compat completion assessment (monitor-disabled mode).
+
+        Legacy behavior is untouched: `record_status` above remains the source
+        of truth. This mirrors the same terminal outcome as an OpenTag-v0.7
+        `execution_compat` assessment into a `completion_assessed` ledger
+        event, with the same durability as the status write (baseline 6.5).
+        """
+        try:
+            from ostag.core.completion import (
+                CompletionContract,
+                CompletionEvaluationInput,
+                CompletionRunResult,
+                MaterialActionGate,
+            )
+            from ostag.core.completion_evaluate import evaluate_completion
+
+            now = utc_now_iso()
+            contract = CompletionContract(
+                id=f"contract_{run.run_id}",
+                version=1,
+                work_thread_id=run.run_id,
+                cycle=1,
+                mode="execution_compat",
+                gates=(
+                    MaterialActionGate(id="execution", action_family="executor.run"),
+                ),
+                max_automatic_retries=0,
+                on_satisfied="report_only",
+                created_at=now,
+            )
+            assessment = evaluate_completion(
+                CompletionEvaluationInput(
+                    contract=contract,
+                    run_results=(
+                        CompletionRunResult(
+                            run_id=run.run_id,
+                            conclusion="success" if ok else "failure",
+                            recorded_at=now,
+                        ),
+                    ),
+                    evaluated_at=now,
+                )
+            )
+            self.run_ledger.append(
+                LedgerEvent(
+                    event_id=new_id("evt"),
+                    run_id=run.run_id,
+                    event_type="completion_assessed",
+                    payload={"assessment": assessment.to_dict()},
+                )
+            )
+        except Exception:  # noqa: BLE001 - mirror must never break the reply path
+            pass
 
     def _build_context_packet(
         self, run: Run, event: NormalizedEvent, text: str, mfs_results: list[str]
