@@ -1,7 +1,7 @@
 # Cross-Platform Daily Task Boards Design
 
-**Date:** 2026-07-13  
-**Status:** Approved for implementation  
+**Date:** 2026-07-13
+**Status:** Approved for implementation
 **Platforms:** Feishu group and DingTalk group
 
 ## Goal
