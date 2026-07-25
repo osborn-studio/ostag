@@ -193,13 +193,28 @@ def create_app(
                 from ostag.copilot_relay.status_board import OsstackStatusBoardService
                 from ostag.copilot_relay.store import RelayStore
 
+                from ostag.copilot_relay.route_explainer import (
+                    RouteExplainer,
+                    RoutingDecisionStore,
+                )
+
                 relay_store = RelayStore(runtime.service.store)
+                relay_service = CopilotRelayService(
+                    relay_store,
+                    RelayPolicy(
+                        owner,
+                        scope_provider=runtime.service.identities.allowed_instances,
+                    ),
+                )
                 runtime.copilot = CopilotFeishuController(
-                    CopilotRelayService(
-                        relay_store,
-                        RelayPolicy(
-                            owner,
-                            scope_provider=runtime.service.identities.allowed_instances,
+                    relay_service,
+                    # Phase 5: read-only explanations for every routing
+                    # decision; recording is best-effort and never on the
+                    # routing path.
+                    route_explainer=RouteExplainer(
+                        relay_service,
+                        RoutingDecisionStore(
+                            runtime.service.store, runtime.service.identities
                         ),
                     ),
                     write_enabled=configured.copilot_relay_write_enabled,
