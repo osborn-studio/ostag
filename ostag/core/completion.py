@@ -153,11 +153,18 @@ def _require_datetime(value: str, name: str, schema: str, *, optional: bool = Fa
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         parsed = None
-    if parsed is None or parsed.tzinfo is None:
+    if (
+        parsed is None
+        or parsed.tzinfo is None
+        or parsed.utcoffset() is None
+        or parsed.utcoffset().total_seconds() != 0
+    ):
+        # UTC-only: the protocol compares timestamps lexically (expiry windows,
+        # authoritative-evidence ordering), which is only correct in one zone.
         raise SchemaError(
             code="invalid_datetime",
-            message=f"{schema}.{name}={value!r} is not a timezone-aware ISO-8601 timestamp",
-            recovery_hint="Use e.g. 2026-07-26T10:00:00+00:00 (or ...Z).",
+            message=f"{schema}.{name}={value!r} is not a UTC ISO-8601 timestamp",
+            recovery_hint="Use UTC, e.g. 2026-07-26T10:00:00+00:00 (or ...Z).",
         )
 
 
@@ -362,7 +369,7 @@ class ArtifactGate:
     def __post_init__(self) -> None:
         _require(self.id, "id", "ArtifactGate")
         _require(self.target_key, "target_key", "ArtifactGate")
-        _require(self.artifact_kind, "artifact_kind", "ArtifactGate")
+        _require_choice(self.artifact_kind, ARTIFACT_KINDS, "artifact_kind", "ArtifactGate")
         _require_positive(self.minimum, "minimum", "ArtifactGate")
 
     def to_dict(self) -> dict[str, Any]:

@@ -178,6 +178,15 @@ def test_wire_strictness_enums_and_datetimes() -> None:
     assert excinfo.value.code == "invalid_datetime"
     with pytest.raises(SchemaError):
         _governed_contract(created_at="2026-07-26T10:00:00")  # naive, no tz
+    with pytest.raises(SchemaError):
+        _governed_contract(created_at="2026-07-26T18:00:00+08:00")  # non-UTC offset
+    _governed_contract(created_at="2026-07-26T10:00:00Z")  # Z form accepted
+    # gate-level artifact kind vocabulary enforced too
+    from ostag.core.completion import ArtifactGate
+
+    with pytest.raises(SchemaError) as excinfo:
+        ArtifactGate(id="a", target_key="t", artifact_kind="change_request", minimum=1)
+    assert excinfo.value.code == "invalid_choice"
 
 
 def test_waiver_requires_unique_gate_ids_and_serializes_run_id() -> None:
