@@ -20,11 +20,27 @@ class ApplyResult:
 
 
 class Projector:
-    def __init__(self, store: MonitorStore) -> None:
+    def __init__(self, store: MonitorStore, access_snapshots=None) -> None:
         self.store = store
+        # Optional Phase 3 shadow hook (AccessSnapshotStore). Called strictly
+        # AFTER the projection transaction commits and wrapped in try/except:
+        # it can never change what apply() stores, buffers, or returns, and it
+        # sits on no routing path.
+        self.access_snapshots = access_snapshots
 
     def apply(self, event: MonitorEvent) -> ApplyResult:
         """Store and project an event in one SQLite transaction."""
+        result, projected = self._apply_txn(event)
+        if self.access_snapshots is not None:
+            for applied_event in projected:
+                if applied_event.kind == "task.created":
+                    try:
+                        self.access_snapshots.capture_from_task_event(applied_event)
+                    except Exception:  # noqa: BLE001 - shadow capture must never break intake
+                        pass
+        return result
+
+    def _apply_txn(self, event: MonitorEvent) -> tuple[ApplyResult, tuple[MonitorEvent, ...]]:
         with self.store.transaction() as connection:
             connection.execute(
                 "INSERT INTO instances(instance_id, last_sequence, last_seen_at) VALUES (?, 0, ?) "
@@ -42,7 +58,7 @@ class Projector:
             last_sequence = int(row["last_sequence"])
 
             if event.sequence <= last_sequence or self._already_stored(connection, event):
-                return ApplyResult(stored=False, duplicate=True)
+                return ApplyResult(stored=False, duplicate=True), ()
 
             payload = encode_event(event)
             inserted = connection.execute(
@@ -58,7 +74,7 @@ class Projector:
                 ),
             ).rowcount
             if inserted == 0:
-                return ApplyResult(stored=False, duplicate=True)
+                return ApplyResult(stored=False, duplicate=True), ()
 
             if event.sequence > last_sequence + 1:
                 connection.execute(
@@ -66,9 +82,10 @@ class Projector:
                     "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
                     (event.instance_id, event.sequence, event.event_id, payload),
                 )
-                return ApplyResult(stored=True, buffered=True)
+                return ApplyResult(stored=True, buffered=True), ()
 
             applied = [event.sequence]
+            projected_events = [event]
             self._project(connection, event)
             next_sequence = event.sequence + 1
             while True:
@@ -79,6 +96,7 @@ class Projector:
                 if pending is None:
                     break
                 pending_event = decode_event(str(pending["payload"]))
+                projected_events.append(pending_event)
                 self._project(connection, pending_event)
                 connection.execute(
                     "DELETE FROM pending_events WHERE instance_id = ? AND sequence = ?",
@@ -92,7 +110,10 @@ class Projector:
                 "WHERE instance_id = ? AND last_sequence < ?",
                 (applied[-1], event.instance_id, applied[-1]),
             )
-            return ApplyResult(stored=True, applied_sequences=tuple(applied))
+            return (
+                ApplyResult(stored=True, applied_sequences=tuple(applied)),
+                tuple(projected_events),
+            )
 
     @staticmethod
     def _already_stored(connection: sqlite3.Connection, event: MonitorEvent) -> bool:

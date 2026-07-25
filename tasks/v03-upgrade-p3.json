@@ -1,0 +1,14 @@
+{
+  "task_id": "v03-upgrade-p3-identity-shadow",
+  "capability": "code.test",
+  "prompt": "OStag v0.3 upgrade Phase 3: agent access-profile snapshots in shadow mode (immutable capture at intake, identity-scoped redacted views, routing untouched). Builder is Claude; this loop is the verification harness of record.",
+  "priority": 95,
+  "source": "task_queue",
+  "context": {"phase": "P3", "branch": "feat/v0.3-p3-identity-shadow"},
+  "evaluation": [
+    {"id": "snapshot-tests", "mode": "command", "description": "Access-snapshot tests pass (model invariants, strict wire validation, digest, redaction non-leakage, immutability, identity scoping, projector shadow capture, hooked/unhooked projection equivalence, reconciliation recovery, v22 migration).", "command": "uv run pytest tests/test_access_snapshots.py -q", "required": true},
+    {"id": "pytest-full", "mode": "command", "description": "Full suite green.", "command": "uv run pytest -q", "required": true},
+    {"id": "ruff-clean", "mode": "command", "description": "Static analysis passes.", "command": "uv run ruff check .", "required": true},
+    {"id": "two-device-acceptance", "mode": "command", "description": "Dual-device fixture acceptance exits 0 with status=passed crossed_routes=0.", "command": "bash -o pipefail -c \"uv run python scripts/multi_device_copilot_acceptance.py --fixtures tests/fixtures/multi-device | grep -q 'status=passed .*crossed_routes=0'\"", "required": true}
+  ]
+}

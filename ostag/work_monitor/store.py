@@ -241,6 +241,14 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS completion_governance_events_thread ON completion_governance_events(instance_id,work_thread_key,created_at)",
         )
     ),
+    # v22: shadow access-profile snapshots (Phase 3, read-only; never consulted
+    # by routing). Immutable rows, instance_id-scoped like completion tables.
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS access_profile_snapshots (instance_id TEXT NOT NULL,snapshot_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,content_digest TEXT NOT NULL,snapshot_json TEXT NOT NULL,captured_at TEXT NOT NULL,PRIMARY KEY(instance_id,snapshot_id))",
+            "CREATE INDEX IF NOT EXISTS access_profile_snapshots_thread ON access_profile_snapshots(instance_id,work_thread_key)",
+        )
+    ),
 )
 
 
