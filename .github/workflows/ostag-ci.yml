@@ -8,6 +8,8 @@ on:
 jobs:
   release-check:
     runs-on: ubuntu-latest
+    env:
+      OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -20,7 +22,5 @@ jobs:
         run: uv sync --all-extras --locked
       - name: Run release check
         run: scripts/release_check.sh
-        env:
-          OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE: "1"
       - name: Run deployment and live-evidence gates
         run: scripts/ci_release_gates.sh

@@ -108,14 +108,10 @@ def test_worker_launcher_quotes_standard_macos_paths_with_spaces() -> None:
 
 def test_ci_explicitly_skips_only_the_external_osstack_smoke() -> None:
     workflow = yaml.safe_load(Path(".github/workflows/ostag-ci.yml").read_text())
-    release_step = next(
-        step
-        for step in workflow["jobs"]["release-check"]["steps"]
-        if step.get("name") == "Run release check"
-    )
+    release_job = workflow["jobs"]["release-check"]
     script = Path("scripts/copilot_relay_smoke.sh").read_text(encoding="utf-8")
 
-    assert release_step["env"]["OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE"] == "1"
+    assert release_job["env"]["OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE"] == "1"
     assert '${OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE:-0}' in script
     assert "osstack Copilot worktree not found" in script
 
