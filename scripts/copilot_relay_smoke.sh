@@ -24,12 +24,16 @@ uv run pytest -q tests/test_copilot_relay_integration.py --basetemp "$TMP_ROOT/p
 uv run python scripts/multi_device_copilot_acceptance.py \
   --fixtures tests/fixtures/multi-device
 
-if [[ ! -d "$OSSTACK_ROOT/packages/cli" ]]; then
-  echo "osstack Copilot worktree not found: $OSSTACK_ROOT" >&2
-  exit 1
+if [[ "${OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE:-0}" == "1" ]]; then
+  echo "Skipping external osstack CLI smoke by explicit CI configuration."
+else
+  if [[ ! -d "$OSSTACK_ROOT/packages/cli" ]]; then
+    echo "osstack Copilot worktree not found: $OSSTACK_ROOT" >&2
+    exit 1
+  fi
+  cd "$OSSTACK_ROOT"
+  pnpm --filter @osstack/cli exec vitest run src/copilot-relay.integration.test.ts
 fi
-cd "$OSSTACK_ROOT"
-pnpm --filter @osstack/cli exec vitest run src/copilot-relay.integration.test.ts
 
 if find "$TMP_ROOT" -type f -print0 | xargs -0 grep -F -a -l \
   "$OSTAG_SMOKE_RELAY_SECRET" >/dev/null 2>&1; then
