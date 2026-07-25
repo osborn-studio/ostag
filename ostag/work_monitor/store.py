@@ -259,6 +259,15 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS human_escalations_thread ON human_escalations(instance_id,work_thread_key,state)",
         )
     ),
+    # v24: read-only routing decisions (Phase 5). Immutable explanation
+    # records; never consulted by the router. instance_id may be '' when a
+    # routing attempt failed before any session was found.
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS routing_decisions (decision_id TEXT PRIMARY KEY,instance_id TEXT NOT NULL DEFAULT '',principal_platform TEXT NOT NULL,principal_actor_id TEXT NOT NULL,run_id TEXT NOT NULL,decision_json TEXT NOT NULL,decided_at TEXT NOT NULL)",
+            "CREATE INDEX IF NOT EXISTS routing_decisions_principal ON routing_decisions(principal_platform,principal_actor_id,decided_at)",
+        )
+    ),
 )
 
 
