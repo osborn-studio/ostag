@@ -41,7 +41,7 @@ class CopilotReporter:
         transport: ReporterTransport | None = None,
         clock: Callable[[], datetime] | None = None,
         device_identity: SigningIdentity | None = None,
-        gateway_version: str = "0.2.0",
+        gateway_version: str = "0.3.0",
         heartbeat_interval_seconds: int = 5,
     ) -> None:
         if not instance_id or (not secret and device_identity is None):

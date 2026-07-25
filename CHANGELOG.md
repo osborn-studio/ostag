@@ -1,11 +1,19 @@
 # Changelog
 
-## Unreleased — 2026-07-14
+## 0.3.0 — 2026-07-25
 
 - Added consolidated audit export through `ostag audit export`, including
   filterable run status and cost, action receipts, approval decisions, spend
   totals, and security events. Exports can be scoped by UTC date range,
   platform, or chat and written as redacted JSON.
+- Added identity-scoped, device-first osstack status dashboards in Feishu.
+  Natural-language status questions are now read-only, show the active device,
+  runtime, agent, session, progress, and pending decision, and do not enqueue a
+  Copilot Relay instruction.
+- Added secure multi-device Copilot Relay gateways for MacBook and Mac mini,
+  including device pairing, signed identities, runtime-aware v2 envelopes,
+  realtime heartbeats, exact device/runtime/session routing, critical event
+  notifications, and recovery-safe launchd deployment.
 - Added the OStag Copilot Relay: an owner-scoped Feishu console for discovering
   osstack sessions, viewing bounded assistant snapshots, answering explicit
   decisions, changing direction, and creating governed tasks without exposing
@@ -16,6 +24,14 @@
 - Added Feishu current-task, latest-reply, decision, and receipt cards. Private
   proactive delivery now resolves the bound user's `open_id` while preserving
   the private chat as the authorization scope.
+- Added durable daily task and requirement dashboards for Feishu and DingTalk,
+  including central ownership, idempotent delivery windows, Beijing-time
+  scheduling, native mobile cards, validation commands, and production-safe
+  fallbacks.
+- Added a persistent work-monitor control plane with scoped principals, live
+  task projections, governed remote controls, rich Feishu cards, Telegram
+  transport, replay protection, reliable acknowledgement, and operational
+  alert scheduling.
 - Added launchd and Compose deployment assets, a production runbook, rollback
   procedure, security/redaction gates, and cross-repository same-session smoke
   coverage with osstack.
