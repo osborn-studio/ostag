@@ -2,7 +2,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OSSTACK_ROOT="${OSSTACK_COPILOT_REPO:-$(cd "$ROOT/.." && pwd)/osstack-copilot-session}"
+# Resolve from the shared repository root so this also works from a Git worktree.
+SOURCE_REPO_ROOT="$(cd "$(git -C "$ROOT" rev-parse --git-common-dir)/.." && pwd)"
+SOURCE_PARENT="$(cd "$SOURCE_REPO_ROOT/.." && pwd)"
+if [[ -n "${OSSTACK_COPILOT_REPO:-}" ]]; then
+  OSSTACK_ROOT="$OSSTACK_COPILOT_REPO"
+elif [[ -d "$SOURCE_PARENT/osstack-copilot-session/packages/cli" ]]; then
+  OSSTACK_ROOT="$SOURCE_PARENT/osstack-copilot-session"
+elif [[ -d "$SOURCE_PARENT/agentsteam/osstack-copilot-session/packages/cli" ]]; then
+  OSSTACK_ROOT="$SOURCE_PARENT/agentsteam/osstack-copilot-session"
+else
+  OSSTACK_ROOT="$SOURCE_PARENT/osstack-copilot-session"
+fi
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ostag-copilot-relay.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
