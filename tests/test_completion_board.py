@@ -17,6 +17,15 @@ from ostag.core.completion import (
     MaterialActionGate,
     VerificationGate,
 )
+from ostag.core.identity import Principal
+from ostag.core.schemas import SchemaError
+from ostag.work_monitor.completion_board import (
+    CompletionBoardService,
+    render_completion_board_text,
+)
+from ostag.work_monitor.completion_store import CompletionStore
+from ostag.work_monitor.identity import IdentityStore
+from ostag.work_monitor.store import MonitorStore
 
 
 def _governed_gates():
@@ -36,15 +45,7 @@ def _governed_gates():
         ),
         HumanAcceptanceGate(id="accept", required_role="owner"),
     )
-from ostag.core.identity import Principal
-from ostag.core.schemas import SchemaError
-from ostag.work_monitor.completion_board import (
-    CompletionBoardService,
-    render_completion_board_text,
-)
-from ostag.work_monitor.completion_store import CompletionStore
-from ostag.work_monitor.identity import IdentityStore
-from ostag.work_monitor.store import MonitorStore
+
 
 NOW = "2026-07-26T10:00:00+00:00"
 LATER = "2026-07-27T00:00:00+00:00"
@@ -507,7 +508,7 @@ def test_hostile_gate_and_thread_identifiers_are_sanitized(env) -> None:
     _seed_thread(
         completion,
         "macmini",
-        "hostile",
+        "hostile xoxb-999-zzz\u202egroup",
         state="pending",
         evidence_backed=True,
         gate_results=(
@@ -526,5 +527,7 @@ def test_hostile_gate_and_thread_identifiers_are_sanitized(env) -> None:
     text = render_completion_board_text((row,))
 
     assert "xoxb-123-abc" not in text  # secret redacted
+    dumped = json.dumps(row.to_dict(), ensure_ascii=False)
+    assert "xoxb-" not in dumped  # to_dict() surface is clean too
     assert "\u202e" not in text  # bidi control stripped
     assert "\n" not in "".join(row.missing_gate_ids)  # single-line identifiers

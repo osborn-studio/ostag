@@ -210,7 +210,7 @@ class CompletionBoardService:
             )
         return CompletionBoardRow(
             instance_id=instance_id,
-            work_thread_key=work_thread_key,
+            work_thread_key=_clean(work_thread_key, 120),
             execution_status=execution_status,
             agent_done=execution_status == "done"
             or "execution_succeeded" in codes
@@ -259,7 +259,7 @@ def render_completion_board_text(rows: tuple[CompletionBoardRow, ...]) -> str:
     blocks: list[str] = []
     for row in rows:
         lines = [
-            f"{_clean(row.work_thread_key, 120)}（completion: {row.completion}"
+            f"{row.work_thread_key}（completion: {row.completion}"
             f"{'，证据背书' if row.evidence_backed else '，兼容模式'}）",
             f"  Agent 已完成：{_MARK[row.agent_done]}"
             + (f"（执行状态 {row.execution_status}）" if row.execution_status else ""),
