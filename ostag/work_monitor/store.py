@@ -249,6 +249,16 @@ MIGRATIONS = (
             "CREATE INDEX IF NOT EXISTS access_profile_snapshots_thread ON access_profile_snapshots(instance_id,work_thread_key)",
         )
     ),
+    # v23: structured human escalations (Phase 4). active_dedupe_key is NULL
+    # once an escalation stops holding its dedupe slot (terminal states);
+    # SQLite unique indexes ignore NULLs, matching upstream semantics.
+    Migration(
+        statements=(
+            "CREATE TABLE IF NOT EXISTS human_escalations (instance_id TEXT NOT NULL,escalation_id TEXT NOT NULL,work_thread_key TEXT NOT NULL,class TEXT NOT NULL,state TEXT NOT NULL,dedupe_key TEXT NOT NULL DEFAULT '',active_dedupe_key TEXT,escalation_json TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(instance_id,escalation_id))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS human_escalations_active_dedupe ON human_escalations(instance_id,work_thread_key,active_dedupe_key)",
+            "CREATE INDEX IF NOT EXISTS human_escalations_thread ON human_escalations(instance_id,work_thread_key,state)",
+        )
+    ),
 )
 
 
