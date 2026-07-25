@@ -161,14 +161,17 @@ class ActionHint:
         )
         _require_wire_keys(data, frozenset({"kind"}), "ActionHint")
         selected = data.get("selectedIntentIds", ())
-        metadata = data.get("metadata")
+        # An ABSENT metadata key defaults to {}; an explicit null (or any
+        # other non-object) is rejected by __post_init__, as upstream's
+        # non-nullable z.record(z.unknown()) would reject it.
+        metadata = data["metadata"] if "metadata" in data else {}
         return cls(
             kind=data.get("kind", ""),
             target_id=data.get("targetId", ""),
             selected_intent_ids=_require_str_tuple(
                 selected, "selectedIntentIds", "ActionHint"
             ),
-            metadata={} if metadata is None else metadata,
+            metadata=metadata,
         )
 
 

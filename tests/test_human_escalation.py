@@ -215,6 +215,13 @@ class TestHumanEscalationModel:
         with pytest.raises(SchemaError):
             ActionHint.from_dict(hint)
 
+    def test_metadata_explicit_null_is_rejected_absent_defaults(self):
+        hint = ActionHint(kind="none").to_dict()
+        hint["metadata"] = None  # explicit null on the wire
+        with pytest.raises(SchemaError):
+            ActionHint.from_dict(hint)
+        assert ActionHint.from_dict({"kind": "none"}).metadata == {}  # absent
+
     def test_explicit_empty_options_list_is_rejected(self):
         data = escalation().to_dict()
         data["options"] = []
@@ -496,6 +503,22 @@ class TestExpireSweep:
         scanned, expired = store.expire_sweep("macbook", at=AFTER_DEADLINE)
         assert scanned == 2
         assert expired == 1  # the second candidate still expired
+
+    def test_sweep_survives_malformed_row_json(self, env):
+        monitor, store = env
+        store.open("macbook", escalation(expires_at=DEADLINE))
+        store.open(
+            "macbook", escalation(id="esc_2", expires_at=DEADLINE, dedupe_key="k2")
+        )
+        with monitor.transaction() as connection:
+            connection.execute(
+                "UPDATE human_escalations SET escalation_json='{corrupt' "
+                "WHERE instance_id='macbook' AND escalation_id='esc_1'"
+            )
+        scanned, expired = store.expire_sweep("macbook", at=AFTER_DEADLINE)
+        assert scanned == 2
+        assert expired == 1  # the well-formed candidate still expired
+        assert store.get("macbook", "esc_2").state == "expired"
 
     def test_sweep_expires_only_overdue(self, env):
         _, store = env

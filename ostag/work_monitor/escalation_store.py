@@ -431,12 +431,15 @@ class EscalationStore:
         expired = 0
         moment = _instant(at)
         for row in rows:
-            escalation = HumanEscalation.from_dict(json.loads(row["escalation_json"]))
-            if run_id is not None and escalation.run_id != run_id:
-                continue
-            if not escalation.expires_at or _instant(escalation.expires_at) > moment:
-                continue
+            # The ENTIRE candidate — decode, filter, transition — is isolated:
+            # one malformed row must not stop the sweep (upstream isolates
+            # every per-candidate failure).
             try:
+                escalation = HumanEscalation.from_dict(json.loads(row["escalation_json"]))
+                if run_id is not None and escalation.run_id != run_id:
+                    continue
+                if not escalation.expires_at or _instant(escalation.expires_at) > moment:
+                    continue
                 _, changed = self.transition(
                     instance_id,
                     escalation.id,
@@ -446,8 +449,8 @@ class EscalationStore:
                 )
                 if changed:
                     expired += 1
-            except Exception:  # noqa: BLE001 - each candidate is independent (upstream
-                pass  # isolates every failure; one bad row must not stop the sweep)
+            except Exception:  # noqa: BLE001 - independent best-effort candidates
+                pass
         return scanned, expired
 
     # -- reads ----------------------------------------------------------------
