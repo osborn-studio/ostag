@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.4.0 — 2026-07-25
+
+Selective back-port of OpenTag v0.7 completion governance (upstream
+`amplifthq/opentag` pinned at `758fb5a6` / `cc1f4fb` / `de70cca`), executed
+as seven independently reviewed, phase-gated increments (PR #2–#8). Every
+intentional divergence from upstream is declared in the mapping notes under
+`docs/upgrade/`.
+
+- Added completion contracts and evidence-based completion assessment
+  (`ostag.core.completion`, `completion_evaluate`): five gate kinds,
+  assurance grading where unverifiable evidence never satisfies,
+  resource-version-pinned evidence where stale never passes, gate-scoped
+  expiring waivers requiring human attribution, append-only assessments
+  with input digests and optimistic recorded/duplicate/conflict appends,
+  and execution-compat vs governed modes. The runner mirrors a best-effort
+  execution-compat assessment into the ledger.
+- Added evidence-aware completion boards (`completion_board`): one
+  identity-scoped WorkLoopView projection separating "agent reported done"
+  from "evidence proves done", with contract-driven test/deploy/acceptance
+  badges, sanitized rendering, and personal vs global-owner admin scoping.
+- Added agent access-profile snapshots in shadow mode
+  (`ostag.core.access_snapshot`, `work_monitor.access_snapshots`):
+  immutable intake captures with content digests and redacted views (no
+  broker refs, no grant reasons), a post-projection best-effort hook that
+  provably cannot alter projection, startup reconciliation for captures
+  lost to crashes, and no role in routing or authorization.
+- Added structured, time-bounded human escalation
+  (`ostag.core.escalation`, `escalation_store`): full upstream lifecycle
+  (open/acknowledged/resolved/expired/superseded) with dedupe slots,
+  attributed idempotent transitions, terminal immutability, optimistic
+  concurrency, and best-effort expiry sweeps. A late acknowledgement or
+  resolution is coerced to expired — an expired escalation never
+  authorizes — and expired escalations are inert to the completion
+  evaluator.
+- Added read-only routing explanations (`ostag.core.routing_explanation`,
+  `copilot_relay.route_explainer`): RoutingDecision records with
+  eligible-only selection, derived strictly after the actual router
+  decides (the upstream placement selector was deliberately not ported).
+  Explanations never invoke the relay policy, are recorded best-effort
+  with a non-throwing fallback ladder, and a corpus equivalence suite
+  proves routing results and relay state are identical with and without
+  the explanation layer. Production Feishu routing (text, decision
+  answers, snapshots, proposal confirmations) records deterministic,
+  principal-attributed, immutable decisions with sanitized views.
+- Added the automatic-routing-fallback design document
+  (`docs/upgrade/v0.3-auto-routing-design.md`) — design only: a narrow
+  same-task-successor fallback gated behind a read-only instrumentation
+  phase, a demand test allowed to conclude "do not build", transactional
+  evidence, a DB-backed kill switch, and an explicit written owner
+  approval gate. No fallback runtime exists in this release.
+- Schema migrations v21–v24, all additive with migration fixtures; the
+  dual-device acceptance invariant `crossed_routes=0` and the full test
+  suite (955 tests) hold throughout.
+
 ## 0.3.0 — 2026-07-25
 
 - Added consolidated audit export through `ostag audit export`, including
