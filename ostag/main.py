@@ -137,6 +137,28 @@ def build_parser() -> argparse.ArgumentParser:
     connector_test_parser.add_argument("--json", action="store_true")
     connector_test_parser.add_argument("--config")
 
+    query = subparsers.add_parser("query", help="Run isolated read-only queries.")
+    query_sub = query.add_subparsers(dest="query_command", required=True)
+    query_status = query_sub.add_parser("status", help="Read a run status through the query lane.")
+    query_status.add_argument("--run", required=True)
+    query_status.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    query_status.add_argument("--chat", required=True)
+    query_status.add_argument("--actor", default=LOCAL_ADMIN_ACTOR)
+    query_status.add_argument("--json", action="store_true")
+    query_status.add_argument("--config")
+    query_audit = query_sub.add_parser("audit", help="Read an audit bundle through the query lane.")
+    query_audit.add_argument("--since")
+    query_audit.add_argument("--until")
+    query_audit.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    query_audit.add_argument("--chat", required=True)
+    query_audit.add_argument("--actor", default=LOCAL_ADMIN_ACTOR)
+    query_audit.add_argument("--json", action="store_true")
+    query_audit.add_argument("--config")
+
     for verb in ("approve", "reject", "apply", "continue"):
         verb_parser = subparsers.add_parser(
             verb, help=f"{verb.capitalize()} an action receipt (or run, for continue)."
@@ -399,6 +421,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return await run_submit_command(args)
     if args.command in ("status", "ledger", "artifacts", "connector", "runs", "context"):
         return run_inspection_command(args)
+    if args.command == "query":
+        return await run_query_command(args)
     if args.command in ("approve", "reject", "apply", "continue", "receipts"):
         return await run_receipt_command(args)
     if args.command == "followups":
@@ -966,6 +990,79 @@ def run_audit_command(args: argparse.Namespace) -> int:
         )
         return 0
     _emit(bundle, as_json=as_json)
+    return 0
+
+
+async def run_query_command(args: argparse.Namespace) -> int:
+    from ostag.core.audit import AuditExporter
+    from ostag.core.query_lane import (
+        QueryLaneError,
+        QueryPolicy,
+        QueryRequest,
+        ReadOnlyQueryLane,
+    )
+
+    as_json = getattr(args, "json", False)
+    try:
+        config = load_settings(getattr(args, "config", None))
+        ledger = RunLedger(config.run_ledger_path)
+
+        async def status_handler(request: QueryRequest) -> dict[str, object]:
+            try:
+                result = ledger.run_status(str(request.payload["run_id"]))
+            except SchemaError as exc:
+                raise QueryLaneError(exc.code, exc.message, exc.recovery_hint) from exc
+            source = result.get("source")
+            source_chat = source.get("channel_id") if isinstance(source, dict) else None
+            if request.actor_id != LOCAL_ADMIN_ACTOR and source_chat != request.chat_id:
+                raise QueryLaneError(
+                    "query_scope_denied", "The requested run is outside this channel"
+                )
+            return result
+
+        async def audit_handler(request: QueryRequest) -> dict[str, object]:
+            return AuditExporter(config, ledger).export(
+                since=request.payload.get("since"),
+                until=request.payload.get("until"),
+                platform=request.platform,
+                chat_id=request.chat_id,
+            )
+
+        handlers = {"status": status_handler, "audit": audit_handler}
+        lane = ReadOnlyQueryLane(
+            QueryPolicy(
+                enabled=config.query_lane_enabled,
+                authorized_channels=frozenset(config.query_lane_channels),
+                max_concurrency=config.query_lane_max_concurrency,
+                timeout_seconds=config.query_lane_timeout_seconds,
+                retry_count=config.query_lane_retry_count,
+                max_result_bytes=config.query_lane_max_result_bytes,
+            ),
+            handlers,
+        )
+        payload: dict[str, object]
+        if args.query_command == "status":
+            payload = {"run_id": args.run}
+        else:
+            payload = {
+                key: value
+                for key, value in {"since": args.since, "until": args.until}.items()
+                if value is not None
+            }
+        response = await lane.execute(
+            QueryRequest(
+                query_id=new_id("query"),
+                kind=args.query_command,
+                platform=args.platform,
+                chat_id=args.chat,
+                actor_id=args.actor,
+                payload=payload,
+            )
+        )
+    except QueryLaneError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
+    _emit(response.to_dict(), as_json=as_json)
     return 0
 
 

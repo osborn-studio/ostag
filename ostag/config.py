@@ -99,6 +99,12 @@ class Settings:
     governed_writes: bool = False
     followup_enabled: bool = True
     followup_after_seconds: int = 14400
+    query_lane_enabled: bool = False
+    query_lane_channels: tuple[str, ...] = ()
+    query_lane_max_concurrency: int = 4
+    query_lane_timeout_seconds: int = 10
+    query_lane_retry_count: int = 1
+    query_lane_max_result_bytes: int = 65_536
     env_scrub_extra: tuple[str, ...] = ()
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
@@ -219,6 +225,16 @@ class Settings:
     daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
     def validate(self) -> Settings:
+        if self.query_lane_max_concurrency < 1:
+            raise ValueError("OSTAG_QUERY_LANE_MAX_CONCURRENCY must be positive")
+        if self.query_lane_timeout_seconds < 1:
+            raise ValueError("OSTAG_QUERY_LANE_TIMEOUT_SECONDS must be positive")
+        if self.query_lane_retry_count < 0:
+            raise ValueError("OSTAG_QUERY_LANE_RETRY_COUNT cannot be negative")
+        if self.query_lane_max_result_bytes < 1:
+            raise ValueError("OSTAG_QUERY_LANE_MAX_RESULT_BYTES must be positive")
+        if any(not item or ":" not in item for item in self.query_lane_channels):
+            raise ValueError("OSTAG_QUERY_LANE_CHANNELS entries must use platform:chat_id")
         if not 0 <= self.ambient_daily_board_hour <= 23:
             raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_HOUR must be between 0 and 23")
         if self.ambient_daily_board_window_minutes <= 0:
@@ -371,6 +387,12 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         governed_writes=_bool("OSTAG_GOVERNED_WRITES", False),
         followup_enabled=_bool("OSTAG_FOLLOWUP_ENABLED", True),
         followup_after_seconds=_int("OSTAG_FOLLOWUP_AFTER_SECONDS", 14400),
+        query_lane_enabled=_bool("OSTAG_QUERY_LANE_ENABLED", False),
+        query_lane_channels=_csv("OSTAG_QUERY_LANE_CHANNELS"),
+        query_lane_max_concurrency=_int("OSTAG_QUERY_LANE_MAX_CONCURRENCY", 4),
+        query_lane_timeout_seconds=_int("OSTAG_QUERY_LANE_TIMEOUT_SECONDS", 10),
+        query_lane_retry_count=_int("OSTAG_QUERY_LANE_RETRY_COUNT", 1),
+        query_lane_max_result_bytes=_int("OSTAG_QUERY_LANE_MAX_RESULT_BYTES", 65_536),
         env_scrub_extra=_csv("OSTAG_ENV_SCRUB_EXTRA"),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),
