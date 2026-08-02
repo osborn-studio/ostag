@@ -19,6 +19,27 @@
         "destructive_requires_approval": true
       },
       "status": "available"
+    },
+    {
+      "capabilities": {
+        "can_apply_action": false,
+        "can_close": false,
+        "can_merge": false,
+        "can_read_merge_evidence": true,
+        "can_read_merge_requests": true,
+        "can_read_pipelines": true
+      },
+      "connector": "merge_requests",
+      "limits": {
+        "pagination": "first page only",
+        "pipeline_page_size": 20
+      },
+      "platform": "gitlab",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
     }
   ],
   "checks": [

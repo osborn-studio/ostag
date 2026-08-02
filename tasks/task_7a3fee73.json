@@ -1,0 +1,7 @@
+{
+  "task_id": "task_7a3fee73",
+  "capability": "code.review",
+  "prompt": "Review git diff c085b09..0a2c6cd for the v0.5.0 release and Mac mini deployment gates. Do not edit files. Check version consistency, Bash 3.2 compatibility, launchd executable/path safety, live-evidence commit/version/freshness binding, stale-evidence rejection, readiness-audit reproducibility, secret hygiene, rollback behavior, and test coverage. Report only actionable correctness, security, deployment, or false-success findings with file/line references, or state no findings.",
+  "priority": 99,
+  "source": "task_queue"
+}

@@ -1,0 +1,7 @@
+{
+  "task_id": "task_4e94ac35",
+  "capability": "code.review",
+  "prompt": "Review only git diff 0a2c6cd..a4eae2a for final release-evidence and launch-status fixes. Do not edit files. Check repo-local OSSTACK_MANAGEMENT_ROOT handling, LOOP-STATE task verification semantics, truthfulness around the one escalated broad review versus successful split reviews, release manifest validation, completion gate status propagation, Bash 3.2 command substitution compatibility, and false-success behavior. Return actionable findings with file/line references, or state no findings.",
+  "priority": 100,
+  "source": "task_queue"
+}

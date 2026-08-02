@@ -1,19 +1,21 @@
 {
-  "generated_at": "2026-06-28T14:24:36+00:00",
+  "generated_at": "2026-08-02T07:43:09+00:00",
   "product": "OS Tag",
-  "fork_root": "/Users/gilbertchen/Documents/CODE/ostag-deep-fork",
-  "management_root": "/Users/gilbertchen/Documents/CODE/ostag",
-  "branch": "ostag/deep-fork",
-  "current_commit": "16574f9b365bc67f3716c552dad416da730088b8",
+  "fork_root": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag",
+  "management_root": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag",
+  "branch": "codex/opentag-p0-p2",
+  "current_commit": "a4eae2aaaef0cdfa0a4269467a36b083cfafc4d8",
   "upstream": {
     "url": "https://github.com/zilliztech/mfs",
     "baseline_commit": "16574f9b365bc67f3716c552dad416da730088b8"
   },
   "score": "96 / 100",
-  "readiness_gate": "PASS",
-  "readiness_checks": "17 passed / 0 warnings / 0 failed",
+  "readiness_gate": "PASS_WITH_EXTERNAL_BLOCKER",
+  "readiness_checks": "17 passed / 2 warnings / 0 failed",
   "production_candidate": "not_recorded",
-  "external_blockers": [],
+  "external_blockers": [
+    "Manual Feishu/Lark group validation record is not completed."
+  ],
   "artifacts": [
     "FORK_ORIGIN.md",
     "docs/fork_migration_report.md",
@@ -60,128 +62,46 @@
   ],
   "osstack_tasks": [
     {
-      "task_id": "task_0034b624",
-      "archived": true
+      "task_id": "task_37dce3d6",
+      "retained": true,
+      "outcome": "success",
+      "verified": true
     },
     {
-      "task_id": "task_0cd7cac4",
-      "archived": true
+      "task_id": "task_4e94ac35",
+      "retained": true,
+      "outcome": "success",
+      "verified": true
     },
     {
-      "task_id": "task_1d0171a0",
-      "archived": true
+      "task_id": "task_7a3fee73",
+      "retained": true,
+      "outcome": "success",
+      "verified": true
     },
     {
-      "task_id": "task_1d181656",
-      "archived": true
+      "task_id": "task_854f73e7",
+      "retained": true,
+      "outcome": "escalated",
+      "verified": false
     },
     {
-      "task_id": "task_1edc63fd",
-      "archived": true
+      "task_id": "task_a54c03d5",
+      "retained": true,
+      "outcome": "success",
+      "verified": true
     },
     {
-      "task_id": "task_29f2ca9f",
-      "archived": true
+      "task_id": "task_acaade5e",
+      "retained": true,
+      "outcome": "success",
+      "verified": true
     },
     {
-      "task_id": "task_2b786dcd",
-      "archived": true
-    },
-    {
-      "task_id": "task_3f9f86a2",
-      "archived": true
-    },
-    {
-      "task_id": "task_49df7528",
-      "archived": true
-    },
-    {
-      "task_id": "task_4fe88e7f",
-      "archived": true
-    },
-    {
-      "task_id": "task_52cc9ad0",
-      "archived": true
-    },
-    {
-      "task_id": "task_657bb669",
-      "archived": true
-    },
-    {
-      "task_id": "task_6a154f84",
-      "archived": true
-    },
-    {
-      "task_id": "task_73b45f33",
-      "archived": true
-    },
-    {
-      "task_id": "task_8c98c03f",
-      "archived": true
-    },
-    {
-      "task_id": "task_938dc237",
-      "archived": true
-    },
-    {
-      "task_id": "task_9db34f83",
-      "archived": true
-    },
-    {
-      "task_id": "task_9e75642a",
-      "archived": true
-    },
-    {
-      "task_id": "task_b57ff6f9",
-      "archived": true
-    },
-    {
-      "task_id": "task_b607da9d",
-      "archived": true
-    },
-    {
-      "task_id": "task_c0be8580",
-      "archived": true
-    },
-    {
-      "task_id": "task_c657d330",
-      "archived": true
-    },
-    {
-      "task_id": "task_c754fc3a",
-      "archived": true
-    },
-    {
-      "task_id": "task_cbcf6d63",
-      "archived": true
-    },
-    {
-      "task_id": "task_d2859192",
-      "archived": true
-    },
-    {
-      "task_id": "task_d488dfdc",
-      "archived": true
-    },
-    {
-      "task_id": "task_d57d82ef",
-      "archived": true
-    },
-    {
-      "task_id": "task_d6e536d7",
-      "archived": true
-    },
-    {
-      "task_id": "task_deff9f0d",
-      "archived": true
-    },
-    {
-      "task_id": "task_e5ed23d9",
-      "archived": true
-    },
-    {
-      "task_id": "task_ed36600e",
-      "archived": true
+      "task_id": "task_df75534b",
+      "retained": true,
+      "outcome": "success",
+      "verified": true
     }
   ]
 }

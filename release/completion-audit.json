@@ -1,18 +1,20 @@
 {
-  "generated_at": "2026-06-28T14:24:38+00:00",
-  "gate": "PASS",
+  "generated_at": "2026-08-02T07:43:27+00:00",
+  "gate": "PASS_WITH_EXTERNAL_BLOCKER",
   "counts": {
-    "PASS": 12,
-    "EXTERNAL_BLOCKER": 0,
+    "PASS": 11,
+    "EXTERNAL_BLOCKER": 1,
     "FAIL": 0,
     "PENDING": 0
   },
-  "remaining_external_blockers": [],
+  "remaining_external_blockers": [
+    "Real Feishu/Lark app credentials and manual group validation evidence"
+  ],
   "rows": [
     {
       "status": "PASS",
       "requirement": "DoD 1: real fork-derived git history exists",
-      "evidence": "`FORK_ORIGIN.md`, upstream remote, and baseline commit are present"
+      "evidence": "`FORK_ORIGIN.md` preserves the upstream URL and pinned baseline in product history"
     },
     {
       "status": "PASS",
@@ -30,19 +32,19 @@
       "evidence": "`scripts/release_check.sh` passes compile, pytest, doctor, and Feishu/Lark dry-runs"
     },
     {
-      "status": "PASS",
+      "status": "EXTERNAL_BLOCKER",
       "requirement": "DoD 5: live Feishu/Lark validation is complete or externally blocked",
       "evidence": "`release/live-validation-feishu.md` records manual pass or missing-credential blocker"
     },
     {
       "status": "PASS",
       "requirement": "DoD 6: osstack records phases, verifier commands, and final score",
-      "evidence": "`STATE.md`, archived tasks, execution board, and scorecard are current"
+      "evidence": "`LOOP-STATE.json` records successful P0/P1/P2 verification commands with zero findings, and the scorecard is current"
     },
     {
       "status": "PASS",
-      "requirement": "Phases 0-7 are completed and archived",
-      "evidence": "All primary phase task files exist under `tasks/archive/2026-06-28/`"
+      "requirement": "OpenTag P0-P2 delivery task records are retained",
+      "evidence": "Current P0, P1, and split P2 task records exist under the repository-local `tasks/` directory"
     },
     {
       "status": "PASS",
@@ -62,7 +64,7 @@
     {
       "status": "PASS",
       "requirement": "Machine-readable manifest matches current gates",
-      "evidence": "`release/release-manifest.json` reflects readiness gate, artifacts, and archived osstack tasks"
+      "evidence": "`release/release-manifest.json` reflects readiness gates, artifacts, and current osstack task outcomes"
     },
     {
       "status": "PASS",

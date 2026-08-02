@@ -1,13 +1,15 @@
 {
-  "generated_at": "2026-06-28T14:24:38Z",
-  "status": "production_candidate",
-  "readiness_gate": "PASS",
-  "readiness_checks": "17 passed / 0 warnings / 0 failed",
-  "completion_gate": "PASS",
+  "generated_at": "2026-08-02T07:37:18Z",
+  "status": "blocked_external",
+  "readiness_gate": "PASS_WITH_EXTERNAL_BLOCKER",
+  "readiness_checks": "17 passed / 2 warnings / 0 failed",
+  "completion_gate": "PASS_WITH_EXTERNAL_BLOCKER",
   "mfs_mode": "excluded",
-  "live_validation_exit_code": 0,
+  "live_validation_exit_code": 3,
   "mfs_validation_exit_code": 3,
   "effective_mfs_exit_code": 0,
-  "exit_code": 0,
-  "blocking_conditions": []
+  "exit_code": 3,
+  "blocking_conditions": [
+    "Feishu/Lark manual live validation is not complete."
+  ]
 }

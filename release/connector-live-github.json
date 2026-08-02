@@ -19,6 +19,27 @@
         "destructive_requires_approval": true
       },
       "status": "available"
+    },
+    {
+      "capabilities": {
+        "can_apply_action": false,
+        "can_close": false,
+        "can_merge": false,
+        "can_read_checks": true,
+        "can_read_merge_evidence": true,
+        "can_read_pull_requests": true
+      },
+      "connector": "pull_requests",
+      "limits": {
+        "max_checks": 100,
+        "pagination": "single bounded projection"
+      },
+      "platform": "github",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
     }
   ],
   "checks": [
