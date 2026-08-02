@@ -134,6 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
     connector_test_parser.add_argument(
         "--live", action="store_true", help="Add bounded read-only provider probes."
     )
+    connector_test_parser.add_argument(
+        "--card-platform",
+        choices=["feishu", "dingtalk"],
+        help="Render a native diagnostic card instead of the raw report.",
+    )
     connector_test_parser.add_argument("--json", action="store_true")
     connector_test_parser.add_argument("--config")
 
@@ -811,6 +816,37 @@ def run_inspection_command(args: argparse.Namespace) -> int:
                 return 0
             config = load_settings(getattr(args, "config", None))
             report = connector_test(config, args.platform, live=args.live)
+            if args.card_platform:
+                if not config.native_diagnostic_cards_enabled:
+                    raise SchemaError(
+                        code="feature_disabled",
+                        message="Native diagnostic cards are disabled",
+                        recovery_hint=(
+                            "Set OSTAG_NATIVE_DIAGNOSTIC_CARDS_ENABLED=true after validation."
+                        ),
+                    )
+                from ostag.core.diagnostic_cards import (
+                    build_diagnostic_view,
+                    render_diagnostic_dingtalk_card,
+                    render_diagnostic_feishu_card,
+                    render_diagnostic_text,
+                )
+
+                view = build_diagnostic_view(report)
+                card = (
+                    render_diagnostic_feishu_card(view)
+                    if args.card_platform == "feishu"
+                    else render_diagnostic_dingtalk_card(view)
+                )
+                _emit(
+                    {
+                        "card_platform": args.card_platform,
+                        "card": card,
+                        "fallback": render_diagnostic_text(view),
+                    },
+                    as_json=as_json,
+                )
+                return 1 if report.status == "blocked" else 0
             _emit(report.to_dict(), as_json=as_json)
             return 1 if report.status == "blocked" else 0
 

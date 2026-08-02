@@ -24,6 +24,12 @@ _CHAT_TEXT_CAPABILITIES: dict[str, bool | str] = {
     "can_apply_action": False,
 }
 
+_NATIVE_CARD_CAPABILITIES: dict[str, bool | str] = {
+    **_CHAT_TEXT_CAPABILITIES,
+    "can_render_buttons": True,
+    "can_render_cards": True,
+}
+
 _TABLE_CAPABILITIES: dict[str, bool | str] = {
     "can_read_records": True,
     "can_write_records": True,
@@ -43,7 +49,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         platform="feishu",
         connector="chat",
-        capabilities=dict(_CHAT_TEXT_CAPABILITIES),
+        capabilities=dict(_NATIVE_CARD_CAPABILITIES),
         limits={"max_message_chars": 15000},
     ),
     ConnectorCapability(
@@ -55,7 +61,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         platform="lark",
         connector="chat",
-        capabilities=dict(_CHAT_TEXT_CAPABILITIES),
+        capabilities=dict(_NATIVE_CARD_CAPABILITIES),
         limits={"max_message_chars": 15000},
     ),
     ConnectorCapability(
@@ -67,7 +73,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         platform="dingtalk",
         connector="chat",
-        capabilities=dict(_CHAT_TEXT_CAPABILITIES),
+        capabilities=dict(_NATIVE_CARD_CAPABILITIES),
         limits={"max_message_chars": 20000},
     ),
     ConnectorCapability(
