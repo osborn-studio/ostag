@@ -303,7 +303,7 @@ async def run_conformance_suite(profile: ExecutorProfile) -> ConformanceReport:
             timeout_seconds=2,
             max_output_bytes=1024,
             env_scrub_extra=profile.env_scrub_extra,
-            environment={**os.environ, "FEISHU_APP_SECRET": "conformance-only"},
+            environment={**os.environ, "FEISHU_APP_SECRET": "placeholder"},
         )
         environment_ok = output == "clean"
     except BackendError:

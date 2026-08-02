@@ -203,6 +203,9 @@ class Settings:
     monitor_degraded_seconds: int = 120
     monitor_offline_seconds: int = 600
     monitor_notification_retry_cap: int = 5
+    operational_report_enabled: bool = False
+    operational_report_connector_evidence_dir: Path = Path("./release")
+    operational_report_max_items: int = 100
     copilot_relay_enabled: bool = False
     copilot_relay_server_enabled: bool = True
     copilot_relay_write_enabled: bool = True
@@ -296,6 +299,8 @@ class Settings:
             raise ValueError("monitor thresholds require 0 < degraded < offline")
         if self.monitor_notification_retry_cap <= 0:
             raise ValueError("monitor notification retry cap must be positive")
+        if not 1 <= self.operational_report_max_items <= 500:
+            raise ValueError("OSTAG_OPERATIONAL_REPORT_MAX_ITEMS must be in 1..500")
         if self.copilot_relay_enabled:
             required = {
                 "copilot_relay_instance_id": self.copilot_relay_instance_id,
@@ -532,6 +537,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_degraded_seconds=_int("OSTAG_MONITOR_DEGRADED_SECONDS", 120),
         monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
         monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
+        operational_report_enabled=_bool("OSTAG_OPERATIONAL_REPORT_ENABLED", False),
+        operational_report_connector_evidence_dir=Path(
+            os.getenv("OSTAG_OPERATIONAL_REPORT_CONNECTOR_EVIDENCE_DIR", "./release")
+        ),
+        operational_report_max_items=_int("OSTAG_OPERATIONAL_REPORT_MAX_ITEMS", 100),
         copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
         copilot_relay_server_enabled=_bool("OSTAG_COPILOT_RELAY_SERVER_ENABLED", True),
         copilot_relay_write_enabled=_bool("OSTAG_COPILOT_RELAY_WRITE_ENABLED", True),

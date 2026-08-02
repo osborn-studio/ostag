@@ -265,6 +265,9 @@ an incompatible migration requires it.
 - Keep `MFS_ALLOWED_SCOPES` narrow.
 - Keep unsafe CLI flags disabled unless testing on an isolated machine.
 - Rotate Feishu/Lark secrets if audit logs or shell history expose credentials.
+- Keep `OSTAG_OPERATIONAL_REPORT_ENABLED=false` until human identity bindings,
+  connector smoke evidence, and the protected workstream path have been verified.
+  See [operational_report.md](operational_report.md).
 
 ## Production work monitor on Tencent Cloud
 

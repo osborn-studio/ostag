@@ -43,6 +43,13 @@ def _sanitize_text(value: str) -> str:
     return redact_secrets(value)[:MAX_TEXT_LENGTH]
 
 
+def sanitize_public_text(value: str, *, limit: int = MAX_TEXT_LENGTH) -> str:
+    """Flatten, redact, and bound text before it enters a public projection."""
+    if not isinstance(value, str) or not 1 <= limit <= MAX_TEXT_LENGTH:
+        raise ValueError("public text and limit are invalid")
+    return " ".join(_sanitize_text(value).split())[:limit]
+
+
 def sanitize_task_input(payload: Mapping[str, Any]) -> TaskSnapshot:
     """Return only approved task metadata, with bounded and redacted strings."""
 

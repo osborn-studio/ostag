@@ -356,6 +356,13 @@ def build_parser() -> argparse.ArgumentParser:
     access_list.add_argument("--actor")
     access_list.add_argument("--json", action="store_true")
     access_list.add_argument("--config")
+    monitor_report = monitor_sub.add_parser("report", help="Render a scoped operational report.")
+    monitor_report.add_argument("--platform", required=True)
+    monitor_report.add_argument("--actor", required=True)
+    monitor_report.add_argument("--scope", choices=["personal", "team"], default="personal")
+    monitor_report.add_argument("--format", choices=["json", "html"], default="json")
+    monitor_report.add_argument("--output", type=Path)
+    monitor_report.add_argument("--config")
 
     copilot = subparsers.add_parser("copilot", help="Manage the OStag Copilot device gateway.")
     copilot_sub = copilot.add_subparsers(dest="copilot_command", required=True)
@@ -699,6 +706,53 @@ def run_monitor_command(args: argparse.Namespace) -> int:
 
     config = load_settings(getattr(args, "config", None))
     as_json = getattr(args, "json", False)
+    if args.monitor_command == "report":
+        from ostag.work_monitor.operational_report import (
+            OperationalReportService,
+            render_operational_report_html,
+        )
+
+        if not config.operational_report_enabled:
+            _emit(
+                {
+                    "error": {
+                        "code": "feature_disabled",
+                        "message": "Operational reporting is disabled",
+                    }
+                },
+                as_json=True,
+            )
+            return 1
+        try:
+            monitor_store = MonitorStore(config.monitor_server_db)
+            identities = IdentityStore(config.monitor_server_db)
+            report = OperationalReportService(
+                monitor_store,
+                identities,
+                workstream_path=config.workstream_store_path,
+                connector_evidence_dir=config.operational_report_connector_evidence_dir,
+                degraded_seconds=config.monitor_degraded_seconds,
+                offline_seconds=config.monitor_offline_seconds,
+                max_items=config.operational_report_max_items,
+            ).build(Principal(args.platform, args.actor), scope=args.scope)
+            rendered = (
+                json.dumps(report.to_dict(), ensure_ascii=False, sort_keys=True)
+                if args.format == "json"
+                else render_operational_report_html(report.to_dict())
+            )
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(rendered + ("\n" if args.format == "json" else ""), encoding="utf-8")
+            else:
+                print(rendered)
+            return 0
+        except (PermissionError, ValueError, OSError) as exc:
+            code = "permission_denied" if isinstance(exc, PermissionError) else "report_unavailable"
+            _emit(
+                {"error": {"code": code, "message": "Operational report could not be read"}},
+                as_json=True,
+            )
+            return 1
     if args.monitor_command == "access":
         identities = IdentityStore(config.monitor_server_db)
         now = datetime.now(UTC).isoformat().replace("+00:00", "Z")

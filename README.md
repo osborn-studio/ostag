@@ -117,6 +117,7 @@ rollback, and the explicitly incomplete external evidence checklist are in
 | Permissions | `OSTAG_ACTOR_PERMISSIONS` + per-channel grants ([docs/channel_policy.md](docs/channel_policy.md)) |
 | Governed writes | opt-in per deployment or per channel; frozen `apply_payload`; connector executors; no delete path ([docs/governed_writes.md](docs/governed_writes.md)) |
 | Audit | run ledger + audit log, secrets redacted ([docs/run_ledger.md](docs/run_ledger.md)) |
+| Reporting | identity-scoped JSON/HTML operations report, disabled by default ([docs/ostag/operational_report.md](docs/ostag/operational_report.md)) |
 | Async | durable continuations ([docs/async_runs.md](docs/async_runs.md)) |
 | Ambient | opt-in, cited, suppressed, proposal-only ([docs/ambient_v2.md](docs/ambient_v2.md)) |
 | Security | defaults and hardening roadmap ([docs/security_governance.md](docs/security_governance.md)) |
@@ -138,6 +139,9 @@ explicit env vars, audit and ledger redact secrets.
 - Executor conformance: `ostag executor list --json` and
   `ostag executor test kimi_cli --json`; OSStack registration is declared
   separately and is never inferred from a locally installed command.
+- Operational report: `ostag monitor report --platform feishu --actor <id>
+  --scope personal --format json`; the monitor server exposes the same scoped
+  projection at `/v1/report` and `/v1/report.html` when explicitly enabled.
 - Capability declarations per connector: `ostag connector list --json`
   ([docs/connector_capabilities.md](docs/connector_capabilities.md))
 
