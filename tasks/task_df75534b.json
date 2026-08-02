@@ -1,0 +1,7 @@
+{
+  "task_id": "task_df75534b",
+  "capability": "code.review",
+  "prompt": "Review only git diff ff01679..2791bfc for P2.1 executor-neutral conformance and the disabled-by-default Kimi CLI backend. Do not edit files. Check manifest strictness, direct argv safety, environment scrubbing, bounded output, timeout termination, resume declaration, unavailable degradation, factory/doctor compatibility, and truthful osstackRegistered=false behavior. Return only actionable findings with file/line references, or state no findings.",
+  "priority": 96,
+  "source": "task_queue"
+}

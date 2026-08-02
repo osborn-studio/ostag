@@ -1,0 +1,7 @@
+{
+  "task_id": "task_854f73e7",
+  "capability": "code.review",
+  "prompt": "Review git diff ff01679..HEAD for the complete P2 delivery. Inspect executor-neutral manifests/conformance, the disabled-by-default Kimi CLI adapter, identity-scoped operational JSON/HTML reporting, connector evidence ingestion, workstream cost association, and deployment feature gates. Do not edit files. Report correctness, security, cross-instance data isolation, compatibility, performance, test gaps, or deployment blockers with file and line references. Confirm that Kimi is not claimed as OSStack-registered.",
+  "priority": 95,
+  "source": "task_queue"
+}

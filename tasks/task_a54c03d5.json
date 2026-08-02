@@ -1,0 +1,7 @@
+{
+  "task_id": "task_a54c03d5",
+  "capability": "code.review",
+  "prompt": "Review only git diff 2791bfc..6f5b379 for P2.2 operational reporting. Do not edit files. Check member/team authorization, cross-instance workstream ownership, bounded SQLite/file reads, allowlisted redaction, connector evidence validation, cost attribution, freshness/error states, HTML escaping/security headers, feature rollback, CLI/server compatibility, and tests. Return only actionable findings with file/line references, or state no findings.",
+  "priority": 95,
+  "source": "task_queue"
+}
