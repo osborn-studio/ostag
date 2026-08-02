@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
 
 
 Platform = Literal["slack", "feishu", "lark", "dingtalk", "telegram"]
-BackendName = Literal["mock", "codex_cli", "claude_cli", "openai_api"]
+BackendName = Literal["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -99,6 +99,22 @@ class Settings:
     governed_writes: bool = False
     followup_enabled: bool = True
     followup_after_seconds: int = 14400
+    query_lane_enabled: bool = False
+    query_lane_channels: tuple[str, ...] = ()
+    query_lane_max_concurrency: int = 4
+    query_lane_timeout_seconds: int = 10
+    query_lane_retry_count: int = 1
+    query_lane_max_result_bytes: int = 65_536
+    native_diagnostic_cards_enabled: bool = False
+    workstreams_enabled: bool = False
+    workstream_store_path: Path = Path("./logs/workstreams.sqlite3")
+    workstream_max_batch: int = 25
+    provider_evidence_enabled: bool = False
+    provider_evidence_max_checks: int = 100
+    executor_runtime_enabled: bool = False
+    kimi_executor_enabled: bool = False
+    executor_max_output_bytes: int = 1_048_576
+    executor_osstack_registered: tuple[str, ...] = ()
     env_scrub_extra: tuple[str, ...] = ()
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
@@ -107,6 +123,7 @@ class Settings:
     mfs_max_results: int = 8
     codex_bin: str = "codex"
     claude_bin: str = "claude"
+    kimi_bin: str = "kimi"
     codex_unsafe_mode: bool = False
     claude_unsafe_mode: bool = False
     openai_model: str = "gpt-5.5"
@@ -127,6 +144,7 @@ class Settings:
     slack_app_token: str = ""
     dingtalk_client_id: str = ""
     dingtalk_client_secret: str = ""
+    dingtalk_api_base_url: str = "https://api.dingtalk.com"
     dingtalk_robot_webhook: str = ""
     dingtalk_robot_secret: str = ""
     telegram_bot_token: str = ""
@@ -185,6 +203,9 @@ class Settings:
     monitor_degraded_seconds: int = 120
     monitor_offline_seconds: int = 600
     monitor_notification_retry_cap: int = 5
+    operational_report_enabled: bool = False
+    operational_report_connector_evidence_dir: Path = Path("./release")
+    operational_report_max_items: int = 100
     copilot_relay_enabled: bool = False
     copilot_relay_server_enabled: bool = True
     copilot_relay_write_enabled: bool = True
@@ -219,6 +240,29 @@ class Settings:
     daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
     def validate(self) -> Settings:
+        if not 1 <= self.agent_timeout_seconds <= 3600:
+            raise ValueError("OSTAG_AGENT_TIMEOUT_SECONDS must be in 1..3600")
+        if self.query_lane_max_concurrency < 1:
+            raise ValueError("OSTAG_QUERY_LANE_MAX_CONCURRENCY must be positive")
+        if self.query_lane_timeout_seconds < 1:
+            raise ValueError("OSTAG_QUERY_LANE_TIMEOUT_SECONDS must be positive")
+        if self.query_lane_retry_count < 0:
+            raise ValueError("OSTAG_QUERY_LANE_RETRY_COUNT cannot be negative")
+        if self.query_lane_max_result_bytes < 1:
+            raise ValueError("OSTAG_QUERY_LANE_MAX_RESULT_BYTES must be positive")
+        if not 1 <= self.workstream_max_batch <= 100:
+            raise ValueError("OSTAG_WORKSTREAM_MAX_BATCH must be in 1..100")
+        if not 1 <= self.provider_evidence_max_checks <= 500:
+            raise ValueError("OSTAG_PROVIDER_EVIDENCE_MAX_CHECKS must be in 1..500")
+        if not 1_024 <= self.executor_max_output_bytes <= 16_777_216:
+            raise ValueError("OSTAG_EXECUTOR_MAX_OUTPUT_BYTES must be in 1024..16777216")
+        if any(
+            item not in {"codex_cli", "claude_cli", "kimi_cli"}
+            for item in self.executor_osstack_registered
+        ):
+            raise ValueError("OSTAG_EXECUTOR_OSSTACK_REGISTERED contains an unknown executor")
+        if any(not item or ":" not in item for item in self.query_lane_channels):
+            raise ValueError("OSTAG_QUERY_LANE_CHANNELS entries must use platform:chat_id")
         if not 0 <= self.ambient_daily_board_hour <= 23:
             raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_HOUR must be between 0 and 23")
         if self.ambient_daily_board_window_minutes <= 0:
@@ -255,6 +299,8 @@ class Settings:
             raise ValueError("monitor thresholds require 0 < degraded < offline")
         if self.monitor_notification_retry_cap <= 0:
             raise ValueError("monitor notification retry cap must be positive")
+        if not 1 <= self.operational_report_max_items <= 500:
+            raise ValueError("OSTAG_OPERATIONAL_REPORT_MAX_ITEMS must be in 1..500")
         if self.copilot_relay_enabled:
             required = {
                 "copilot_relay_instance_id": self.copilot_relay_instance_id,
@@ -371,6 +417,26 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         governed_writes=_bool("OSTAG_GOVERNED_WRITES", False),
         followup_enabled=_bool("OSTAG_FOLLOWUP_ENABLED", True),
         followup_after_seconds=_int("OSTAG_FOLLOWUP_AFTER_SECONDS", 14400),
+        query_lane_enabled=_bool("OSTAG_QUERY_LANE_ENABLED", False),
+        query_lane_channels=_csv("OSTAG_QUERY_LANE_CHANNELS"),
+        query_lane_max_concurrency=_int("OSTAG_QUERY_LANE_MAX_CONCURRENCY", 4),
+        query_lane_timeout_seconds=_int("OSTAG_QUERY_LANE_TIMEOUT_SECONDS", 10),
+        query_lane_retry_count=_int("OSTAG_QUERY_LANE_RETRY_COUNT", 1),
+        query_lane_max_result_bytes=_int("OSTAG_QUERY_LANE_MAX_RESULT_BYTES", 65_536),
+        native_diagnostic_cards_enabled=_bool(
+            "OSTAG_NATIVE_DIAGNOSTIC_CARDS_ENABLED", False
+        ),
+        workstreams_enabled=_bool("OSTAG_WORKSTREAMS_ENABLED", False),
+        workstream_store_path=Path(
+            os.getenv("OSTAG_WORKSTREAM_STORE_PATH", "./logs/workstreams.sqlite3")
+        ),
+        workstream_max_batch=_int("OSTAG_WORKSTREAM_MAX_BATCH", 25),
+        provider_evidence_enabled=_bool("OSTAG_PROVIDER_EVIDENCE_ENABLED", False),
+        provider_evidence_max_checks=_int("OSTAG_PROVIDER_EVIDENCE_MAX_CHECKS", 100),
+        executor_runtime_enabled=_bool("OSTAG_EXECUTOR_RUNTIME_ENABLED", False),
+        kimi_executor_enabled=_bool("OSTAG_KIMI_EXECUTOR_ENABLED", False),
+        executor_max_output_bytes=_int("OSTAG_EXECUTOR_MAX_OUTPUT_BYTES", 1_048_576),
+        executor_osstack_registered=_csv("OSTAG_EXECUTOR_OSSTACK_REGISTERED"),
         env_scrub_extra=_csv("OSTAG_ENV_SCRUB_EXTRA"),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),
@@ -379,6 +445,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         mfs_max_results=_int("MFS_MAX_RESULTS", 8),
         codex_bin=os.getenv("CODEX_BIN", "codex"),
         claude_bin=os.getenv("CLAUDE_BIN", "claude"),
+        kimi_bin=os.getenv("KIMI_BIN", "kimi"),
         codex_unsafe_mode=_bool("OSTAG_CODEX_UNSAFE_MODE", False),
         claude_unsafe_mode=_bool("OSTAG_CLAUDE_UNSAFE_MODE", False),
         openai_model=os.getenv("OSTAG_OPENAI_MODEL", "gpt-5.5"),
@@ -399,6 +466,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         slack_app_token=os.getenv("SLACK_APP_TOKEN", ""),
         dingtalk_client_id=os.getenv("DINGTALK_CLIENT_ID", ""),
         dingtalk_client_secret=os.getenv("DINGTALK_CLIENT_SECRET", ""),
+        dingtalk_api_base_url=os.getenv("DINGTALK_API_BASE_URL", "https://api.dingtalk.com"),
         dingtalk_robot_webhook=os.getenv("DINGTALK_ROBOT_WEBHOOK", ""),
         dingtalk_robot_secret=os.getenv("DINGTALK_ROBOT_SECRET", ""),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
@@ -469,6 +537,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         monitor_degraded_seconds=_int("OSTAG_MONITOR_DEGRADED_SECONDS", 120),
         monitor_offline_seconds=_int("OSTAG_MONITOR_OFFLINE_SECONDS", 600),
         monitor_notification_retry_cap=_int("OSTAG_MONITOR_NOTIFICATION_RETRY_CAP", 5),
+        operational_report_enabled=_bool("OSTAG_OPERATIONAL_REPORT_ENABLED", False),
+        operational_report_connector_evidence_dir=Path(
+            os.getenv("OSTAG_OPERATIONAL_REPORT_CONNECTOR_EVIDENCE_DIR", "./release")
+        ),
+        operational_report_max_items=_int("OSTAG_OPERATIONAL_REPORT_MAX_ITEMS", 100),
         copilot_relay_enabled=_bool("OSTAG_COPILOT_RELAY_ENABLED", False),
         copilot_relay_server_enabled=_bool("OSTAG_COPILOT_RELAY_SERVER_ENABLED", True),
         copilot_relay_write_enabled=_bool("OSTAG_COPILOT_RELAY_WRITE_ENABLED", True),

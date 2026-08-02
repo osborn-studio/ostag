@@ -24,6 +24,12 @@ _CHAT_TEXT_CAPABILITIES: dict[str, bool | str] = {
     "can_apply_action": False,
 }
 
+_NATIVE_CARD_CAPABILITIES: dict[str, bool | str] = {
+    **_CHAT_TEXT_CAPABILITIES,
+    "can_render_buttons": True,
+    "can_render_cards": True,
+}
+
 _TABLE_CAPABILITIES: dict[str, bool | str] = {
     "can_read_records": True,
     "can_write_records": True,
@@ -43,7 +49,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         platform="feishu",
         connector="chat",
-        capabilities=dict(_CHAT_TEXT_CAPABILITIES),
+        capabilities=dict(_NATIVE_CARD_CAPABILITIES),
         limits={"max_message_chars": 15000},
     ),
     ConnectorCapability(
@@ -55,7 +61,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         platform="lark",
         connector="chat",
-        capabilities=dict(_CHAT_TEXT_CAPABILITIES),
+        capabilities=dict(_NATIVE_CARD_CAPABILITIES),
         limits={"max_message_chars": 15000},
     ),
     ConnectorCapability(
@@ -67,7 +73,7 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
     ConnectorCapability(
         platform="dingtalk",
         connector="chat",
-        capabilities=dict(_CHAT_TEXT_CAPABILITIES),
+        capabilities=dict(_NATIVE_CARD_CAPABILITIES),
         limits={"max_message_chars": 20000},
     ),
     ConnectorCapability(
@@ -90,6 +96,19 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         limits={"transport": "gh CLI (must be installed and authenticated)"},
     ),
     ConnectorCapability(
+        platform="github",
+        connector="pull_requests",
+        capabilities={
+            "can_read_pull_requests": True,
+            "can_read_checks": True,
+            "can_read_merge_evidence": True,
+            "can_merge": False,
+            "can_close": False,
+            "can_apply_action": False,
+        },
+        limits={"max_checks": 100, "pagination": "single bounded projection"},
+    ),
+    ConnectorCapability(
         platform="gitlab",
         connector="issues",
         capabilities={
@@ -101,6 +120,19 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
             "can_apply_action": True,
         },
         limits={"transport": "glab CLI (must be installed and authenticated)"},
+    ),
+    ConnectorCapability(
+        platform="gitlab",
+        connector="merge_requests",
+        capabilities={
+            "can_read_merge_requests": True,
+            "can_read_pipelines": True,
+            "can_read_merge_evidence": True,
+            "can_merge": False,
+            "can_close": False,
+            "can_apply_action": False,
+        },
+        limits={"pipeline_page_size": 20, "pagination": "first page only"},
     ),
 )
 

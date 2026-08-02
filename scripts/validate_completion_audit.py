@@ -23,7 +23,7 @@ def main() -> int:
         "DoD 4: automated dry-run/backend/safety/audit gates pass",
         "DoD 5: live Feishu/Lark validation is complete or externally blocked",
         "DoD 6: osstack records phases, verifier commands, and final score",
-        "Phases 0-7 are completed and archived",
+        "OpenTag P0-P2 delivery task records are retained",
         "Live MFS smoke is complete or externally blocked",
     }
     missing = sorted(expected - requirements)

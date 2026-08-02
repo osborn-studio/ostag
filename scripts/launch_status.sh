@@ -14,27 +14,24 @@ bash scripts/validate_production_scope.sh >/tmp/ostag-launch-scope-gate.out
 uv run python scripts/generate_release_manifest.py >/dev/null
 uv run python scripts/generate_completion_audit.py >/dev/null
 
-readiness_gate="$(uv run python - <<'PY'
+readiness_gate="$(uv run python -c '
 import re
 from pathlib import Path
 text = Path("release/readiness-audit.md").read_text(encoding="utf-8")
 print(re.search(r"Gate status: `([^`]+)`", text).group(1))
-PY
-)"
-readiness_checks="$(uv run python - <<'PY'
+')"
+readiness_checks="$(uv run python -c '
 import re
 from pathlib import Path
 text = Path("release/readiness-audit.md").read_text(encoding="utf-8")
 print(re.search(r"Checks: `([^`]+)`", text).group(1))
-PY
-)"
-completion_gate="$(uv run python - <<'PY'
+')"
+completion_gate="$(uv run python -c '
 import json
 from pathlib import Path
 data = json.loads(Path("release/completion-audit.json").read_text(encoding="utf-8"))
 print(data["gate"])
-PY
-)"
+')"
 
 set +e
 bash scripts/validate_live_validation_record.sh feishu >/tmp/ostag-launch-live-gate.out 2>&1
@@ -43,13 +40,12 @@ bash scripts/validate_mfs_validation_record.sh >/tmp/ostag-launch-mfs-gate.out 2
 mfs_code=$?
 set -e
 
-mfs_mode="$(uv run python - <<'PY'
+mfs_mode="$(uv run python -c '
 import json
 from pathlib import Path
 data = json.loads(Path("release/production-scope.json").read_text(encoding="utf-8"))
 print(data.get("mfs_mode", "required"))
-PY
-)"
+')"
 effective_mfs_code="$mfs_code"
 if [[ "$mfs_mode" == "excluded" ]]; then
   effective_mfs_code=0

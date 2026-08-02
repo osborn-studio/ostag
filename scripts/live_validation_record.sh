@@ -23,8 +23,12 @@ esac
 mkdir -p release
 record="release/live-validation-${platform}.md"
 doctor_log="$(mktemp)"
+release_commit="$(git rev-parse HEAD)"
+release_version="$(uv run python -c 'import ostag; print(ostag.__version__)')"
 
-if [[ -f "$record" ]] && rg -q 'Status: `manual_group_validation_passed`' "$record"; then
+if [[ -f "$record" ]] \
+  && rg -q 'Status: `manual_group_validation_passed`' "$record" \
+  && scripts/validate_live_validation_record.sh "$platform" "$record" >/dev/null 2>&1; then
   echo "$record"
   rm -f "$doctor_log"
   exit 0
@@ -57,6 +61,8 @@ fi
   echo
   echo "- Platform: \`$platform\`"
   echo "- Generated at: \`$(date -u +"%Y-%m-%dT%H:%M:%SZ")\`"
+  echo "- Release commit: \`$release_commit\`"
+  echo "- Release version: \`$release_version\`"
   echo "- App id prefix: \`${app_prefix:-not set}\`"
   echo "- Doctor exit code: \`$doctor_code\`"
   if [[ "${#required_missing[@]}" -gt 0 ]]; then

@@ -1,0 +1,7 @@
+{
+  "task_id": "task_acaade5e",
+  "capability": "code.review",
+  "prompt": "Review git diff 5684fad..HEAD for the complete P1 delivery: native Feishu/DingTalk diagnostic cards with opaque authorized controls, immutable recipe/workstream governance, and SHA-bound read-only GitHub/GitLab completion evidence. Do not edit files. Report correctness, security, compatibility, or deployment blockers.",
+  "priority": 90,
+  "source": "task_queue"
+}

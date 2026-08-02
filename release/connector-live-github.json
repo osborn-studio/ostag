@@ -1,0 +1,83 @@
+{
+  "capabilities": [
+    {
+      "capabilities": {
+        "can_apply_action": true,
+        "can_close_issues": false,
+        "can_comment_issues": true,
+        "can_create_issues": true,
+        "can_delete_issues": false,
+        "can_read_thread": false
+      },
+      "connector": "issues",
+      "limits": {
+        "transport": "gh CLI (must be installed and authenticated)"
+      },
+      "platform": "github",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
+    },
+    {
+      "capabilities": {
+        "can_apply_action": false,
+        "can_close": false,
+        "can_merge": false,
+        "can_read_checks": true,
+        "can_read_merge_evidence": true,
+        "can_read_pull_requests": true
+      },
+      "connector": "pull_requests",
+      "limits": {
+        "max_checks": 100,
+        "pagination": "single bounded projection"
+      },
+      "platform": "github",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
+    }
+  ],
+  "checks": [
+    {
+      "id": "declaration",
+      "required": true,
+      "status": "pass",
+      "summary": "connector capabilities declared"
+    },
+    {
+      "id": "cli",
+      "required": true,
+      "status": "pass",
+      "summary": "GitHub CLI executable available"
+    },
+    {
+      "id": "target",
+      "recovery_hint": "Configure OSTAG_GITHUB_DEFAULT_REPO.",
+      "required": true,
+      "status": "fail",
+      "summary": "default target missing"
+    },
+    {
+      "id": "governed_write",
+      "recovery_hint": "Enable both OSTAG_GOVERNED_WRITES and OSTAG_APPLY_ENABLED after approval.",
+      "required": false,
+      "status": "warn",
+      "summary": "connector writes disabled"
+    }
+  ],
+  "mode": "live",
+  "platform": "github",
+  "read_ready": false,
+  "schema_version": 1,
+  "status": "blocked",
+  "target": {
+    "configured": false,
+    "kind": "repository"
+  },
+  "write_ready": false
+}

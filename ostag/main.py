@@ -17,6 +17,7 @@ from ostag.connectors.apply import build_apply_executors
 from ostag.core.ambient import AmbientScheduler
 from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
+from ostag.core.connector_diagnostics import connector_test
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
 from ostag.core.event import NormalizedEvent
 from ostag.core.identity import Principal
@@ -78,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Actor id the run is attributed to (default: local-admin).",
     )
     run_submit.add_argument("--thread", help="Optional thread id.")
-    run_submit.add_argument("--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"])
+    run_submit.add_argument(
+        "--backend", choices=["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
+    )
     run_submit.add_argument("--json", action="store_true")
     run_submit.add_argument("--config")
 
@@ -124,6 +127,92 @@ def build_parser() -> argparse.ArgumentParser:
         "--platform", choices=["slack", "feishu", "lark", "dingtalk", "github", "gitlab"]
     )
     connector_list.add_argument("--json", action="store_true")
+    connector_test_parser = connector_sub.add_parser(
+        "test", help="Run non-mutating connector readiness diagnostics."
+    )
+    connector_test_parser.add_argument(
+        "platform", choices=["feishu", "lark", "dingtalk", "github", "gitlab"]
+    )
+    connector_test_parser.add_argument(
+        "--live", action="store_true", help="Add bounded read-only provider probes."
+    )
+    connector_test_parser.add_argument(
+        "--card-platform",
+        choices=["feishu", "dingtalk"],
+        help="Render a native diagnostic card instead of the raw report.",
+    )
+    connector_test_parser.add_argument("--json", action="store_true")
+    connector_test_parser.add_argument("--config")
+    connector_evidence = connector_sub.add_parser(
+        "evidence", help="Collect SHA-bound read-only PR/MR completion evidence."
+    )
+    connector_evidence.add_argument("platform", choices=["github", "gitlab"])
+    connector_evidence.add_argument("--repo")
+    connector_evidence.add_argument("--number", type=int, required=True)
+    connector_evidence.add_argument("--expected-sha", default="")
+    connector_evidence.add_argument("--work-thread")
+    connector_evidence.add_argument("--cycle", type=int, default=1)
+    connector_evidence.add_argument("--json", action="store_true")
+    connector_evidence.add_argument("--config")
+
+    query = subparsers.add_parser("query", help="Run isolated read-only queries.")
+    query_sub = query.add_subparsers(dest="query_command", required=True)
+    query_status = query_sub.add_parser("status", help="Read a run status through the query lane.")
+    query_status.add_argument("--run", required=True)
+    query_status.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    query_status.add_argument("--chat", required=True)
+    query_status.add_argument("--actor", default=LOCAL_ADMIN_ACTOR)
+    query_status.add_argument("--json", action="store_true")
+    query_status.add_argument("--config")
+    query_audit = query_sub.add_parser("audit", help="Read an audit bundle through the query lane.")
+    query_audit.add_argument("--since")
+    query_audit.add_argument("--until")
+    query_audit.add_argument(
+        "--platform", choices=["slack", "feishu", "lark", "dingtalk"], required=True
+    )
+    query_audit.add_argument("--chat", required=True)
+    query_audit.add_argument("--actor", default=LOCAL_ADMIN_ACTOR)
+    query_audit.add_argument("--json", action="store_true")
+    query_audit.add_argument("--config")
+
+    workstream = subparsers.add_parser("workstream", help="Manage governed multi-run workstreams.")
+    workstream_sub = workstream.add_subparsers(dest="workstream_command", required=True)
+    recipe_register = workstream_sub.add_parser("recipe-register")
+    recipe_register.add_argument("--file", type=Path, required=True)
+    recipe_register.add_argument("--json", action="store_true")
+    recipe_register.add_argument("--config")
+    workstream_admit = workstream_sub.add_parser("admit")
+    workstream_admit.add_argument("--recipe", required=True)
+    workstream_admit.add_argument("--version", type=int, required=True)
+    workstream_admit.add_argument("--key", required=True)
+    workstream_admit.add_argument("--goal", required=True)
+    workstream_admit.add_argument("--json", action="store_true")
+    workstream_admit.add_argument("--config")
+    workstream_attach = workstream_sub.add_parser("attach-run")
+    workstream_attach.add_argument("--id", required=True)
+    workstream_attach.add_argument("--run", required=True)
+    workstream_attach.add_argument("--cost", type=int, default=0)
+    workstream_attach.add_argument("--json", action="store_true")
+    workstream_attach.add_argument("--config")
+    workstream_show = workstream_sub.add_parser("show")
+    workstream_show.add_argument("--id", required=True)
+    workstream_show.add_argument("--json", action="store_true")
+    workstream_show.add_argument("--config")
+    workstream_list = workstream_sub.add_parser("list")
+    workstream_list.add_argument("--json", action="store_true")
+    workstream_list.add_argument("--config")
+
+    executor = subparsers.add_parser("executor", help="Inspect executor profiles and conformance.")
+    executor_sub = executor.add_subparsers(dest="executor_command", required=True)
+    executor_list = executor_sub.add_parser("list")
+    executor_list.add_argument("--json", action="store_true")
+    executor_list.add_argument("--config")
+    executor_test = executor_sub.add_parser("test")
+    executor_test.add_argument("executor_id", choices=["codex_cli", "claude_cli", "kimi_cli"])
+    executor_test.add_argument("--json", action="store_true")
+    executor_test.add_argument("--config")
 
     for verb in ("approve", "reject", "apply", "continue"):
         verb_parser = subparsers.add_parser(
@@ -267,6 +356,13 @@ def build_parser() -> argparse.ArgumentParser:
     access_list.add_argument("--actor")
     access_list.add_argument("--json", action="store_true")
     access_list.add_argument("--config")
+    monitor_report = monitor_sub.add_parser("report", help="Render a scoped operational report.")
+    monitor_report.add_argument("--platform", required=True)
+    monitor_report.add_argument("--actor", required=True)
+    monitor_report.add_argument("--scope", choices=["personal", "team"], default="personal")
+    monitor_report.add_argument("--format", choices=["json", "html"], default="json")
+    monitor_report.add_argument("--output", type=Path)
+    monitor_report.add_argument("--config")
 
     copilot = subparsers.add_parser("copilot", help="Manage the OStag Copilot device gateway.")
     copilot_sub = copilot.add_subparsers(dest="copilot_command", required=True)
@@ -357,7 +453,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--live", action="store_true", help="Disable dry-run and require live credentials."
     )
     parser.add_argument("--event", type=Path)
-    parser.add_argument("--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"])
+    parser.add_argument(
+        "--backend", choices=["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
+    )
     parser.add_argument("--config")
     parser.add_argument(
         "--doctor", action="store_true", help="Run deployment preflight checks and exit."
@@ -379,14 +477,112 @@ def create_adapter(platform: str, config) -> Adapter:
     raise NotImplementedError(f"Unsupported platform: {platform}")
 
 
+async def run_provider_evidence_command(args: argparse.Namespace) -> int:
+    from ostag.connectors.github import (
+        GhCLI,
+        GitHubCLIError,
+        GitHubPullRequestConnector,
+    )
+    from ostag.connectors.gitlab import (
+        GlabCLI,
+        GitLabCLIError,
+        GitLabMergeRequestConnector,
+    )
+
+    as_json = getattr(args, "json", False)
+    try:
+        config = load_settings(getattr(args, "config", None))
+        if not config.provider_evidence_enabled:
+            raise SchemaError(
+                code="feature_disabled",
+                message="Provider completion evidence is disabled",
+                recovery_hint="Set OSTAG_PROVIDER_EVIDENCE_ENABLED=true after live validation.",
+            )
+        repo = args.repo or (
+            config.github_default_repo
+            if args.platform == "github"
+            else config.gitlab_default_repo
+        )
+        if not repo:
+            raise SchemaError(
+                code="provider_target_missing",
+                message="No provider repository was configured",
+                recovery_hint="Pass --repo or configure the platform default repository.",
+            )
+        if args.platform == "github":
+            evidence = await GitHubPullRequestConnector(GhCLI(config), config).collect(
+                repo, args.number, expected_sha=args.expected_sha
+            )
+        else:
+            evidence = await GitLabMergeRequestConnector(GlabCLI(config), config).collect(
+                repo, args.number, expected_sha=args.expected_sha
+            )
+        facts = ()
+        if args.work_thread:
+            facts = evidence.to_completion_facts(
+                work_thread_id=args.work_thread,
+                cycle=args.cycle,
+                received_at=datetime.now(UTC).isoformat(),
+            )
+        _emit(
+            {
+                "evidence": evidence.to_dict(),
+                "payloadDigest": evidence.payload_digest,
+                "completionFacts": [fact.to_dict() for fact in facts],
+            },
+            as_json=as_json,
+        )
+        return 0
+    except SchemaError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
+    except (GitHubCLIError, GitLabCLIError):
+        _emit(
+            {
+                "error": {
+                    "code": "provider_evidence_failed",
+                    "message": "Provider evidence could not be read",
+                    "recovery_hint": "Check CLI authentication and read access, then retry.",
+                }
+            },
+            as_json=as_json,
+        )
+        return 1
+
+
+async def run_executor_command(args: argparse.Namespace) -> int:
+    from ostag.backends.executor_runtime import executor_profiles, run_conformance_suite
+
+    config = load_settings(getattr(args, "config", None))
+    profiles = executor_profiles(config)
+    if args.executor_command == "list":
+        reports = []
+        for executor_id in sorted(profiles):
+            report = await run_conformance_suite(profiles[executor_id])
+            reports.append(report.to_dict())
+        _emit(reports, as_json=getattr(args, "json", False))
+        return 0 if all(report["conformant"] for report in reports) else 1
+    report = await run_conformance_suite(profiles[args.executor_id])
+    _emit(report.to_dict(), as_json=getattr(args, "json", False))
+    return 0 if report.conformant else 1
+
+
 async def main_async(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "memory":
         return run_memory_command(args)
     if args.command == "run":
         return await run_submit_command(args)
+    if args.command == "connector" and args.connector_command == "evidence":
+        return await run_provider_evidence_command(args)
     if args.command in ("status", "ledger", "artifacts", "connector", "runs", "context"):
         return run_inspection_command(args)
+    if args.command == "query":
+        return await run_query_command(args)
+    if args.command == "workstream":
+        return run_workstream_command(args)
+    if args.command == "executor":
+        return await run_executor_command(args)
     if args.command in ("approve", "reject", "apply", "continue", "receipts"):
         return await run_receipt_command(args)
     if args.command == "followups":
@@ -510,6 +706,53 @@ def run_monitor_command(args: argparse.Namespace) -> int:
 
     config = load_settings(getattr(args, "config", None))
     as_json = getattr(args, "json", False)
+    if args.monitor_command == "report":
+        from ostag.work_monitor.operational_report import (
+            OperationalReportService,
+            render_operational_report_html,
+        )
+
+        if not config.operational_report_enabled:
+            _emit(
+                {
+                    "error": {
+                        "code": "feature_disabled",
+                        "message": "Operational reporting is disabled",
+                    }
+                },
+                as_json=True,
+            )
+            return 1
+        try:
+            monitor_store = MonitorStore(config.monitor_server_db)
+            identities = IdentityStore(config.monitor_server_db)
+            report = OperationalReportService(
+                monitor_store,
+                identities,
+                workstream_path=config.workstream_store_path,
+                connector_evidence_dir=config.operational_report_connector_evidence_dir,
+                degraded_seconds=config.monitor_degraded_seconds,
+                offline_seconds=config.monitor_offline_seconds,
+                max_items=config.operational_report_max_items,
+            ).build(Principal(args.platform, args.actor), scope=args.scope)
+            rendered = (
+                json.dumps(report.to_dict(), ensure_ascii=False, sort_keys=True)
+                if args.format == "json"
+                else render_operational_report_html(report.to_dict())
+            )
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(rendered + ("\n" if args.format == "json" else ""), encoding="utf-8")
+            else:
+                print(rendered)
+            return 0
+        except (PermissionError, ValueError, OSError) as exc:
+            code = "permission_denied" if isinstance(exc, PermissionError) else "report_unavailable"
+            _emit(
+                {"error": {"code": code, "message": "Operational report could not be read"}},
+                as_json=True,
+            )
+            return 1
     if args.monitor_command == "access":
         identities = IdentityStore(config.monitor_server_db)
         now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -769,9 +1012,45 @@ def run_inspection_command(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
     try:
         if args.command == "connector":
-            capabilities = list_capabilities(getattr(args, "platform", None))
-            _emit([item.to_dict() for item in capabilities], as_json=as_json)
-            return 0
+            if args.connector_command == "list":
+                capabilities = list_capabilities(getattr(args, "platform", None))
+                _emit([item.to_dict() for item in capabilities], as_json=as_json)
+                return 0
+            config = load_settings(getattr(args, "config", None))
+            report = connector_test(config, args.platform, live=args.live)
+            if args.card_platform:
+                if not config.native_diagnostic_cards_enabled:
+                    raise SchemaError(
+                        code="feature_disabled",
+                        message="Native diagnostic cards are disabled",
+                        recovery_hint=(
+                            "Set OSTAG_NATIVE_DIAGNOSTIC_CARDS_ENABLED=true after validation."
+                        ),
+                    )
+                from ostag.core.diagnostic_cards import (
+                    build_diagnostic_view,
+                    render_diagnostic_dingtalk_card,
+                    render_diagnostic_feishu_card,
+                    render_diagnostic_text,
+                )
+
+                view = build_diagnostic_view(report)
+                card = (
+                    render_diagnostic_feishu_card(view)
+                    if args.card_platform == "feishu"
+                    else render_diagnostic_dingtalk_card(view)
+                )
+                _emit(
+                    {
+                        "card_platform": args.card_platform,
+                        "card": card,
+                        "fallback": render_diagnostic_text(view),
+                    },
+                    as_json=as_json,
+                )
+                return 1 if report.status == "blocked" else 0
+            _emit(report.to_dict(), as_json=as_json)
+            return 1 if report.status == "blocked" else 0
 
         config = load_settings(getattr(args, "config", None))
         ledger = RunLedger(config.run_ledger_path)
@@ -950,6 +1229,146 @@ def run_audit_command(args: argparse.Namespace) -> int:
         return 0
     _emit(bundle, as_json=as_json)
     return 0
+
+
+async def run_query_command(args: argparse.Namespace) -> int:
+    from ostag.core.audit import AuditExporter
+    from ostag.core.query_lane import (
+        QueryLaneError,
+        QueryPolicy,
+        QueryRequest,
+        ReadOnlyQueryLane,
+    )
+
+    as_json = getattr(args, "json", False)
+    try:
+        config = load_settings(getattr(args, "config", None))
+        ledger = RunLedger(config.run_ledger_path)
+
+        async def status_handler(request: QueryRequest) -> dict[str, object]:
+            try:
+                result = ledger.run_status(str(request.payload["run_id"]))
+            except SchemaError as exc:
+                raise QueryLaneError(exc.code, exc.message, exc.recovery_hint) from exc
+            source = result.get("source")
+            source_chat = source.get("channel_id") if isinstance(source, dict) else None
+            if request.actor_id != LOCAL_ADMIN_ACTOR and source_chat != request.chat_id:
+                raise QueryLaneError(
+                    "query_scope_denied", "The requested run is outside this channel"
+                )
+            return result
+
+        async def audit_handler(request: QueryRequest) -> dict[str, object]:
+            return AuditExporter(config, ledger).export(
+                since=request.payload.get("since"),
+                until=request.payload.get("until"),
+                platform=request.platform,
+                chat_id=request.chat_id,
+            )
+
+        handlers = {"status": status_handler, "audit": audit_handler}
+        lane = ReadOnlyQueryLane(
+            QueryPolicy(
+                enabled=config.query_lane_enabled,
+                authorized_channels=frozenset(config.query_lane_channels),
+                max_concurrency=config.query_lane_max_concurrency,
+                timeout_seconds=config.query_lane_timeout_seconds,
+                retry_count=config.query_lane_retry_count,
+                max_result_bytes=config.query_lane_max_result_bytes,
+            ),
+            handlers,
+        )
+        payload: dict[str, object]
+        if args.query_command == "status":
+            payload = {"run_id": args.run}
+        else:
+            payload = {
+                key: value
+                for key, value in {"since": args.since, "until": args.until}.items()
+                if value is not None
+            }
+        response = await lane.execute(
+            QueryRequest(
+                query_id=new_id("query"),
+                kind=args.query_command,
+                platform=args.platform,
+                chat_id=args.chat,
+                actor_id=args.actor,
+                payload=payload,
+            )
+        )
+    except QueryLaneError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
+    _emit(response.to_dict(), as_json=as_json)
+    return 0
+
+
+def run_workstream_command(args: argparse.Namespace) -> int:
+    from ostag.core.workstreams import (
+        RecipeDefinition,
+        WorkstreamAdmission,
+        WorkstreamStore,
+    )
+
+    as_json = getattr(args, "json", False)
+    try:
+        config = load_settings(getattr(args, "config", None))
+        if not config.workstreams_enabled:
+            raise SchemaError(
+                code="feature_disabled",
+                message="Workstreams are disabled",
+                recovery_hint="Set OSTAG_WORKSTREAMS_ENABLED=true after migration checks.",
+            )
+        store = WorkstreamStore(
+            config.workstream_store_path, max_batch=config.workstream_max_batch
+        )
+        if args.workstream_command == "recipe-register":
+            raw = json.loads(args.file.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise SchemaError(
+                    code="invalid_recipe",
+                    message="Recipe file must contain an object",
+                    recovery_hint="Provide a JSON object matching RecipeDefinition.",
+                )
+            recipe = store.register_recipe(RecipeDefinition.from_dict(raw))
+            _emit({**recipe.to_dict(), "digest": recipe.digest}, as_json=as_json)
+            return 0
+        if args.workstream_command == "admit":
+            admitted = store.admit(
+                WorkstreamAdmission(args.key, args.recipe, args.version, args.goal)
+            )
+            _emit(admitted.to_dict(), as_json=as_json)
+            return 0
+        if args.workstream_command == "attach-run":
+            attached = store.attach_run(args.id, args.run, cost_credits=args.cost)
+            _emit(attached.to_dict(), as_json=as_json)
+            return 0
+        if args.workstream_command == "show":
+            workstream = store.get_workstream(args.id)
+            _emit(
+                {
+                    "workstream": workstream.to_dict(),
+                    "childRuns": [item.to_dict() for item in store.child_runs(args.id)],
+                },
+                as_json=as_json,
+            )
+            return 0
+        _emit(
+            [item.to_dict() for item in store.list_workstreams()],
+            as_json=as_json,
+        )
+        return 0
+    except (SchemaError, OSError, json.JSONDecodeError) as exc:
+        if isinstance(exc, SchemaError):
+            error = exc.to_dict()
+        else:
+            error = {
+                "code": "workstream_input_error",
+                "message": "Workstream input could not be read",
+            }
+        _emit({"error": error}, as_json=as_json)
+        return 1
 
 
 def run_budget_command(args: argparse.Namespace) -> int:

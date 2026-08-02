@@ -2,18 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<!-- Development-only standalone adapter. Production Feishu ingress is owned by
-     the central FastAPI service with FEISHU_USE_WEBSOCKET=true. -->
 <dict>
   <key>Label</key><string>ai.ostag.feishu</string>
-  <key>WorkingDirectory</key><string>/Users/gilbertchen/Documents/CODE/ostag-deep-fork</string>
+  <key>WorkingDirectory</key><string>/Volumes/AIMATE_WORK/Developer/CodeX/OStag</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>OSTAG_PLATFORM</key><string>feishu</string>
   </dict>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/gilbertchen/.local/bin/uv</string>
+    <string>/Users/osborn/.local/bin/uv</string>
     <string>run</string>
     <string>python</string>
     <string>-m</string>
@@ -22,9 +20,9 @@
     <string>feishu</string>
     <string>--live</string>
   </array>
-  <key>RunAtLoad</key><false/>
-  <key>KeepAlive</key><false/>
-  <key>StandardOutPath</key><string>/Users/gilbertchen/Documents/CODE/ostag-deep-fork/logs/launchd.out.log</string>
-  <key>StandardErrorPath</key><string>/Users/gilbertchen/Documents/CODE/ostag-deep-fork/logs/launchd.err.log</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Volumes/AIMATE_WORK/Developer/CodeX/OStag/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key><string>/Volumes/AIMATE_WORK/Developer/CodeX/OStag/logs/launchd.err.log</string>
 </dict>
 </plist>

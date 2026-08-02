@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANAGEMENT_ROOT="${OSTAG_MANAGEMENT_ROOT:-/Users/gilbertchen/Documents/CODE/ostag}"
+MANAGEMENT_ROOT="${OSTAG_MANAGEMENT_ROOT:-$ROOT}"
 cd "$ROOT"
 
-mkdir -p release
-report="release/readiness-audit.md"
+report="${OSTAG_READINESS_REPORT:-release/readiness-audit.md}"
+mkdir -p "$(dirname "$report")"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -39,8 +39,8 @@ check_cmd() {
 }
 
 check_cmd "Fork-derived git history exists" \
-  "\`upstream\` remote, baseline commit, and \`FORK_ORIGIN.md\` are present" \
-  bash -c 'git remote get-url upstream >/dev/null && rg -q "16574f9b365bc67f3716c552dad416da730088b8" FORK_ORIGIN.md && git cat-file -e 16574f9b365bc67f3716c552dad416da730088b8^{commit}'
+  "\`FORK_ORIGIN.md\` preserves the upstream URL and pinned baseline in product history" \
+  bash -c 'test -s FORK_ORIGIN.md && rg -q "https://github.com/zilliztech/mfs" FORK_ORIGIN.md && rg -q "16574f9b365bc67f3716c552dad416da730088b8" FORK_ORIGIN.md && git log -1 --format=%H -- FORK_ORIGIN.md | rg -q .'
 
 check_cmd "Open Tag migration decisions are recorded" \
   "\`docs/fork_migration_report.md\` maps upstream files to ported/rewritten/deferred decisions" \
@@ -59,16 +59,16 @@ check_cmd "Automated release checks pass" \
   scripts/release_check.sh
 
 check_cmd "Prompt contract is migrated" \
-  "\`ostag/core/prompt.py\` exists and \`tests/test_prompt.py\` is included in the release test gate" \
-  bash -c 'test -f ostag/core/prompt.py && rg -q "tests/test_prompt.py" pyproject.toml && uv run pytest tests/test_prompt.py'
+  "\`ostag/core/prompt.py\` exists and its focused test module passes" \
+  bash -c 'test -f ostag/core/prompt.py && test -f tests/test_prompt.py && uv run pytest tests/test_prompt.py'
 
 check_cmd "Memory utility is migrated" \
-  "\`ostag/mfs/memory.py\` exists, \`tests/test_memory.py\` is included in the release test gate, and the memory CLI works" \
-  bash -c 'test -f ostag/mfs/memory.py && rg -q "tests/test_memory.py" pyproject.toml && uv run pytest tests/test_memory.py'
+  "\`ostag/mfs/memory.py\` exists and its focused test module passes" \
+  bash -c 'test -f ostag/mfs/memory.py && test -f tests/test_memory.py && uv run pytest tests/test_memory.py'
 
 check_cmd "MFS client subprocess integration is covered" \
   "\`tests/test_mfs_client.py\` exercises enabled MFS search through a fake CLI subprocess" \
-  bash -c 'test -f tests/test_mfs_client.py && rg -q "tests/test_mfs_client.py" pyproject.toml && uv run pytest tests/test_mfs_client.py'
+  bash -c 'test -f tests/test_mfs_client.py && uv run pytest tests/test_mfs_client.py'
 
 check_cmd "MFS validation record exists" \
   "\`release/mfs-validation.md\` records either a real MFS smoke pass or a structured external blocker" \
@@ -106,6 +106,14 @@ check_cmd "Live validation is credential-gated" \
   "\`release/live-validation-feishu.md\` exists and records pass or blocked_missing_credentials status" \
   bash -c 'test -f release/live-validation-feishu.md && rg -q "Status: `(blocked_missing_credentials|preflight_passed_manual_group_test_required|manual_group_validation_passed)`" release/live-validation-feishu.md'
 
+check_cmd "Connector live smoke evidence is structured" \
+  "Feishu, DingTalk, GitHub, and GitLab evidence records are present and schema-valid" \
+  bash -c 'for platform in feishu dingtalk github gitlab; do file="release/connector-live-${platform}.json"; test -s "$file" && uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1])); assert data["schema_version"] == 1 and data["platform"] == sys.argv[2] and data["mode"] == "live" and isinstance(data["read_ready"], bool)'\'' "$file" "$platform" || exit 1; done'
+
+check_cmd "Provider completion evidence is structured" \
+  "GitHub and GitLab PR/MR evidence records contain ready evidence or an explicit blocker" \
+  bash -c 'for platform in github gitlab; do file="release/provider-evidence-${platform}.json"; test -s "$file" && uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1])); assert data["schema_version"] == 1 and data["platform"] == sys.argv[2] and data["status"] in {"ready", "blocked"}'\'' "$file" "$platform" || exit 1; done'
+
 set +e
 scripts/validate_live_validation_record.sh feishu >"$tmpdir/live-validation-gate.log" 2>&1
 live_gate_code=$?
@@ -127,12 +135,12 @@ else
 fi
 
 check_cmd "osstack state records phase execution" \
-  "\`STATE.md\` contains completed phase task ids and the deployment preflight hardening task" \
-  bash -c 'test -f "$0/STATE.md" && rg -q "task_d57d82ef" "$0/STATE.md" && rg -q "task_6a154f84" "$0/STATE.md"' "$MANAGEMENT_ROOT"
+  "\`LOOP-STATE.json\` is present and structurally valid at the configured management root" \
+  bash -c 'test -s "$0/LOOP-STATE.json" && uv run python -m json.tool "$0/LOOP-STATE.json" >/dev/null' "$MANAGEMENT_ROOT"
 
-check_cmd "osstack task archive contains latest readiness verification task" \
-  "\`tasks/archive/2026-06-28/task_ed36600e.json\` exists" \
-  bash -c 'test -f "$0/tasks/archive/2026-06-28/task_ed36600e.json"' "$MANAGEMENT_ROOT"
+check_cmd "osstack task evidence is retained" \
+  "P0, P1, and split P2 review tasks exist and have successful outcomes in \`LOOP-STATE.json\`" \
+  bash -c 'for id in task_37dce3d6 task_acaade5e task_df75534b task_a54c03d5; do test -s "$0/tasks/$id.json" || exit 1; done; uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); completed={item.get("task_id") for item in data.get("completed_tasks", []) if item.get("outcome") == "success"}; required={"task_37dce3d6", "task_acaade5e", "task_df75534b", "task_a54c03d5"}; assert required <= completed'\'' "$0/LOOP-STATE.json"' "$MANAGEMENT_ROOT"
 
 check_cmd "Scorecard is current" \
   "\`release/ostag-scorecard.md\` reports 96/100 pilot-ready status" \

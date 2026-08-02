@@ -119,8 +119,10 @@ scripts/deploy_preflight.sh
 ```
 
 It runs the release check, validates Docker Compose configuration, renders the
-launchd plist, validates the plist when `plutil` is available, and writes a
-credential-gated live validation record under `release/`.
+launchd plist, validates the plist when `plutil` is available, and writes
+credential-gated live validation plus Feishu, DingTalk, GitHub, and GitLab
+connector evidence under `release/`. A missing credential or target is retained
+as a structured external blocker; malformed evidence fails the preflight.
 
 After a real group test, validate the manual evidence:
 
@@ -263,6 +265,9 @@ an incompatible migration requires it.
 - Keep `MFS_ALLOWED_SCOPES` narrow.
 - Keep unsafe CLI flags disabled unless testing on an isolated machine.
 - Rotate Feishu/Lark secrets if audit logs or shell history expose credentials.
+- Keep `OSTAG_OPERATIONAL_REPORT_ENABLED=false` until human identity bindings,
+  connector smoke evidence, and the protected workstream path have been verified.
+  See [operational_report.md](operational_report.md).
 
 ## Production work monitor on Tencent Cloud
 

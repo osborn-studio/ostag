@@ -11,7 +11,7 @@
   </dict>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/gilbertchen/.local/bin/uv</string>
+    <string>__UV_BIN__</string>
     <string>run</string>
     <string>python</string>
     <string>-m</string>

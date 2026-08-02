@@ -1,0 +1,99 @@
+{
+  "capabilities": [
+    {
+      "capabilities": {
+        "can_apply_action": false,
+        "can_mention_users": "limited",
+        "can_read_thread": true,
+        "can_render_buttons": true,
+        "can_render_cards": true,
+        "can_reply_thread": true,
+        "can_schedule_message": false,
+        "can_send_proactive": true,
+        "can_upload_artifact": false
+      },
+      "connector": "chat",
+      "limits": {
+        "max_message_chars": 20000
+      },
+      "platform": "dingtalk",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
+    },
+    {
+      "capabilities": {
+        "can_create_records": true,
+        "can_create_tables": true,
+        "can_delete_records": false,
+        "can_read_records": true,
+        "can_send_proactive": true,
+        "can_write_records": true
+      },
+      "connector": "ai_table",
+      "limits": {
+        "batch_size": 30
+      },
+      "platform": "dingtalk",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
+    }
+  ],
+  "checks": [
+    {
+      "id": "declaration",
+      "required": true,
+      "status": "pass",
+      "summary": "connector capabilities declared"
+    },
+    {
+      "id": "credentials",
+      "recovery_hint": "Configure DINGTALK_CLIENT_ID and DINGTALK_CLIENT_SECRET.",
+      "required": true,
+      "status": "fail",
+      "summary": "application credentials configured missing"
+    },
+    {
+      "id": "cli",
+      "required": true,
+      "status": "pass",
+      "summary": "DingTalk workspace CLI executable available"
+    },
+    {
+      "id": "target",
+      "recovery_hint": "Configure OSTAG_DAILY_TASK_BOARD_DINGTALK_TABLE_ID.",
+      "required": true,
+      "status": "fail",
+      "summary": "default target missing"
+    },
+    {
+      "id": "live_provider",
+      "recovery_hint": "Check provider credentials, bot availability, and network access, then retry.",
+      "required": true,
+      "status": "fail",
+      "summary": "live provider API probe failed"
+    },
+    {
+      "id": "governed_write",
+      "recovery_hint": "Enable both OSTAG_GOVERNED_WRITES and OSTAG_APPLY_ENABLED after approval.",
+      "required": false,
+      "status": "warn",
+      "summary": "connector writes disabled"
+    }
+  ],
+  "mode": "live",
+  "platform": "dingtalk",
+  "read_ready": false,
+  "schema_version": 1,
+  "status": "blocked",
+  "target": {
+    "configured": false,
+    "kind": "ai_table"
+  },
+  "write_ready": false
+}

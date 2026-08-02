@@ -12,7 +12,8 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 
 from ostag.config import Settings, load_settings
 from ostag.core.identity import Principal
@@ -515,6 +516,55 @@ def create_app(
             return svc.instances(principal, destination)
         except Exception as exc:
             raise translate(exc) from exc
+
+    if configured.operational_report_enabled:
+        from .operational_report import OperationalReportService, render_operational_report_html
+
+        def report_service() -> OperationalReportService:
+            svc = active_service()
+            return OperationalReportService(
+                svc.store,
+                svc.identities,
+                workstream_path=configured.workstream_store_path,
+                connector_evidence_dir=configured.operational_report_connector_evidence_dir,
+                degraded_seconds=configured.monitor_degraded_seconds,
+                offline_seconds=configured.monitor_offline_seconds,
+                max_items=configured.operational_report_max_items,
+            )
+
+        @app.get("/v1/report")
+        async def operational_report(
+            request: Request,
+            response: Response,
+            scope: Literal["personal", "team"] = "personal",
+        ) -> dict[str, object]:
+            _, principal, _ = human(request)
+            try:
+                response.headers["Cache-Control"] = "no-store"
+                return report_service().build(principal, scope=scope).to_dict()
+            except Exception as exc:
+                raise translate(exc) from exc
+
+        @app.get("/v1/report.html", response_class=HTMLResponse)
+        async def operational_report_html(
+            request: Request, scope: Literal["personal", "team"] = "personal"
+        ) -> HTMLResponse:
+            _, principal, _ = human(request)
+            try:
+                report = report_service().build(principal, scope=scope).to_dict()
+                return HTMLResponse(
+                    render_operational_report_html(report),
+                    headers={
+                        "Cache-Control": "no-store",
+                        "Content-Security-Policy": (
+                            "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; "
+                            "frame-ancestors 'none'"
+                        ),
+                        "X-Content-Type-Options": "nosniff",
+                    },
+                )
+            except Exception as exc:
+                raise translate(exc) from exc
 
     @app.post("/v1/subscriptions")
     async def subscriptions(request: Request) -> dict[str, str]:

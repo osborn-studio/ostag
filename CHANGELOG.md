@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.5.0 — 2026-08-02
+
+OpenTag v0.8/v0.9 benchmark release, delivered as independently reviewed P0,
+P1, and P2 increments. The release improves live-pilot diagnostics, separates
+read-only work from mutation paths, adds governed multi-run delivery, closes
+provider completion evidence, and introduces executor-neutral and reporting
+surfaces without changing default production behavior.
+
+- Added `ostag connector test <platform>` for Feishu/Lark, DingTalk, GitHub,
+  and GitLab. Diagnostics emit stable, redacted readiness evidence for local
+  tools, authentication, target configuration, read/write capability, and
+  bounded live probes. Credential-gated smoke harnesses preserve explicit
+  external blockers instead of reporting false success.
+- Added isolated `ostag query status` and `ostag query audit` read-only lanes.
+  Queries have independent authorization, bounded execution, deterministic
+  output, retry semantics, and no route into receipt or apply mutations.
+- Added feature-gated native Feishu and DingTalk cards for connector,
+  completion, and operational evidence, with compact source-thread status and
+  safe text fallbacks.
+- Added immutable recipe/workstream governance for multi-run goals: bounded
+  admission, child-run linkage, aggregate lifecycle projection, and evidence-
+  aware completion. The implementation reuses the existing run ledger,
+  completion contracts, escalation, and work-monitor ownership model.
+- Extended GitHub and GitLab completion proof from issue-level activity to
+  SHA-bound PR/MR checks and merge evidence. Evidence is immutable, bounded,
+  feature-gated, and captured by provider-live smoke harnesses.
+- Added a schema-versioned executor-neutral runtime and conformance suite,
+  including a feature-gated Kimi CLI backend. Commands use direct argv
+  execution, bounded output, timeouts, secret-scrubbed environments, and
+  explicit OSStack registration rather than implicit discovery.
+- Added identity-scoped operational JSON and HTML reports for work-monitor
+  status, workstreams, costs, completion evidence, connector readiness, and
+  escalations. Reports are bounded, redacted, scriptless, non-cacheable, and
+  exposed through feature-gated CLI and HTTP surfaces.
+- Added release gates, rollback guidance, deployment wiring, and 69 focused
+  tests across the new capabilities. The complete suite now contains 1,024
+  passing tests and has passed Ruff, secret hygiene, and split OSStack/Claude
+  independent review with zero findings.
+
 ## 0.4.0 — 2026-07-25
 
 Selective back-port of OpenTag v0.7 completion governance (upstream
