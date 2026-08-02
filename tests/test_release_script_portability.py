@@ -56,3 +56,25 @@ def test_live_validation_is_bound_to_the_release_commit() -> None:
     assert "Release version" in validator
     assert "git rev-parse HEAD" in recorder
     assert "git merge-base --is-ancestor" in validator
+
+
+def test_release_evidence_uses_current_repo_local_osstack_state() -> None:
+    generators = [
+        Path("scripts/generate_completion_audit.py"),
+        Path("scripts/generate_release_manifest.py"),
+    ]
+    validators = [
+        Path("scripts/validate_completion_audit.py"),
+        Path("scripts/validate_release_manifest.py"),
+    ]
+
+    source = "\n".join(path.read_text(encoding="utf-8") for path in generators)
+    validator_source = "\n".join(
+        path.read_text(encoding="utf-8") for path in validators
+    )
+
+    assert "/Users/gilbertchen" not in source
+    assert "OSTAG_MANAGEMENT_ROOT" in source
+    assert "LOOP-STATE.json" in source
+    assert "tasks/archive/2026-06-28" not in source
+    assert 'task["archived"]' not in validator_source

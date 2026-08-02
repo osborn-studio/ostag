@@ -37,9 +37,22 @@ def main() -> int:
         raise SystemExit(f"unexpected readiness gate: {data['readiness_gate']}")
     if not data["osstack_tasks"]:
         raise SystemExit("manifest has no osstack tasks")
-    unarchived = [task["task_id"] for task in data["osstack_tasks"] if not task["archived"]]
-    if unarchived:
-        raise SystemExit(f"unarchived osstack tasks in manifest: {unarchived}")
+    required_reviews = {
+        "task_37dce3d6",
+        "task_acaade5e",
+        "task_df75534b",
+        "task_a54c03d5",
+    }
+    task_evidence = {task["task_id"]: task for task in data["osstack_tasks"]}
+    incomplete = sorted(
+        task_id
+        for task_id in required_reviews
+        if task_id not in task_evidence
+        or not task_evidence[task_id].get("retained")
+        or not task_evidence[task_id].get("verified")
+    )
+    if incomplete:
+        raise SystemExit(f"incomplete osstack task evidence in manifest: {incomplete}")
     for artifact in data["artifacts"]:
         if not (ROOT / artifact).exists():
             raise SystemExit(f"missing artifact: {artifact}")

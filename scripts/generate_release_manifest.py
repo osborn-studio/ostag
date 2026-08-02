@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from datetime import datetime, timezone
@@ -8,7 +9,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANAGEMENT_ROOT = Path("/Users/gilbertchen/Documents/CODE/ostag")
+MANAGEMENT_ROOT = Path(os.getenv("OSTAG_MANAGEMENT_ROOT", str(ROOT))).resolve()
+REQUIRED_REVIEW_TASKS = {
+    "task_37dce3d6",
+    "task_acaade5e",
+    "task_df75534b",
+    "task_a54c03d5",
+}
 
 
 def read(path: Path) -> str:
@@ -20,21 +27,35 @@ def first_match(pattern: str, text: str, default: str = "") -> str:
     return match.group(1) if match else default
 
 
-def archived(task_id: str) -> bool:
-    return (MANAGEMENT_ROOT / "tasks" / "archive" / "2026-06-28" / f"{task_id}.json").exists()
+def read_json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def main() -> int:
     scorecard = read(ROOT / "release" / "ostag-scorecard.md")
     readiness = read(ROOT / "release" / "readiness-audit.md")
-    evidence = read(ROOT / "release" / "ostag-launch-evidence.md")
+    state = read_json(MANAGEMENT_ROOT / "LOOP-STATE.json")
 
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     branch = subprocess.check_output(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=ROOT, text=True
     ).strip()
 
-    task_ids = sorted(set(re.findall(r"task_[a-f0-9]{8}", evidence)))
+    completed_tasks = {
+        item.get("task_id"): item
+        for item in state.get("completed_tasks", [])
+        if isinstance(item, dict) and isinstance(item.get("task_id"), str)
+    }
+    retained_task_ids = {
+        path.stem
+        for path in (MANAGEMENT_ROOT / "tasks").glob("task_*.json")
+        if re.fullmatch(r"task_[a-f0-9]{8}", path.stem)
+    }
+    task_ids = sorted(retained_task_ids | REQUIRED_REVIEW_TASKS)
 
     artifacts = [
         "FORK_ORIGIN.md",
@@ -112,7 +133,14 @@ def main() -> int:
             "scripts/release_readiness_audit.sh",
         ],
         "osstack_tasks": [
-            {"task_id": task_id, "archived": archived(task_id)} for task_id in task_ids
+            {
+                "task_id": task_id,
+                "retained": task_id in retained_task_ids,
+                "outcome": completed_tasks.get(task_id, {}).get("outcome", "not_recorded"),
+                "verified": completed_tasks.get(task_id, {}).get("outcome") == "success"
+                and completed_tasks.get(task_id, {}).get("verify_issue_count", 0) == 0,
+            }
+            for task_id in task_ids
         ],
     }
 

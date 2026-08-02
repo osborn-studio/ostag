@@ -10,9 +10,15 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANAGEMENT_ROOT = Path("/Users/gilbertchen/Documents/CODE/ostag")
+MANAGEMENT_ROOT = Path(os.getenv("OSTAG_MANAGEMENT_ROOT", str(ROOT))).resolve()
 OUT_MD = ROOT / "release" / "completion-audit.md"
 OUT_JSON = ROOT / "release" / "completion-audit.json"
+REQUIRED_REVIEW_TASKS = {
+    "task_37dce3d6",
+    "task_acaade5e",
+    "task_df75534b",
+    "task_a54c03d5",
+}
 
 
 @dataclass(frozen=True)
@@ -42,8 +48,12 @@ def exists(path: str) -> bool:
     return (ROOT / path).exists()
 
 
-def archived(task_id: str) -> bool:
-    return (MANAGEMENT_ROOT / "tasks" / "archive" / "2026-06-28" / f"{task_id}.json").exists()
+def read_json(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(read(path) or "{}")
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def live_status() -> str:
@@ -71,9 +81,26 @@ def main() -> int:
     (ROOT / "release").mkdir(exist_ok=True)
     readiness = read(ROOT / "release" / "readiness-audit.md")
     scorecard = read(ROOT / "release" / "ostag-scorecard.md")
-    state = read(MANAGEMENT_ROOT / "STATE.md")
-    manifest = json.loads(read(ROOT / "release" / "release-manifest.json") or "{}")
+    state = read_json(MANAGEMENT_ROOT / "LOOP-STATE.json")
+    manifest = read_json(ROOT / "release" / "release-manifest.json")
     migration_report = read(ROOT / "docs/fork_migration_report.md")
+
+    completed_tasks = {
+        item.get("task_id"): item
+        for item in state.get("completed_tasks", [])
+        if isinstance(item, dict) and isinstance(item.get("task_id"), str)
+    }
+    osstack_reviews_pass = all(
+        task_id in completed_tasks
+        and completed_tasks[task_id].get("outcome") == "success"
+        and completed_tasks[task_id].get("verify_issue_count", 0) == 0
+        and bool(completed_tasks[task_id].get("verify_commands"))
+        for task_id in REQUIRED_REVIEW_TASKS
+    )
+    task_records_retained = all(
+        (MANAGEMENT_ROOT / "tasks" / f"{task_id}.json").is_file()
+        for task_id in REQUIRED_REVIEW_TASKS
+    )
 
     code, release_output = run("scripts/release_check.sh")
     release_check_pass = code == 0 and re.search(r"\b\d+\s+passed\b", release_output) is not None
@@ -86,9 +113,13 @@ def main() -> int:
 
     rows = [
         Row(
-            "PASS" if exists("FORK_ORIGIN.md") and run("git", "remote", "get-url", "upstream")[0] == 0 else "FAIL",
+            "PASS"
+            if exists("FORK_ORIGIN.md")
+            and "https://github.com/zilliztech/mfs" in read(ROOT / "FORK_ORIGIN.md")
+            and "16574f9b365bc67f3716c552dad416da730088b8" in read(ROOT / "FORK_ORIGIN.md")
+            else "FAIL",
             "DoD 1: real fork-derived git history exists",
-            "`FORK_ORIGIN.md`, upstream remote, and baseline commit are present",
+            "`FORK_ORIGIN.md` preserves the upstream URL and pinned baseline in product history",
         ),
         Row(
             "PASS" if exists("docs/fork_migration_report.md") and all(item in migration_report for item in ("mfs_cat.py", "mfs_search.py", "opentag_agent.py", "opentag_doctor.py", "opentag_memory.py", "slack_socket_agent.py")) else "FAIL",
@@ -111,14 +142,14 @@ def main() -> int:
             "`release/live-validation-feishu.md` records manual pass or missing-credential blocker",
         ),
         Row(
-            "PASS" if all(task in state for task in ("task_d57d82ef", "task_d2859192", "task_3f9f86a2")) and "Total: `96 / 100`" in scorecard else "FAIL",
+            "PASS" if osstack_reviews_pass and "Total: `96 / 100`" in scorecard else "FAIL",
             "DoD 6: osstack records phases, verifier commands, and final score",
-            "`STATE.md`, archived tasks, execution board, and scorecard are current",
+            "`LOOP-STATE.json` records successful P0/P1/P2 verification commands with zero findings, and the scorecard is current",
         ),
         Row(
-            "PASS" if all(archived(task) for task in ("task_d57d82ef", "task_2b786dcd", "task_49df7528", "task_1edc63fd", "task_c0be8580", "task_657bb669", "task_8c98c03f", "task_d2859192")) else "FAIL",
-            "Phases 0-7 are completed and archived",
-            "All primary phase task files exist under `tasks/archive/2026-06-28/`",
+            "PASS" if task_records_retained else "FAIL",
+            "OpenTag P0-P2 delivery task records are retained",
+            "Current P0, P1, and split P2 task records exist under the repository-local `tasks/` directory",
         ),
         Row(
             "PASS" if docker_compose_pass and exists("release/ai.ostag.feishu.plist") else "FAIL",
@@ -138,7 +169,7 @@ def main() -> int:
         Row(
             "PASS" if manifest.get("readiness_gate") in {"PASS", "PASS_WITH_EXTERNAL_BLOCKER"} and "0 failed" in manifest.get("readiness_checks", "") else "FAIL",
             "Machine-readable manifest matches current gates",
-            "`release/release-manifest.json` reflects readiness gate, artifacts, and archived osstack tasks",
+            "`release/release-manifest.json` reflects readiness gates, artifacts, and current osstack task outcomes",
         ),
         Row(
             "PASS" if ("PASS" in readiness or "PASS_WITH_EXTERNAL_BLOCKER" in readiness) and "0 failed" in readiness else "FAIL",

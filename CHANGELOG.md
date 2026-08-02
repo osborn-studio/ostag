@@ -34,8 +34,8 @@ surfaces without changing default production behavior.
   status, workstreams, costs, completion evidence, connector readiness, and
   escalations. Reports are bounded, redacted, scriptless, non-cacheable, and
   exposed through feature-gated CLI and HTTP surfaces.
-- Added release gates, rollback guidance, deployment wiring, and 68 focused
-  tests across the new capabilities. The complete suite now contains 1,023
+- Added release gates, rollback guidance, deployment wiring, and 69 focused
+  tests across the new capabilities. The complete suite now contains 1,024
   passing tests and has passed Ruff, secret hygiene, and split OSStack/Claude
   independent review with zero findings.
 
