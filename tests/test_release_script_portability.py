@@ -29,6 +29,9 @@ def test_release_scripts_avoid_bash4_case_conversion() -> None:
         assert ",,}" not in source, f"{path} requires Bash 4 lowercase expansion"
         assert "^^}" not in source, f"{path} requires Bash 4 uppercase expansion"
 
+    launch_status = Path("scripts/launch_status.sh").read_text(encoding="utf-8")
+    assert '="$(uv run python - <<' not in launch_status
+
 
 def test_launchd_renderer_uses_the_target_hosts_uv_binary(tmp_path: Path) -> None:
     output = tmp_path / "ai.ostag.feishu.plist"
