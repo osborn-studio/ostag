@@ -106,6 +106,9 @@ class Settings:
     query_lane_retry_count: int = 1
     query_lane_max_result_bytes: int = 65_536
     native_diagnostic_cards_enabled: bool = False
+    workstreams_enabled: bool = False
+    workstream_store_path: Path = Path("./logs/workstreams.sqlite3")
+    workstream_max_batch: int = 25
     env_scrub_extra: tuple[str, ...] = ()
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
@@ -235,6 +238,8 @@ class Settings:
             raise ValueError("OSTAG_QUERY_LANE_RETRY_COUNT cannot be negative")
         if self.query_lane_max_result_bytes < 1:
             raise ValueError("OSTAG_QUERY_LANE_MAX_RESULT_BYTES must be positive")
+        if not 1 <= self.workstream_max_batch <= 100:
+            raise ValueError("OSTAG_WORKSTREAM_MAX_BATCH must be in 1..100")
         if any(not item or ":" not in item for item in self.query_lane_channels):
             raise ValueError("OSTAG_QUERY_LANE_CHANNELS entries must use platform:chat_id")
         if not 0 <= self.ambient_daily_board_hour <= 23:
@@ -398,6 +403,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         native_diagnostic_cards_enabled=_bool(
             "OSTAG_NATIVE_DIAGNOSTIC_CARDS_ENABLED", False
         ),
+        workstreams_enabled=_bool("OSTAG_WORKSTREAMS_ENABLED", False),
+        workstream_store_path=Path(
+            os.getenv("OSTAG_WORKSTREAM_STORE_PATH", "./logs/workstreams.sqlite3")
+        ),
+        workstream_max_batch=_int("OSTAG_WORKSTREAM_MAX_BATCH", 25),
         env_scrub_extra=_csv("OSTAG_ENV_SCRUB_EXTRA"),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),

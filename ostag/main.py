@@ -164,6 +164,33 @@ def build_parser() -> argparse.ArgumentParser:
     query_audit.add_argument("--json", action="store_true")
     query_audit.add_argument("--config")
 
+    workstream = subparsers.add_parser("workstream", help="Manage governed multi-run workstreams.")
+    workstream_sub = workstream.add_subparsers(dest="workstream_command", required=True)
+    recipe_register = workstream_sub.add_parser("recipe-register")
+    recipe_register.add_argument("--file", type=Path, required=True)
+    recipe_register.add_argument("--json", action="store_true")
+    recipe_register.add_argument("--config")
+    workstream_admit = workstream_sub.add_parser("admit")
+    workstream_admit.add_argument("--recipe", required=True)
+    workstream_admit.add_argument("--version", type=int, required=True)
+    workstream_admit.add_argument("--key", required=True)
+    workstream_admit.add_argument("--goal", required=True)
+    workstream_admit.add_argument("--json", action="store_true")
+    workstream_admit.add_argument("--config")
+    workstream_attach = workstream_sub.add_parser("attach-run")
+    workstream_attach.add_argument("--id", required=True)
+    workstream_attach.add_argument("--run", required=True)
+    workstream_attach.add_argument("--cost", type=int, default=0)
+    workstream_attach.add_argument("--json", action="store_true")
+    workstream_attach.add_argument("--config")
+    workstream_show = workstream_sub.add_parser("show")
+    workstream_show.add_argument("--id", required=True)
+    workstream_show.add_argument("--json", action="store_true")
+    workstream_show.add_argument("--config")
+    workstream_list = workstream_sub.add_parser("list")
+    workstream_list.add_argument("--json", action="store_true")
+    workstream_list.add_argument("--config")
+
     for verb in ("approve", "reject", "apply", "continue"):
         verb_parser = subparsers.add_parser(
             verb, help=f"{verb.capitalize()} an action receipt (or run, for continue)."
@@ -428,6 +455,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return run_inspection_command(args)
     if args.command == "query":
         return await run_query_command(args)
+    if args.command == "workstream":
+        return run_workstream_command(args)
     if args.command in ("approve", "reject", "apply", "continue", "receipts"):
         return await run_receipt_command(args)
     if args.command == "followups":
@@ -1100,6 +1129,73 @@ async def run_query_command(args: argparse.Namespace) -> int:
         return 1
     _emit(response.to_dict(), as_json=as_json)
     return 0
+
+
+def run_workstream_command(args: argparse.Namespace) -> int:
+    from ostag.core.workstreams import (
+        RecipeDefinition,
+        WorkstreamAdmission,
+        WorkstreamStore,
+    )
+
+    as_json = getattr(args, "json", False)
+    try:
+        config = load_settings(getattr(args, "config", None))
+        if not config.workstreams_enabled:
+            raise SchemaError(
+                code="feature_disabled",
+                message="Workstreams are disabled",
+                recovery_hint="Set OSTAG_WORKSTREAMS_ENABLED=true after migration checks.",
+            )
+        store = WorkstreamStore(
+            config.workstream_store_path, max_batch=config.workstream_max_batch
+        )
+        if args.workstream_command == "recipe-register":
+            raw = json.loads(args.file.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise SchemaError(
+                    code="invalid_recipe",
+                    message="Recipe file must contain an object",
+                    recovery_hint="Provide a JSON object matching RecipeDefinition.",
+                )
+            recipe = store.register_recipe(RecipeDefinition.from_dict(raw))
+            _emit({**recipe.to_dict(), "digest": recipe.digest}, as_json=as_json)
+            return 0
+        if args.workstream_command == "admit":
+            admitted = store.admit(
+                WorkstreamAdmission(args.key, args.recipe, args.version, args.goal)
+            )
+            _emit(admitted.to_dict(), as_json=as_json)
+            return 0
+        if args.workstream_command == "attach-run":
+            attached = store.attach_run(args.id, args.run, cost_credits=args.cost)
+            _emit(attached.to_dict(), as_json=as_json)
+            return 0
+        if args.workstream_command == "show":
+            workstream = store.get_workstream(args.id)
+            _emit(
+                {
+                    "workstream": workstream.to_dict(),
+                    "childRuns": [item.to_dict() for item in store.child_runs(args.id)],
+                },
+                as_json=as_json,
+            )
+            return 0
+        _emit(
+            [item.to_dict() for item in store.list_workstreams()],
+            as_json=as_json,
+        )
+        return 0
+    except (SchemaError, OSError, json.JSONDecodeError) as exc:
+        if isinstance(exc, SchemaError):
+            error = exc.to_dict()
+        else:
+            error = {
+                "code": "workstream_input_error",
+                "message": "Workstream input could not be read",
+            }
+        _emit({"error": error}, as_json=as_json)
+        return 1
 
 
 def run_budget_command(args: argparse.Namespace) -> int:
