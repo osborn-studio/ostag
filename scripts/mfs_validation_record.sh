@@ -19,7 +19,8 @@ stdout_file="$(mktemp)"
 stderr_file="$(mktemp)"
 trap 'rm -f "$stdout_file" "$stderr_file"' EXIT
 
-if [[ "${enabled,,}" != "true" ]]; then
+enabled_normalized="$(printf '%s' "$enabled" | tr '[:upper:]' '[:lower:]')"
+if [[ "$enabled_normalized" != "true" ]]; then
   details+=("MFS_ENABLED is not true.")
 elif ! command -v "$mfs_bin" >/dev/null 2>&1; then
   status="blocked_missing_mfs_bin"

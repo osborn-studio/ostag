@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 platform="${1:-feishu}"
-record="${2:-release/live-validation-${platform}.md}"
+default_record="release/live-validation-${platform}.md"
+record="${2:-$default_record}"
 
 if [[ ! "$platform" =~ ^(feishu|lark)$ ]]; then
   echo "usage: $0 [feishu|lark] [record-path]" >&2
@@ -15,6 +16,62 @@ fi
 if [[ ! -f "$record" ]]; then
   echo "missing live validation record: $record" >&2
   exit 2
+fi
+
+if [[ "$record" == "$default_record" ]]; then
+  expected_version="$(uv run python -c 'import ostag; print(ostag.__version__)')"
+  recorded_commit="$({
+    awk '
+      /^- Release commit:/ {
+        value=$0
+        sub(/^- Release commit:[[:space:]]*`?/, "", value)
+        sub(/`?[[:space:]]*$/, "", value)
+        print value
+        exit
+      }
+    ' "$record"
+  } || true)"
+  recorded_version="$({
+    awk '
+      /^- Release version:/ {
+        value=$0
+        sub(/^- Release version:[[:space:]]*`?/, "", value)
+        sub(/`?[[:space:]]*$/, "", value)
+        print value
+        exit
+      }
+    ' "$record"
+  } || true)"
+  generated_at="$({
+    awk '
+      /^- Generated at:/ {
+        value=$0
+        sub(/^- Generated at:[[:space:]]*`?/, "", value)
+        sub(/`?[[:space:]]*$/, "", value)
+        print value
+        exit
+      }
+    ' "$record"
+  } || true)"
+  if [[ -z "$recorded_commit" ]] \
+    || ! git cat-file -e "$recorded_commit^{commit}" >/dev/null 2>&1 \
+    || ! git merge-base --is-ancestor "$recorded_commit" HEAD \
+    || [[ "$recorded_version" != "$expected_version" ]]; then
+    echo "blocked: live validation evidence is not bound to the current release commit" >&2
+    exit 3
+  fi
+  if ! uv run python -c '
+from datetime import UTC, datetime, timedelta
+import sys
+
+generated = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+age = datetime.now(UTC) - generated
+limit = timedelta(days=int(sys.argv[2]))
+raise SystemExit(0 if -timedelta(minutes=5) <= age <= limit else 1)
+' "$generated_at" "${OSTAG_LIVE_EVIDENCE_MAX_AGE_DAYS:-7}"; then
+    echo "blocked: live validation evidence is stale for the current release" >&2
+    exit 3
+  fi
 fi
 
 if rg -q 'Status: `blocked_missing_credentials`' "$record"; then

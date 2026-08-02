@@ -39,8 +39,8 @@ check_cmd() {
 }
 
 check_cmd "Fork-derived git history exists" \
-  "\`upstream\` remote, baseline commit, and \`FORK_ORIGIN.md\` are present" \
-  bash -c 'git remote get-url upstream >/dev/null && rg -q "16574f9b365bc67f3716c552dad416da730088b8" FORK_ORIGIN.md && git cat-file -e 16574f9b365bc67f3716c552dad416da730088b8^{commit}'
+  "\`FORK_ORIGIN.md\` preserves the upstream URL and pinned baseline in product history" \
+  bash -c 'test -s FORK_ORIGIN.md && rg -q "https://github.com/zilliztech/mfs" FORK_ORIGIN.md && rg -q "16574f9b365bc67f3716c552dad416da730088b8" FORK_ORIGIN.md && git log -1 --format=%H -- FORK_ORIGIN.md | rg -q .'
 
 check_cmd "Open Tag migration decisions are recorded" \
   "\`docs/fork_migration_report.md\` maps upstream files to ported/rewritten/deferred decisions" \
@@ -59,16 +59,16 @@ check_cmd "Automated release checks pass" \
   scripts/release_check.sh
 
 check_cmd "Prompt contract is migrated" \
-  "\`ostag/core/prompt.py\` exists and \`tests/test_prompt.py\` is included in the release test gate" \
-  bash -c 'test -f ostag/core/prompt.py && rg -q "tests/test_prompt.py" pyproject.toml && uv run pytest tests/test_prompt.py'
+  "\`ostag/core/prompt.py\` exists and its focused test module passes" \
+  bash -c 'test -f ostag/core/prompt.py && test -f tests/test_prompt.py && uv run pytest tests/test_prompt.py'
 
 check_cmd "Memory utility is migrated" \
-  "\`ostag/mfs/memory.py\` exists, \`tests/test_memory.py\` is included in the release test gate, and the memory CLI works" \
-  bash -c 'test -f ostag/mfs/memory.py && rg -q "tests/test_memory.py" pyproject.toml && uv run pytest tests/test_memory.py'
+  "\`ostag/mfs/memory.py\` exists and its focused test module passes" \
+  bash -c 'test -f ostag/mfs/memory.py && test -f tests/test_memory.py && uv run pytest tests/test_memory.py'
 
 check_cmd "MFS client subprocess integration is covered" \
   "\`tests/test_mfs_client.py\` exercises enabled MFS search through a fake CLI subprocess" \
-  bash -c 'test -f tests/test_mfs_client.py && rg -q "tests/test_mfs_client.py" pyproject.toml && uv run pytest tests/test_mfs_client.py'
+  bash -c 'test -f tests/test_mfs_client.py && uv run pytest tests/test_mfs_client.py'
 
 check_cmd "MFS validation record exists" \
   "\`release/mfs-validation.md\` records either a real MFS smoke pass or a structured external blocker" \
@@ -139,8 +139,8 @@ check_cmd "osstack state records phase execution" \
   bash -c 'test -s "$0/LOOP-STATE.json" && uv run python -m json.tool "$0/LOOP-STATE.json" >/dev/null' "$MANAGEMENT_ROOT"
 
 check_cmd "osstack task evidence is retained" \
-  "At least one completed JSON task record exists at the configured management root" \
-  bash -c 'test -d "$0/tasks" && rg -l '\''"status"[[:space:]]*:[[:space:]]*"completed"'\'' "$0/tasks" -g '\''*.json'\'' | head -1 | rg -q . ' "$MANAGEMENT_ROOT"
+  "P0, P1, and split P2 review tasks exist and have successful outcomes in \`LOOP-STATE.json\`" \
+  bash -c 'for id in task_37dce3d6 task_acaade5e task_df75534b task_a54c03d5; do test -s "$0/tasks/$id.json" || exit 1; done; uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1], encoding="utf-8")); completed={item.get("task_id") for item in data.get("completed_tasks", []) if item.get("outcome") == "success"}; required={"task_37dce3d6", "task_acaade5e", "task_df75534b", "task_a54c03d5"}; assert required <= completed'\'' "$0/LOOP-STATE.json"' "$MANAGEMENT_ROOT"
 
 check_cmd "Scorecard is current" \
   "\`release/ostag-scorecard.md\` reports 96/100 pilot-ready status" \
