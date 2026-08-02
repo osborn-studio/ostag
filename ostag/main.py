@@ -17,6 +17,7 @@ from ostag.connectors.apply import build_apply_executors
 from ostag.core.ambient import AmbientScheduler
 from ostag.core.approvals import PENDING_STATES, ApprovalService
 from ostag.core.capabilities import list_capabilities
+from ostag.core.connector_diagnostics import connector_test
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
 from ostag.core.event import NormalizedEvent
 from ostag.core.identity import Principal
@@ -124,6 +125,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--platform", choices=["slack", "feishu", "lark", "dingtalk", "github", "gitlab"]
     )
     connector_list.add_argument("--json", action="store_true")
+    connector_test_parser = connector_sub.add_parser(
+        "test", help="Run non-mutating connector readiness diagnostics."
+    )
+    connector_test_parser.add_argument(
+        "platform", choices=["feishu", "lark", "dingtalk", "github", "gitlab"]
+    )
+    connector_test_parser.add_argument(
+        "--live", action="store_true", help="Add bounded read-only provider probes."
+    )
+    connector_test_parser.add_argument("--json", action="store_true")
+    connector_test_parser.add_argument("--config")
 
     for verb in ("approve", "reject", "apply", "continue"):
         verb_parser = subparsers.add_parser(
@@ -769,9 +781,14 @@ def run_inspection_command(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
     try:
         if args.command == "connector":
-            capabilities = list_capabilities(getattr(args, "platform", None))
-            _emit([item.to_dict() for item in capabilities], as_json=as_json)
-            return 0
+            if args.connector_command == "list":
+                capabilities = list_capabilities(getattr(args, "platform", None))
+                _emit([item.to_dict() for item in capabilities], as_json=as_json)
+                return 0
+            config = load_settings(getattr(args, "config", None))
+            report = connector_test(config, args.platform, live=args.live)
+            _emit(report.to_dict(), as_json=as_json)
+            return 1 if report.status == "blocked" else 0
 
         config = load_settings(getattr(args, "config", None))
         ledger = RunLedger(config.run_ledger_path)
