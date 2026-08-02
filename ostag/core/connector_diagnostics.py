@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import shlex
 import shutil
 import subprocess
 from collections.abc import Callable
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from ostag.config import Settings
 from ostag.core.capabilities import list_capabilities
@@ -24,6 +27,85 @@ class ProbeResult:
 
 
 Probe = Callable[[tuple[str, ...], float], ProbeResult]
+HttpTransport = Callable[
+    [str, str, dict[str, str], dict[str, str] | None, float], dict[str, object]
+]
+ProviderProbe = Callable[[str, Settings, float], ProbeResult]
+
+
+def _default_http_transport(
+    method: str,
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, str] | None,
+    timeout: float,
+) -> dict[str, object]:
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ValueError("provider URL must use HTTPS")
+    payload = json.dumps(body).encode("utf-8") if body is not None else None
+    request = Request(url, data=payload, headers=headers, method=method)
+    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - HTTPS validated above
+        raw = response.read(1_048_577)
+    if len(raw) > 1_048_576:
+        raise ValueError("provider response exceeded byte limit")
+    result = json.loads(raw)
+    if not isinstance(result, dict):
+        raise ValueError("provider response must be an object")
+    return result
+
+
+def provider_api_probe(
+    platform: str,
+    config: Settings,
+    timeout: float,
+    *,
+    http: HttpTransport = _default_http_transport,
+) -> ProbeResult:
+    """Authenticate and perform the smallest available non-mutating provider read."""
+    try:
+        if platform in {"feishu", "lark"}:
+            app_id = config.feishu_app_id if platform == "feishu" else config.lark_app_id
+            app_secret = (
+                config.feishu_app_secret if platform == "feishu" else config.lark_app_secret
+            )
+            base_url = (
+                config.feishu_api_base_url if platform == "feishu" else config.lark_api_base_url
+            ).rstrip("/")
+            auth = http(
+                "POST",
+                f"{base_url}/open-apis/auth/v3/tenant_access_token/internal/",
+                {"Content-Type": "application/json; charset=utf-8"},
+                {"app_id": app_id, "app_secret": app_secret},
+                timeout,
+            )
+            token = auth.get("tenant_access_token")
+            if auth.get("code") != 0 or not isinstance(token, str) or not token:
+                return ProbeResult(False)
+            bot = http(
+                "GET",
+                f"{base_url}/open-apis/bot/v3/info",
+                {"Authorization": f"Bearer {token}"},
+                None,
+                timeout,
+            )
+            return ProbeResult(bot.get("code") == 0 and isinstance(bot.get("bot"), dict))
+        if platform == "dingtalk":
+            response = http(
+                "POST",
+                f"{config.dingtalk_api_base_url.rstrip('/')}/v1.0/oauth2/accessToken",
+                {"Content-Type": "application/json"},
+                {
+                    "appKey": config.dingtalk_client_id,
+                    "appSecret": config.dingtalk_client_secret,
+                },
+                timeout,
+            )
+            token = response.get("accessToken")
+            return ProbeResult(isinstance(token, str) and bool(token))
+    except Exception:
+        return ProbeResult(False)
+    return ProbeResult(False)
 
 
 @dataclass(frozen=True)
@@ -166,6 +248,7 @@ def connector_test(
     live: bool = False,
     which: Which = shutil.which,
     probe: Probe = _default_probe,
+    provider_probe: ProviderProbe = provider_api_probe,
 ) -> ConnectorDiagnosticReport:
     declared = tuple(item.to_dict() for item in list_capabilities(platform))
     if not declared:
@@ -278,13 +361,23 @@ def connector_test(
         raise ValueError(f"unsupported connector platform: {platform}")
 
     if live and platform in {"feishu", "lark", "dingtalk"}:
+        credential_check = next(item for item in checks if item.id == "credentials")
+        provider_result = (
+            provider_probe(platform, config, 10.0)
+            if credential_check.status == "pass"
+            else ProbeResult(False)
+        )
         checks.append(
             ConnectorCheck(
                 "live_provider",
-                "warn",
-                False,
-                "provider-live read probe is delegated to the credential-gated smoke harness",
-                "Run scripts/connector_live_smoke.sh for a bounded provider API check.",
+                "pass" if provider_result.ok else "fail",
+                True,
+                "live provider API probe passed"
+                if provider_result.ok
+                else "live provider API probe failed",
+                "Check provider credentials, bot availability, and network access, then retry."
+                if not provider_result.ok
+                else "",
             )
         )
 

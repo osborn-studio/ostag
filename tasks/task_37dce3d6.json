@@ -1,0 +1,7 @@
+{
+  "task_id": "task_37dce3d6",
+  "capability": "code.review",
+  "prompt": "Review the complete P0 delivery for connector diagnostics, isolated read-only query execution, provider-live smoke evidence, release-script portability, security boundaries, and regression coverage. Do not edit files; report any correctness, security, or deployment blockers.",
+  "priority": 90,
+  "source": "task_queue"
+}

@@ -2,11 +2,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANAGEMENT_ROOT="${OSTAG_MANAGEMENT_ROOT:-/Users/gilbertchen/Documents/CODE/ostag}"
+MANAGEMENT_ROOT="${OSTAG_MANAGEMENT_ROOT:-$ROOT}"
 cd "$ROOT"
 
-mkdir -p release
-report="release/readiness-audit.md"
+report="${OSTAG_READINESS_REPORT:-release/readiness-audit.md}"
+mkdir -p "$(dirname "$report")"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -106,6 +106,10 @@ check_cmd "Live validation is credential-gated" \
   "\`release/live-validation-feishu.md\` exists and records pass or blocked_missing_credentials status" \
   bash -c 'test -f release/live-validation-feishu.md && rg -q "Status: `(blocked_missing_credentials|preflight_passed_manual_group_test_required|manual_group_validation_passed)`" release/live-validation-feishu.md'
 
+check_cmd "Connector live smoke evidence is structured" \
+  "Feishu, DingTalk, GitHub, and GitLab evidence records are present and schema-valid" \
+  bash -c 'for platform in feishu dingtalk github gitlab; do file="release/connector-live-${platform}.json"; test -s "$file" && uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1])); assert data["schema_version"] == 1 and data["platform"] == sys.argv[2] and data["mode"] == "live" and isinstance(data["read_ready"], bool)'\'' "$file" "$platform" || exit 1; done'
+
 set +e
 scripts/validate_live_validation_record.sh feishu >"$tmpdir/live-validation-gate.log" 2>&1
 live_gate_code=$?
@@ -127,12 +131,12 @@ else
 fi
 
 check_cmd "osstack state records phase execution" \
-  "\`STATE.md\` contains completed phase task ids and the deployment preflight hardening task" \
-  bash -c 'test -f "$0/STATE.md" && rg -q "task_d57d82ef" "$0/STATE.md" && rg -q "task_6a154f84" "$0/STATE.md"' "$MANAGEMENT_ROOT"
+  "\`LOOP-STATE.json\` is present and structurally valid at the configured management root" \
+  bash -c 'test -s "$0/LOOP-STATE.json" && uv run python -m json.tool "$0/LOOP-STATE.json" >/dev/null' "$MANAGEMENT_ROOT"
 
-check_cmd "osstack task archive contains latest readiness verification task" \
-  "\`tasks/archive/2026-06-28/task_ed36600e.json\` exists" \
-  bash -c 'test -f "$0/tasks/archive/2026-06-28/task_ed36600e.json"' "$MANAGEMENT_ROOT"
+check_cmd "osstack task evidence is retained" \
+  "At least one completed JSON task record exists at the configured management root" \
+  bash -c 'test -d "$0/tasks" && rg -l '\''"status"[[:space:]]*:[[:space:]]*"completed"'\'' "$0/tasks" -g '\''*.json'\'' | head -1 | rg -q . ' "$MANAGEMENT_ROOT"
 
 check_cmd "Scorecard is current" \
   "\`release/ostag-scorecard.md\` reports 96/100 pilot-ready status" \

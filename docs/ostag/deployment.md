@@ -119,8 +119,10 @@ scripts/deploy_preflight.sh
 ```
 
 It runs the release check, validates Docker Compose configuration, renders the
-launchd plist, validates the plist when `plutil` is available, and writes a
-credential-gated live validation record under `release/`.
+launchd plist, validates the plist when `plutil` is available, and writes
+credential-gated live validation plus Feishu, DingTalk, GitHub, and GitLab
+connector evidence under `release/`. A missing credential or target is retained
+as a structured external blocker; malformed evidence fails the preflight.
 
 After a real group test, validate the manual evidence:
 

@@ -133,6 +133,7 @@ class Settings:
     slack_app_token: str = ""
     dingtalk_client_id: str = ""
     dingtalk_client_secret: str = ""
+    dingtalk_api_base_url: str = "https://api.dingtalk.com"
     dingtalk_robot_webhook: str = ""
     dingtalk_robot_secret: str = ""
     telegram_bot_token: str = ""
@@ -421,6 +422,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         slack_app_token=os.getenv("SLACK_APP_TOKEN", ""),
         dingtalk_client_id=os.getenv("DINGTALK_CLIENT_ID", ""),
         dingtalk_client_secret=os.getenv("DINGTALK_CLIENT_SECRET", ""),
+        dingtalk_api_base_url=os.getenv("DINGTALK_API_BASE_URL", "https://api.dingtalk.com"),
         dingtalk_robot_webhook=os.getenv("DINGTALK_ROBOT_WEBHOOK", ""),
         dingtalk_robot_secret=os.getenv("DINGTALK_ROBOT_SECRET", ""),
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),

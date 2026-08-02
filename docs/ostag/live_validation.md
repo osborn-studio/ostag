@@ -14,7 +14,21 @@ production-candidate score.
 
 ## Preflight
 
-Run:
+Run the bounded connector probe first. It authenticates and performs only
+provider reads; it never sends messages or writes provider records:
+
+```bash
+scripts/connector_live_smoke.sh feishu
+scripts/connector_live_smoke.sh dingtalk
+scripts/connector_live_smoke.sh github
+scripts/connector_live_smoke.sh gitlab
+```
+
+Each command writes `release/connector-live-<platform>.json`. Exit `0` means
+the connector is read-ready, `3` is a structured credential/configuration
+blocker, and `2` means the evidence contract itself failed.
+
+For the Feishu/Lark manual group test, run:
 
 ```bash
 scripts/live_validation_record.sh feishu
@@ -64,6 +78,20 @@ Add these fields to the generated validation record:
 - Screenshot or transcript path if available.
 
 Do not paste app secrets or full user tokens into the evidence file.
+
+## Read-only Queries
+
+Read-only status and audit requests use a separate lane from receipt/apply:
+
+```bash
+OSTAG_QUERY_LANE_ENABLED=true \
+OSTAG_QUERY_LANE_CHANNELS=feishu:oc_example \
+uv run ostag query status --run run_example --platform feishu --chat oc_example --json
+```
+
+Remote actors must match an exact `platform:chat_id` allowlist entry. The lane
+is disabled by default and enforces concurrency, timeout, retry, payload, and
+result-size bounds.
 
 ## Validation Gate
 

@@ -1,0 +1,63 @@
+{
+  "capabilities": [
+    {
+      "capabilities": {
+        "can_apply_action": true,
+        "can_close_issues": false,
+        "can_comment_issues": true,
+        "can_create_issues": true,
+        "can_delete_issues": false,
+        "can_read_thread": false
+      },
+      "connector": "issues",
+      "limits": {
+        "transport": "glab CLI (must be installed and authenticated)"
+      },
+      "platform": "gitlab",
+      "policy": {
+        "default_mode": "propose",
+        "destructive_requires_approval": true
+      },
+      "status": "available"
+    }
+  ],
+  "checks": [
+    {
+      "id": "declaration",
+      "required": true,
+      "status": "pass",
+      "summary": "connector capabilities declared"
+    },
+    {
+      "id": "cli",
+      "recovery_hint": "Install GitLab CLI or configure its OStag binary setting.",
+      "required": true,
+      "status": "fail",
+      "summary": "GitLab CLI executable missing"
+    },
+    {
+      "id": "target",
+      "recovery_hint": "Configure OSTAG_GITLAB_DEFAULT_REPO.",
+      "required": true,
+      "status": "fail",
+      "summary": "default target missing"
+    },
+    {
+      "id": "governed_write",
+      "recovery_hint": "Enable both OSTAG_GOVERNED_WRITES and OSTAG_APPLY_ENABLED after approval.",
+      "required": false,
+      "status": "warn",
+      "summary": "connector writes disabled"
+    }
+  ],
+  "mode": "live",
+  "platform": "gitlab",
+  "read_ready": false,
+  "schema_version": 1,
+  "status": "blocked",
+  "target": {
+    "configured": false,
+    "kind": "repository"
+  },
+  "write_ready": false
+}
