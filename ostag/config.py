@@ -14,7 +14,7 @@ except ImportError:  # pragma: no cover
 
 
 Platform = Literal["slack", "feishu", "lark", "dingtalk", "telegram"]
-BackendName = Literal["mock", "codex_cli", "claude_cli", "openai_api"]
+BackendName = Literal["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -111,6 +111,10 @@ class Settings:
     workstream_max_batch: int = 25
     provider_evidence_enabled: bool = False
     provider_evidence_max_checks: int = 100
+    executor_runtime_enabled: bool = False
+    kimi_executor_enabled: bool = False
+    executor_max_output_bytes: int = 1_048_576
+    executor_osstack_registered: tuple[str, ...] = ()
     env_scrub_extra: tuple[str, ...] = ()
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
@@ -119,6 +123,7 @@ class Settings:
     mfs_max_results: int = 8
     codex_bin: str = "codex"
     claude_bin: str = "claude"
+    kimi_bin: str = "kimi"
     codex_unsafe_mode: bool = False
     claude_unsafe_mode: bool = False
     openai_model: str = "gpt-5.5"
@@ -232,6 +237,8 @@ class Settings:
     daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
     def validate(self) -> Settings:
+        if not 1 <= self.agent_timeout_seconds <= 3600:
+            raise ValueError("OSTAG_AGENT_TIMEOUT_SECONDS must be in 1..3600")
         if self.query_lane_max_concurrency < 1:
             raise ValueError("OSTAG_QUERY_LANE_MAX_CONCURRENCY must be positive")
         if self.query_lane_timeout_seconds < 1:
@@ -244,6 +251,13 @@ class Settings:
             raise ValueError("OSTAG_WORKSTREAM_MAX_BATCH must be in 1..100")
         if not 1 <= self.provider_evidence_max_checks <= 500:
             raise ValueError("OSTAG_PROVIDER_EVIDENCE_MAX_CHECKS must be in 1..500")
+        if not 1_024 <= self.executor_max_output_bytes <= 16_777_216:
+            raise ValueError("OSTAG_EXECUTOR_MAX_OUTPUT_BYTES must be in 1024..16777216")
+        if any(
+            item not in {"codex_cli", "claude_cli", "kimi_cli"}
+            for item in self.executor_osstack_registered
+        ):
+            raise ValueError("OSTAG_EXECUTOR_OSSTACK_REGISTERED contains an unknown executor")
         if any(not item or ":" not in item for item in self.query_lane_channels):
             raise ValueError("OSTAG_QUERY_LANE_CHANNELS entries must use platform:chat_id")
         if not 0 <= self.ambient_daily_board_hour <= 23:
@@ -414,6 +428,10 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         workstream_max_batch=_int("OSTAG_WORKSTREAM_MAX_BATCH", 25),
         provider_evidence_enabled=_bool("OSTAG_PROVIDER_EVIDENCE_ENABLED", False),
         provider_evidence_max_checks=_int("OSTAG_PROVIDER_EVIDENCE_MAX_CHECKS", 100),
+        executor_runtime_enabled=_bool("OSTAG_EXECUTOR_RUNTIME_ENABLED", False),
+        kimi_executor_enabled=_bool("OSTAG_KIMI_EXECUTOR_ENABLED", False),
+        executor_max_output_bytes=_int("OSTAG_EXECUTOR_MAX_OUTPUT_BYTES", 1_048_576),
+        executor_osstack_registered=_csv("OSTAG_EXECUTOR_OSSTACK_REGISTERED"),
         env_scrub_extra=_csv("OSTAG_ENV_SCRUB_EXTRA"),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),
@@ -422,6 +440,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         mfs_max_results=_int("MFS_MAX_RESULTS", 8),
         codex_bin=os.getenv("CODEX_BIN", "codex"),
         claude_bin=os.getenv("CLAUDE_BIN", "claude"),
+        kimi_bin=os.getenv("KIMI_BIN", "kimi"),
         codex_unsafe_mode=_bool("OSTAG_CODEX_UNSAFE_MODE", False),
         claude_unsafe_mode=_bool("OSTAG_CLAUDE_UNSAFE_MODE", False),
         openai_model=os.getenv("OSTAG_OPENAI_MODEL", "gpt-5.5"),

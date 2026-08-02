@@ -109,6 +109,15 @@ def _check_backend(config: Settings) -> DoctorCheck:
         return _check_executable("backend", config.codex_bin, "Codex CLI")
     if config.backend == "claude_cli":
         return _check_executable("backend", config.claude_bin, "Claude CLI")
+    if config.backend == "kimi_cli":
+        if not config.executor_runtime_enabled or not config.kimi_executor_enabled:
+            return DoctorCheck(
+                "backend",
+                False,
+                "error",
+                "Kimi executor is disabled; enable the runtime and profile after conformance passes",
+            )
+        return _check_executable("backend", config.kimi_bin, "Kimi CLI")
     if config.backend == "openai_api":
         if importlib.util.find_spec("openai") is None:
             return DoctorCheck("backend", False, "error", "OpenAI SDK missing; run `uv sync --extra openai`")

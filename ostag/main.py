@@ -79,7 +79,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Actor id the run is attributed to (default: local-admin).",
     )
     run_submit.add_argument("--thread", help="Optional thread id.")
-    run_submit.add_argument("--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"])
+    run_submit.add_argument(
+        "--backend", choices=["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
+    )
     run_submit.add_argument("--json", action="store_true")
     run_submit.add_argument("--config")
 
@@ -201,6 +203,16 @@ def build_parser() -> argparse.ArgumentParser:
     workstream_list = workstream_sub.add_parser("list")
     workstream_list.add_argument("--json", action="store_true")
     workstream_list.add_argument("--config")
+
+    executor = subparsers.add_parser("executor", help="Inspect executor profiles and conformance.")
+    executor_sub = executor.add_subparsers(dest="executor_command", required=True)
+    executor_list = executor_sub.add_parser("list")
+    executor_list.add_argument("--json", action="store_true")
+    executor_list.add_argument("--config")
+    executor_test = executor_sub.add_parser("test")
+    executor_test.add_argument("executor_id", choices=["codex_cli", "claude_cli", "kimi_cli"])
+    executor_test.add_argument("--json", action="store_true")
+    executor_test.add_argument("--config")
 
     for verb in ("approve", "reject", "apply", "continue"):
         verb_parser = subparsers.add_parser(
@@ -434,7 +446,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--live", action="store_true", help="Disable dry-run and require live credentials."
     )
     parser.add_argument("--event", type=Path)
-    parser.add_argument("--backend", choices=["mock", "codex_cli", "claude_cli", "openai_api"])
+    parser.add_argument(
+        "--backend", choices=["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
+    )
     parser.add_argument("--config")
     parser.add_argument(
         "--doctor", action="store_true", help="Run deployment preflight checks and exit."
@@ -529,6 +543,23 @@ async def run_provider_evidence_command(args: argparse.Namespace) -> int:
         return 1
 
 
+async def run_executor_command(args: argparse.Namespace) -> int:
+    from ostag.backends.executor_runtime import executor_profiles, run_conformance_suite
+
+    config = load_settings(getattr(args, "config", None))
+    profiles = executor_profiles(config)
+    if args.executor_command == "list":
+        reports = []
+        for executor_id in sorted(profiles):
+            report = await run_conformance_suite(profiles[executor_id])
+            reports.append(report.to_dict())
+        _emit(reports, as_json=getattr(args, "json", False))
+        return 0 if all(report["conformant"] for report in reports) else 1
+    report = await run_conformance_suite(profiles[args.executor_id])
+    _emit(report.to_dict(), as_json=getattr(args, "json", False))
+    return 0 if report.conformant else 1
+
+
 async def main_async(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "memory":
@@ -543,6 +574,8 @@ async def main_async(argv: list[str] | None = None) -> int:
         return await run_query_command(args)
     if args.command == "workstream":
         return run_workstream_command(args)
+    if args.command == "executor":
+        return await run_executor_command(args)
     if args.command in ("approve", "reject", "apply", "continue", "receipts"):
         return await run_receipt_command(args)
     if args.command == "followups":

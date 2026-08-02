@@ -131,9 +131,13 @@ explicit env vars, audit and ledger redact secrets.
   [Lark](docs/ostag/lark_setup.md) · [Slack](docs/ostag/slack_setup.md) ·
   [DingTalk](docs/ostag/dingtalk_setup.md) ·
   [deployment](docs/ostag/deployment.md) (launchd, Docker Compose)
-- Backends: `OSTAG_BACKEND=mock|codex_cli|claude_cli|openai_api`
+- Backends: `OSTAG_BACKEND=mock|codex_cli|claude_cli|kimi_cli|openai_api`
   (`uv sync --extra openai` for the API backend; unsafe CLI modes require
-  explicit `OSTAG_*_UNSAFE_MODE` flags)
+  explicit `OSTAG_*_UNSAFE_MODE` flags; Kimi stays disabled until both executor
+  feature flags are enabled after `ostag executor test kimi_cli` passes)
+- Executor conformance: `ostag executor list --json` and
+  `ostag executor test kimi_cli --json`; OSStack registration is declared
+  separately and is never inferred from a locally installed command.
 - Capability declarations per connector: `ostag connector list --json`
   ([docs/connector_capabilities.md](docs/connector_capabilities.md))
 
