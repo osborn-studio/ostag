@@ -96,6 +96,19 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
         limits={"transport": "gh CLI (must be installed and authenticated)"},
     ),
     ConnectorCapability(
+        platform="github",
+        connector="pull_requests",
+        capabilities={
+            "can_read_pull_requests": True,
+            "can_read_checks": True,
+            "can_read_merge_evidence": True,
+            "can_merge": False,
+            "can_close": False,
+            "can_apply_action": False,
+        },
+        limits={"max_checks": 100, "pagination": "single bounded projection"},
+    ),
+    ConnectorCapability(
         platform="gitlab",
         connector="issues",
         capabilities={
@@ -107,6 +120,19 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
             "can_apply_action": True,
         },
         limits={"transport": "glab CLI (must be installed and authenticated)"},
+    ),
+    ConnectorCapability(
+        platform="gitlab",
+        connector="merge_requests",
+        capabilities={
+            "can_read_merge_requests": True,
+            "can_read_pipelines": True,
+            "can_read_merge_evidence": True,
+            "can_merge": False,
+            "can_close": False,
+            "can_apply_action": False,
+        },
+        limits={"pipeline_page_size": 20, "pagination": "first page only"},
     ),
 )
 

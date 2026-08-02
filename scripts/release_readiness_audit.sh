@@ -110,6 +110,10 @@ check_cmd "Connector live smoke evidence is structured" \
   "Feishu, DingTalk, GitHub, and GitLab evidence records are present and schema-valid" \
   bash -c 'for platform in feishu dingtalk github gitlab; do file="release/connector-live-${platform}.json"; test -s "$file" && uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1])); assert data["schema_version"] == 1 and data["platform"] == sys.argv[2] and data["mode"] == "live" and isinstance(data["read_ready"], bool)'\'' "$file" "$platform" || exit 1; done'
 
+check_cmd "Provider completion evidence is structured" \
+  "GitHub and GitLab PR/MR evidence records contain ready evidence or an explicit blocker" \
+  bash -c 'for platform in github gitlab; do file="release/provider-evidence-${platform}.json"; test -s "$file" && uv run python -c '\''import json,sys; data=json.load(open(sys.argv[1])); assert data["schema_version"] == 1 and data["platform"] == sys.argv[2] and data["status"] in {"ready", "blocked"}'\'' "$file" "$platform" || exit 1; done'
+
 set +e
 scripts/validate_live_validation_record.sh feishu >"$tmpdir/live-validation-gate.log" 2>&1
 live_gate_code=$?

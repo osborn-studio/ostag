@@ -7,6 +7,7 @@ cd "$ROOT"
 scripts/deploy_preflight.sh
 
 uv run pytest -q tests/test_connector_diagnostics.py tests/test_connector_live_smoke.py
+uv run pytest -q tests/test_provider_evidence.py tests/test_provider_evidence_live_smoke.py
 
 set +e
 scripts/validate_live_validation_record.sh feishu >/tmp/ostag-ci-live-gate-blocked.out 2>&1

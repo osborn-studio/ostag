@@ -109,6 +109,8 @@ class Settings:
     workstreams_enabled: bool = False
     workstream_store_path: Path = Path("./logs/workstreams.sqlite3")
     workstream_max_batch: int = 25
+    provider_evidence_enabled: bool = False
+    provider_evidence_max_checks: int = 100
     env_scrub_extra: tuple[str, ...] = ()
     mfs_enabled: bool = False
     mfs_bin: str = "mfs"
@@ -240,6 +242,8 @@ class Settings:
             raise ValueError("OSTAG_QUERY_LANE_MAX_RESULT_BYTES must be positive")
         if not 1 <= self.workstream_max_batch <= 100:
             raise ValueError("OSTAG_WORKSTREAM_MAX_BATCH must be in 1..100")
+        if not 1 <= self.provider_evidence_max_checks <= 500:
+            raise ValueError("OSTAG_PROVIDER_EVIDENCE_MAX_CHECKS must be in 1..500")
         if any(not item or ":" not in item for item in self.query_lane_channels):
             raise ValueError("OSTAG_QUERY_LANE_CHANNELS entries must use platform:chat_id")
         if not 0 <= self.ambient_daily_board_hour <= 23:
@@ -408,6 +412,8 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
             os.getenv("OSTAG_WORKSTREAM_STORE_PATH", "./logs/workstreams.sqlite3")
         ),
         workstream_max_batch=_int("OSTAG_WORKSTREAM_MAX_BATCH", 25),
+        provider_evidence_enabled=_bool("OSTAG_PROVIDER_EVIDENCE_ENABLED", False),
+        provider_evidence_max_checks=_int("OSTAG_PROVIDER_EVIDENCE_MAX_CHECKS", 100),
         env_scrub_extra=_csv("OSTAG_ENV_SCRUB_EXTRA"),
         mfs_enabled=_bool("MFS_ENABLED", False),
         mfs_bin=os.getenv("MFS_BIN", "mfs"),

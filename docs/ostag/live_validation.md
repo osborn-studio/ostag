@@ -28,6 +28,20 @@ Each command writes `release/connector-live-<platform>.json`. Exit `0` means
 the connector is read-ready, `3` is a structured credential/configuration
 blocker, and `2` means the evidence contract itself failed.
 
+To prove a concrete pull/merge request without mutating it, provide its number:
+
+```bash
+OSTAG_PROVIDER_EVIDENCE_ENABLED=true \
+scripts/provider_evidence_live_smoke.sh github 123
+
+OSTAG_PROVIDER_EVIDENCE_ENABLED=true \
+scripts/provider_evidence_live_smoke.sh gitlab 123
+```
+
+The collector binds PR/MR state, merge commit, and checks/pipeline status to the
+current head SHA. Omitting the number records `missing_change_number` with exit
+`3`; it is never treated as production acceptance.
+
 For the Feishu/Lark manual group test, run:
 
 ```bash

@@ -10,10 +10,17 @@ exclusively through the action receipt protocol.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
+from urllib.parse import quote
 
 from ostag.config import Settings
 from ostag.core.safety import scrub_environment
+from ostag.core.provider_evidence import (
+    ProviderChangeEvidence,
+    ProviderCheck,
+    normalize_utc_timestamp,
+)
 from ostag.core.schemas import ActionReceipt, SchemaError
 
 
@@ -77,6 +84,97 @@ class GitLabIssuesConnector:
         """Comment on an issue; returns glab's stdout."""
         return await self.cli.run(
             "issue", "note", str(number), "--repo", repo, "--message", body
+        )
+
+
+class GitLabMergeRequestConnector:
+    """Collect read-only MR, pipeline, merge, and commit evidence."""
+
+    def __init__(self, cli: GlabCLI, config: Settings):
+        self.cli = cli
+        self.config = config
+
+    async def collect(
+        self, repo: str, number: int, *, expected_sha: str = ""
+    ) -> ProviderChangeEvidence:
+        mr_raw = await self.cli.run(
+            "mr", "view", str(number), "--repo", repo, "--output", "json"
+        )
+        encoded_repo = quote(repo, safe="")
+        pipelines_raw = await self.cli.run(
+            "api",
+            f"projects/{encoded_repo}/merge_requests/{number}/pipelines?per_page=20&page=1",
+        )
+        if len(mr_raw.encode()) + len(pipelines_raw.encode()) > 1_048_576:
+            raise SchemaError(
+                "provider_evidence_limit", "GitLab evidence exceeded 1 MiB", "Reduce pipelines."
+            )
+        try:
+            payload = json.loads(mr_raw)
+            pipelines = json.loads(pipelines_raw)
+        except json.JSONDecodeError as exc:
+            raise SchemaError(
+                "invalid_provider_evidence", "GitLab returned invalid JSON", "Retry the read."
+            ) from exc
+        if not isinstance(payload, dict) or payload.get("iid") != number:
+            raise SchemaError(
+                "invalid_provider_evidence", "GitLab MR response is malformed", "Retry the read."
+            )
+        if not isinstance(pipelines, list) or len(pipelines) > min(
+            20, self.config.provider_evidence_max_checks
+        ):
+            raise SchemaError(
+                "provider_evidence_limit", "GitLab pipeline page exceeded its bound", "Retry."
+            )
+        if any(not isinstance(item, dict) for item in pipelines):
+            raise SchemaError(
+                "invalid_provider_evidence", "GitLab pipeline response is malformed", "Retry."
+            )
+        head_sha = payload.get("sha", "")
+        if expected_sha and head_sha != expected_sha:
+            raise SchemaError(
+                "provider_sha_mismatch", "GitLab MR head SHA changed", "Refresh expected SHA."
+            )
+        current = next(
+            (item for item in pipelines if isinstance(item, dict) and item.get("sha") == head_sha),
+            None,
+        )
+        checks = (self._pipeline(current, head_sha),) if current is not None else ()
+        raw_state = str(payload.get("state", "")).casefold()
+        if raw_state not in {"opened", "closed", "merged"}:
+            raise SchemaError(
+                "invalid_provider_evidence", "GitLab MR state is unknown", "Retry the read."
+            )
+        state = raw_state
+        if state == "opened":
+            state = "open"
+        return ProviderChangeEvidence(
+            provider="gitlab",
+            repository=repo,
+            number=number,
+            url=payload.get("web_url", ""),
+            state=state,
+            draft=payload.get("draft", False),
+            head_sha=head_sha,
+            merge_sha=payload.get("merge_commit_sha") or "",
+            observed_at=normalize_utc_timestamp(payload.get("updated_at", "")),
+            checks=checks,
+        )
+
+    @staticmethod
+    def _pipeline(payload: dict[str, Any], head_sha: str) -> ProviderCheck:
+        status = str(payload.get("status", "")).casefold()
+        if status in {"success", "skipped"}:
+            state = "passed"
+        elif status in {"failed", "canceled"}:
+            state = "failed"
+        else:
+            state = "pending"
+        return ProviderCheck(
+            name=f"pipeline:{payload.get('id', 'unknown')}",
+            state=state,
+            sha=head_sha,
+            url=str(payload.get("web_url") or ""),
         )
 
 

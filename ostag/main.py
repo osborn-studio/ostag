@@ -141,6 +141,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     connector_test_parser.add_argument("--json", action="store_true")
     connector_test_parser.add_argument("--config")
+    connector_evidence = connector_sub.add_parser(
+        "evidence", help="Collect SHA-bound read-only PR/MR completion evidence."
+    )
+    connector_evidence.add_argument("platform", choices=["github", "gitlab"])
+    connector_evidence.add_argument("--repo")
+    connector_evidence.add_argument("--number", type=int, required=True)
+    connector_evidence.add_argument("--expected-sha", default="")
+    connector_evidence.add_argument("--work-thread")
+    connector_evidence.add_argument("--cycle", type=int, default=1)
+    connector_evidence.add_argument("--json", action="store_true")
+    connector_evidence.add_argument("--config")
 
     query = subparsers.add_parser("query", help="Run isolated read-only queries.")
     query_sub = query.add_subparsers(dest="query_command", required=True)
@@ -445,12 +456,87 @@ def create_adapter(platform: str, config) -> Adapter:
     raise NotImplementedError(f"Unsupported platform: {platform}")
 
 
+async def run_provider_evidence_command(args: argparse.Namespace) -> int:
+    from ostag.connectors.github import (
+        GhCLI,
+        GitHubCLIError,
+        GitHubPullRequestConnector,
+    )
+    from ostag.connectors.gitlab import (
+        GlabCLI,
+        GitLabCLIError,
+        GitLabMergeRequestConnector,
+    )
+
+    as_json = getattr(args, "json", False)
+    try:
+        config = load_settings(getattr(args, "config", None))
+        if not config.provider_evidence_enabled:
+            raise SchemaError(
+                code="feature_disabled",
+                message="Provider completion evidence is disabled",
+                recovery_hint="Set OSTAG_PROVIDER_EVIDENCE_ENABLED=true after live validation.",
+            )
+        repo = args.repo or (
+            config.github_default_repo
+            if args.platform == "github"
+            else config.gitlab_default_repo
+        )
+        if not repo:
+            raise SchemaError(
+                code="provider_target_missing",
+                message="No provider repository was configured",
+                recovery_hint="Pass --repo or configure the platform default repository.",
+            )
+        if args.platform == "github":
+            evidence = await GitHubPullRequestConnector(GhCLI(config), config).collect(
+                repo, args.number, expected_sha=args.expected_sha
+            )
+        else:
+            evidence = await GitLabMergeRequestConnector(GlabCLI(config), config).collect(
+                repo, args.number, expected_sha=args.expected_sha
+            )
+        facts = ()
+        if args.work_thread:
+            facts = evidence.to_completion_facts(
+                work_thread_id=args.work_thread,
+                cycle=args.cycle,
+                received_at=datetime.now(UTC).isoformat(),
+            )
+        _emit(
+            {
+                "evidence": evidence.to_dict(),
+                "payloadDigest": evidence.payload_digest,
+                "completionFacts": [fact.to_dict() for fact in facts],
+            },
+            as_json=as_json,
+        )
+        return 0
+    except SchemaError as exc:
+        _emit({"error": exc.to_dict()}, as_json=as_json)
+        return 1
+    except (GitHubCLIError, GitLabCLIError):
+        _emit(
+            {
+                "error": {
+                    "code": "provider_evidence_failed",
+                    "message": "Provider evidence could not be read",
+                    "recovery_hint": "Check CLI authentication and read access, then retry.",
+                }
+            },
+            as_json=as_json,
+        )
+        return 1
+
+
 async def main_async(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "memory":
         return run_memory_command(args)
     if args.command == "run":
         return await run_submit_command(args)
+    if args.command == "connector" and args.connector_command == "evidence":
+        return await run_provider_evidence_command(args)
     if args.command in ("status", "ledger", "artifacts", "connector", "runs", "context"):
         return run_inspection_command(args)
     if args.command == "query":

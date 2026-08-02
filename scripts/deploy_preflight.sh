@@ -39,6 +39,20 @@ for platform in feishu dingtalk github gitlab; do
   fi
 done
 
+echo "== provider completion evidence =="
+for platform in github gitlab; do
+  set +e
+  scripts/provider_evidence_live_smoke.sh "$platform" \
+    > /tmp/ostag-provider-evidence-"$platform".out
+  evidence_code=$?
+  set -e
+  if [[ "$evidence_code" -ne 0 && "$evidence_code" -ne 3 ]]; then
+    cat /tmp/ostag-provider-evidence-"$platform".out >&2
+    echo "$platform provider evidence produced an invalid artifact" >&2
+    exit 1
+  fi
+done
+
 echo "== mfs validation record =="
 mfs_record_path="$(scripts/mfs_validation_record.sh)"
 test -f "$mfs_record_path"
