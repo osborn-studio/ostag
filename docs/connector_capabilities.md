@@ -18,6 +18,7 @@ aspirational.
 | dingtalk | chat | available | reply/proactive text |
 | dingtalk | ai_table | available | read/create/update records, batch 30, no delete |
 | github | issues | available | create/comment via gh CLI; no close/delete (`docs/github_connector.md`) |
+| github | pull_requests | available | bounded reads; governed APPROVE + Vercel Production release; no merge/close |
 | gitlab | issues | available | create/comment via glab CLI; no close/delete (`docs/gitlab_connector.md`) |
 
 Policy defaults for every connector: `default_mode: propose`,

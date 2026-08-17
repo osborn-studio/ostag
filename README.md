@@ -40,6 +40,10 @@ strategic direction.
   carry `code`, `message`, `recovery_hint`.
 - **Remote work monitor** — signed OStag/osstack event streams feed a persistent
   mobile Feishu/Telegram board; pause/resume/retry/cancel stay receipt-governed.
+- **Governed PR release** (opt-in) — an allowlisted group PR mention freezes the
+  GitHub head SHA and checks into a high-risk receipt; after `approve` + `apply`,
+  OStag submits a SHA-bound GitHub review and waits for that SHA to reach a
+  Vercel Production `READY` deployment with an assigned alias.
 
 ## Architecture
 
@@ -213,8 +217,8 @@ continuations · per-channel policy · ambient monitors V2.
 
 Also done since: governed task creation · environment scrub for agent
 subprocesses · high-risk approval quorum · four-eyes rule · GitHub and GitLab
-issues connectors (governed create/comment via gh/glab CLI) · per-channel
-daily cost budgets.
+issues connectors (governed create/comment via gh/glab CLI) · SHA-bound GitHub
+PR review plus Vercel Production release · per-channel daily cost budgets.
 
 Next: MFS-deepened context packets · sandbox hardening for code-writing
 executors · Slack Block Kit / Feishu card renderers · GitHub/GitLab thread

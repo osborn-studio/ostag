@@ -68,6 +68,81 @@ Example group commands:
 If multiple records match, OS Tag refuses to update and asks for a more specific
 requirement keyword or code.
 
+## Governed GitHub PR -> Vercel Production release
+
+This optional workflow lets collaborators without direct Vercel project access
+request a release from an authorized group while OStag retains the service
+credentials and audit trail. It does not grant collaborators a Vercel token and
+does not merge the PR.
+
+Prerequisites:
+
+1. Authenticate `gh` as a dedicated reviewer identity that is not the PR author
+   and has GitHub `Pull requests: write` on the one release repository.
+2. Connect the Vercel Project to that GitHub repository.
+3. Create a Vercel Access Token scoped to the owning Team with access to the
+   target Project. Keep it only in the OStag host's `.env`/secret manager.
+4. Grant intended release operators platform-scoped OStag `write` permission.
+5. Configure exactly one repository, one Vercel Project, and the allowed groups:
+
+```dotenv
+OSTAG_GITHUB_VERCEL_RELEASE_ENABLED=true
+OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY=owner/repo
+OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS=feishu:oc_release_group
+OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS=true
+OSTAG_VERCEL_ACCESS_TOKEN=<server-only-team-scoped-token>
+OSTAG_VERCEL_TEAM_ID=team_xxx
+OSTAG_VERCEL_PROJECT_ID=prj_xxx
+OSTAG_VERCEL_PROJECT_NAME=release-app
+OSTAG_VERCEL_DEPLOY_TIMEOUT_SECONDS=600
+OSTAG_VERCEL_POLL_INTERVAL_SECONDS=2
+OSTAG_ACTOR_PERMISSIONS=feishu:ou_release_owner:write
+OSTAG_APPLY_ENABLED=true
+```
+
+Run the non-mutating startup/config check before enabling a live group:
+
+```bash
+python -m ostag.main --platform feishu --live --doctor
+gh auth status
+ostag connector list --platform github --json
+```
+
+The doctor confirms local executable/config readiness and never prints the
+Vercel token; it deliberately does not create a review or deployment. Then use
+a designated test PR in the allowlisted repository:
+
+```text
+@OS Tag PR 已提交，请处理 https://github.com/owner/repo/pull/123
+@OS Tag approve 1
+@OS Tag apply 1
+```
+
+Acceptance evidence must show all of the following:
+
+- proposal output contains the exact PR number, head SHA, Vercel Project and
+  Production target, while provider write count is still zero;
+- GitHub shows an `APPROVED` review for that exact commit SHA;
+- Vercel shows the same SHA, `READY`, `target=production`, and an assigned
+  Production alias;
+- `ostag ledger export --run <run_id> --json` contains the applied receipt and
+  bounded provider URLs without credentials.
+
+If GitHub approves but Vercel fails, treat the run as partial failure: inspect
+GitHub/Vercel, resolve the provider issue, and send a new PR notification to
+create a fresh receipt. Failed receipts cannot be replayed. Do not report the
+release as online unless the alias evidence is present.
+
+Rollback admission immediately by setting:
+
+```dotenv
+OSTAG_GITHUB_VERCEL_RELEASE_ENABLED=false
+```
+
+and restarting OStag. This prevents new release receipts without altering
+provider state or historical audit evidence. Provider rollback is intentionally
+out of scope and must use the project's existing Vercel rollback procedure.
+
 ## Daily FDE Requirement Dashboard
 
 OStag can read the original requirement Base and send one interactive dashboard
