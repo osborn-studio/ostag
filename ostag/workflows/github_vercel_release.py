@@ -244,7 +244,12 @@ class GitHubVercelReleaseExecutor:
                 "GitHub/Vercel release execution is disabled",
                 "Enable the release workflow and create a fresh receipt.",
             )
-        if receipt.target_system != "github_vercel_release" or set(payload) != _APPLY_KEYS:
+        valid_action_id = re.fullmatch(r"action_[A-Za-z0-9]{1,64}", receipt.action_id)
+        if (
+            receipt.target_system != "github_vercel_release"
+            or set(payload) != _APPLY_KEYS
+            or valid_action_id is None
+        ):
             raise SchemaError(
                 "invalid_apply_payload",
                 "GitHub/Vercel release receipt has an invalid contract",

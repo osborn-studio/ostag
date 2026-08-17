@@ -2,11 +2,13 @@
 
 Consistent with the repo's other connectors (lark-cli, dws-cli), all GitHub
 operations shell out to an already-authenticated CLI — OS Tag never handles
-GitHub tokens itself. Only non-destructive operations are implemented:
-issue creation and issue comments. There is no close/delete path.
+GitHub tokens itself. Issue creation/comments and SHA-bound PR approval reviews
+are implemented. There is no merge/close/delete path.
 
 Writes reach GitHub exclusively through the action receipt protocol:
-propose → approve → apply (`GitHubApplyExecutor`).
+propose → approve → apply (`GitHubApplyExecutor` or the composite release executor).
+
+Source: https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request
 """
 
 from __future__ import annotations

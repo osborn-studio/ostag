@@ -117,6 +117,37 @@ def test_enabled_release_accepts_explicit_single_project_mapping(tmp_path: Path)
     assert config.vercel_project_name == "release-app"
 
 
+def test_release_settings_load_from_documented_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    values = {
+        "OSTAG_GITHUB_VERCEL_RELEASE_ENABLED": "true",
+        "OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY": "owner/repo",
+        "OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS": "feishu:oc_one,slack:C123",
+        "OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS": "false",
+        "OSTAG_VERCEL_ACCESS_TOKEN": "test-token",
+        "OSTAG_VERCEL_TEAM_ID": "team_test",
+        "OSTAG_VERCEL_PROJECT_ID": "prj_test",
+        "OSTAG_VERCEL_PROJECT_NAME": "release-app",
+        "OSTAG_VERCEL_DEPLOY_TIMEOUT_SECONDS": "900",
+        "OSTAG_VERCEL_POLL_INTERVAL_SECONDS": "3",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+
+    config = load_settings(
+        str(tmp_path / "missing.env"),
+        audit_log=tmp_path / "audit.log",
+        run_ledger_path=tmp_path / "ledger.jsonl",
+    )
+
+    assert config.github_vercel_release_enabled is True
+    assert config.github_vercel_release_channels == ("feishu:oc_one", "slack:C123")
+    assert config.github_vercel_require_checks is False
+    assert config.vercel_deploy_timeout_seconds == 900
+    assert config.vercel_poll_interval_seconds == 3
+
+
 class FakeGh:
     def __init__(self, *outputs: dict[str, object]) -> None:
         self.calls: list[tuple[str, ...]] = []
@@ -187,6 +218,20 @@ async def test_github_source_rejects_sha_drift() -> None:
         await connector.resolve_source("owner/repo", 17, expected_sha="b" * 40)
 
     assert excinfo.value.code == "provider_sha_mismatch"
+
+
+@pytest.mark.parametrize(("field", "value"), [("state", "closed"), ("draft", True)])
+async def test_github_source_rejects_closed_or_draft_pr(field: str, value: object) -> None:
+    payload = _github_pr_payload()
+    payload[field] = value
+    connector = GitHubPullRequestConnector(
+        FakeGh(payload), object()  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(SchemaError) as excinfo:
+        await connector.resolve_source("owner/repo", 17)
+
+    assert excinfo.value.code == "invalid_provider_evidence"
 
 
 async def test_github_submits_sha_bound_approval_review() -> None:
@@ -350,6 +395,19 @@ async def test_vercel_does_not_treat_ready_without_production_alias_as_live(
     )
 
     with pytest.raises(VercelDeploymentError, match="alias"):
+        await client.deploy_production(source, action_id="action_release")
+
+
+async def test_vercel_ready_deployment_must_confirm_frozen_sha(tmp_path: Path) -> None:
+    payload = _deployment("READY", alias_assigned=True)
+    payload["gitSource"] = {"sha": "b" * 40}
+    opener = FakeVercelOpen(payload)
+    client = VercelClient(_enabled_config(tmp_path), opener=opener, sleeper=_no_sleep)
+    source = PullRequestSource(
+        "owner/repo", 17, "https://github.com/owner/repo/pull/17", "a" * 40, "release"
+    )
+
+    with pytest.raises(VercelDeploymentError, match="frozen GitHub SHA"):
         await client.deploy_production(source, action_id="action_release")
 
 
@@ -573,6 +631,19 @@ async def test_release_workflow_ignores_non_pr_text_and_disabled_feature(tmp_pat
     assert github.resolve_calls == []
 
 
+async def test_release_workflow_can_allow_repository_without_configured_checks(
+    tmp_path: Path,
+) -> None:
+    github = FakeReleaseGitHub(evidence=_evidence())
+    config = _enabled_config(tmp_path, github_vercel_require_checks=False)
+    workflow = GitHubVercelReleaseWorkflow(config, github=github)
+
+    receipt = await workflow.prepare(_event(), "run_release")
+
+    assert isinstance(receipt, ActionReceipt)
+    assert github.approve_calls == []
+
+
 async def test_composite_executor_revalidates_then_approves_then_deploys(
     tmp_path: Path,
 ) -> None:
@@ -611,6 +682,54 @@ async def test_composite_executor_stops_before_writes_when_sha_drifted(tmp_path:
 
     assert excinfo.value.code == "provider_sha_mismatch"
     assert drifted.approve_calls == []
+    assert vercel.calls == []
+
+
+async def test_composite_executor_rejects_server_target_drift_before_provider_writes(
+    tmp_path: Path,
+) -> None:
+    config = _enabled_config(tmp_path)
+    github = FakeReleaseGitHub()
+    receipt = await GitHubVercelReleaseWorkflow(config, github=github).prepare(
+        _event(), "run_release"
+    )
+    assert isinstance(receipt, ActionReceipt)
+    payload = dict(receipt.apply_payload)
+    payload["vercel_project_id"] = "prj_attacker"
+    changed = ActionReceipt.from_dict(receipt.to_dict() | {"apply_payload": payload})
+    github.resolve_calls.clear()
+    vercel = FakeReleaseVercel()
+    executor = GitHubVercelReleaseExecutor(config, github=github, vercel=vercel)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await executor.apply(changed.with_state("applying"))
+
+    assert excinfo.value.code == "release_target_mismatch"
+    assert github.resolve_calls == []
+    assert github.approve_calls == []
+    assert vercel.calls == []
+
+
+async def test_composite_executor_rejects_unbounded_action_id_before_writes(
+    tmp_path: Path,
+) -> None:
+    config = _enabled_config(tmp_path)
+    github = FakeReleaseGitHub()
+    receipt = await GitHubVercelReleaseWorkflow(config, github=github).prepare(
+        _event(), "run_release"
+    )
+    assert isinstance(receipt, ActionReceipt)
+    changed = ActionReceipt.from_dict(receipt.to_dict() | {"action_id": "invalid action id"})
+    github.resolve_calls.clear()
+    vercel = FakeReleaseVercel()
+    executor = GitHubVercelReleaseExecutor(config, github=github, vercel=vercel)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await executor.apply(changed.with_state("applying"))
+
+    assert excinfo.value.code == "invalid_apply_payload"
+    assert github.resolve_calls == []
+    assert github.approve_calls == []
     assert vercel.calls == []
 
 
