@@ -18,13 +18,15 @@ from ostag.core.logging import write_audit_log
 from ostag.connectors.apply import build_apply_executors
 from ostag.core.approvals import ApprovalService
 from ostag.core.budget import BudgetService, utc_today
+from ostag.core.followups import FollowUpService
 from ostag.core.prompt import PromptContext, build_chat_prompt
-from ostag.core.receipts import parse_receipt_command
+from ostag.core.receipts import parse_receipt_command, render_receipt_text
 from ostag.core.run_ledger import RunLedger
 from ostag.core.safety import check_message_length, sanitize_user_text
 from ostag.core.schemas import ContextPacket, LedgerEvent, Run, SchemaError, new_id, utc_now_iso
 from ostag.mfs.client import MFSClient
 from ostag.workflows.auto_base import AutoBaseWorkflow
+from ostag.workflows.github_vercel_release import GitHubVercelReleaseWorkflow
 from ostag.work_monitor.service import WorkMonitorService, parse_monitor_command
 
 
@@ -40,6 +42,7 @@ class OSTagRunner:
         approvals: ApprovalService | None = None,
         work_monitor: WorkMonitorService | None = None,
         copilot_relay: Any | None = None,
+        github_vercel_release_workflow: GitHubVercelReleaseWorkflow | None = None,
     ):
         self.config = config
         self.backend = backend or create_backend(config)
@@ -54,6 +57,9 @@ class OSTagRunner:
         self.budget = BudgetService(config, self.run_ledger)
         self.work_monitor = work_monitor
         self.copilot_relay = copilot_relay
+        self.github_vercel_release = (
+            github_vercel_release_workflow or GitHubVercelReleaseWorkflow(config)
+        )
         # Run id of the most recent handled event; set by handle_event so CLI
         # callers can report which run their submission created.
         self.last_run_id = ""
@@ -213,6 +219,79 @@ class OSTagRunner:
                 self.config.audit_log,
                 event=event,
                 backend="receipts",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="ok",
+                env=self.config.env,
+            )
+            return self._finish(run, reply, ok=True)
+
+        try:
+            release_receipt = await self.github_vercel_release.prepare(event, run.run_id)
+        except SchemaError as exc:
+            reply = f"PR 发布未进入审批：{exc}。{exc.recovery_hint}"
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="github_vercel_release",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="blocked",
+                env=self.config.env,
+                error=exc.code,
+            )
+            return self._finish(run, reply, ok=False, detail=exc.code)
+        except Exception as exc:  # noqa: BLE001 - provider detail must not reach chat/audit
+            detail = f"release_prepare_failed:{type(exc).__name__}"
+            reply = "PR 发布证据读取失败，未生成审批，也未执行 GitHub/Vercel 写入。"
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="github_vercel_release",
+                mfs_enabled=self.config.mfs_enabled,
+                input_text=text,
+                output_text=reply,
+                status="error",
+                env=self.config.env,
+                error=detail,
+            )
+            return self._finish(run, reply, ok=False, detail=detail)
+        if release_receipt is not None:
+            self.approvals.propose(
+                release_receipt,
+                chat_id=event.chat_id,
+                platform=event.platform,
+                proposer_id=event.sender_id,
+            )
+            if self.config.followup_enabled:
+                FollowUpService(self.config, self.run_ledger).schedule_receipt_follow_up(
+                    release_receipt,
+                    chat_id=event.chat_id,
+                    platform=event.platform,
+                )
+            pending = self.run_ledger.list_receipts(
+                chat_id=event.chat_id,
+                states=("proposed", "needs_approval", "ready_to_apply"),
+            )
+            index = next(
+                (
+                    position
+                    for position, item in enumerate(pending, start=1)
+                    if item.action_id == release_receipt.action_id
+                ),
+                None,
+            )
+            self._build_context_packet(run, event, text, [])
+            reply = (
+                "已生成 GitHub/Vercel Production 待审批操作：\n"
+                + render_receipt_text(release_receipt, index=index)
+            )
+            write_audit_log(
+                self.config.audit_log,
+                event=event,
+                backend="github_vercel_release",
                 mfs_enabled=self.config.mfs_enabled,
                 input_text=text,
                 output_text=reply,

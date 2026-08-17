@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 from ostag.config import load_settings
+from ostag.connectors.apply import build_apply_executors
 from ostag.connectors.github import (
     GitHubPullRequestConnector,
     PullRequestReviewEvidence,
@@ -19,7 +20,10 @@ from ostag.connectors.vercel import (
     VercelDeploymentError,
 )
 from ostag.core.event import NormalizedEvent
+from ostag.core.approvals import ApprovalService
 from ostag.core.provider_evidence import ProviderChangeEvidence, ProviderCheck
+from ostag.core.run_ledger import RunLedger
+from ostag.core.runner import OSTagRunner
 from ostag.core.schemas import ActionReceipt, SchemaError
 from ostag.workflows.github_vercel_release import (
     GitHubVercelPartialFailure,
@@ -627,3 +631,86 @@ async def test_composite_executor_reports_partial_failure_without_token(tmp_path
 
     assert "pullrequestreview-91" in str(excinfo.value)
     assert config.vercel_access_token not in str(excinfo.value)
+
+
+def test_default_apply_registry_includes_github_vercel_composite_executor(
+    tmp_path: Path,
+) -> None:
+    class WorkflowShell:
+        def __init__(self) -> None:
+            self.config = _enabled_config(tmp_path)
+            self.requirements = object()
+
+    registry = build_apply_executors(WorkflowShell())
+
+    assert isinstance(registry["github_vercel_release"], GitHubVercelReleaseExecutor)
+
+
+async def test_runner_full_chat_loop_proposes_approves_and_applies_release(
+    tmp_path: Path,
+) -> None:
+    order: list[str] = []
+    github = FakeReleaseGitHub(order=order)
+    vercel = FakeReleaseVercel(order=order)
+    config = _enabled_config(
+        tmp_path,
+        apply_enabled=True,
+        actor_permissions=("feishu:ou_author:write",),
+        auto_base_enabled=False,
+        backend="mock",
+    )
+    ledger = RunLedger(config.run_ledger_path)
+    workflow = GitHubVercelReleaseWorkflow(config, github=github)
+    executor = GitHubVercelReleaseExecutor(config, github=github, vercel=vercel)
+    approvals = ApprovalService(
+        config,
+        ledger,
+        {"github_vercel_release": executor},
+    )
+    runner = OSTagRunner(
+        config,
+        run_ledger=ledger,
+        approvals=approvals,
+        github_vercel_release_workflow=workflow,
+    )
+
+    proposal = await runner.handle_event(_event())
+
+    assert "GitHub/Vercel Production 待审批" in proposal
+    assert "approve 1" in proposal
+    assert order == ["resolve", "collect"]
+    receipt = ledger.list_receipts(chat_id="oc_release")[0]
+    assert receipt.state == "needs_approval"
+
+    approved = await runner.handle_event(_event("approve 1"))
+    assert "已批准" in approved
+    assert order == ["resolve", "collect"]
+
+    applied = await runner.handle_event(_event("apply 1"))
+    assert "已执行" in applied
+    assert order == ["resolve", "collect", "resolve", "collect", "approve", "deploy"]
+    assert ledger.get_receipt(receipt.action_id).state == "applied"
+    details = [
+        record.get("payload", {}).get("detail", "")
+        for record in ledger.export_run(receipt.run_id)
+        if record.get("event_type") == "action_state_changed"
+    ]
+    assert any("https://release.example.com" in detail for detail in details)
+
+
+async def test_runner_returns_safe_release_refusal_without_falling_through(
+    tmp_path: Path,
+) -> None:
+    token = "vercel-secret-never-render"
+    github = FakeReleaseGitHub()
+    config = _enabled_config(tmp_path, vercel_access_token=token, auto_base_enabled=False)
+    workflow = GitHubVercelReleaseWorkflow(config, github=github)
+    runner = OSTagRunner(config, github_vercel_release_workflow=workflow)
+
+    reply = await runner.handle_event(_event(chat_id="oc_denied"))
+
+    assert "PR 发布未进入审批" in reply
+    assert "not authorized" in reply
+    assert token not in reply
+    assert github.resolve_calls == []
+    assert runner.run_ledger.list_receipts(chat_id="oc_denied") == []
