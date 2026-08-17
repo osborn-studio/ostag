@@ -9,10 +9,25 @@ import pytest
 from ostag.config import load_settings
 from ostag.connectors.github import (
     GitHubPullRequestConnector,
+    PullRequestReviewEvidence,
     PullRequestSource,
 )
-from ostag.connectors.vercel import VercelAPIError, VercelClient, VercelDeploymentError
-from ostag.core.schemas import SchemaError
+from ostag.connectors.vercel import (
+    VercelAPIError,
+    VercelClient,
+    VercelDeployment,
+    VercelDeploymentError,
+)
+from ostag.core.event import NormalizedEvent
+from ostag.core.provider_evidence import ProviderChangeEvidence, ProviderCheck
+from ostag.core.schemas import ActionReceipt, SchemaError
+from ostag.workflows.github_vercel_release import (
+    GitHubVercelPartialFailure,
+    GitHubVercelReleaseExecutor,
+    GitHubVercelReleaseWorkflow,
+    PullRequestReference,
+    parse_pull_request_reference,
+)
 
 
 def _config(tmp_path: Path, **overrides: object):
@@ -350,3 +365,265 @@ async def test_vercel_error_redacts_access_token(tmp_path: Path) -> None:
         await client.deploy_production(source, action_id="action_release")
 
     assert token not in str(excinfo.value)
+
+
+def _event(
+    text: str = "PR 已提交，请处理 https://github.com/owner/repo/pull/17",
+    *,
+    chat_id: str = "oc_release",
+    chat_type: str = "group",
+) -> NormalizedEvent:
+    return NormalizedEvent(
+        platform="feishu",
+        event_id="evt_release",
+        chat_id=chat_id,
+        message_id="msg_release",
+        sender_id="ou_author",
+        text=text,
+        mention_bot=True,
+        chat_type=chat_type,  # type: ignore[arg-type]
+        destination_id=chat_id,
+    )
+
+
+def _source(*, sha: str = "a" * 40, ref: str = "feature/release") -> PullRequestSource:
+    return PullRequestSource(
+        "owner/repo",
+        17,
+        "https://github.com/owner/repo/pull/17",
+        sha,
+        ref,
+    )
+
+
+def _evidence(*states: str) -> ProviderChangeEvidence:
+    checks = tuple(
+        ProviderCheck(
+            f"check-{index}",
+            state,
+            "a" * 40,
+            f"https://github.com/owner/repo/actions/runs/{index}",
+        )
+        for index, state in enumerate(states, start=1)
+    )
+    return ProviderChangeEvidence(
+        provider="github",
+        repository="owner/repo",
+        number=17,
+        url="https://github.com/owner/repo/pull/17",
+        state="open",
+        draft=False,
+        head_sha="a" * 40,
+        merge_sha="",
+        observed_at="2026-08-17T08:00:00+00:00",
+        checks=checks,
+    )
+
+
+class FakeReleaseGitHub:
+    def __init__(
+        self,
+        *,
+        source: PullRequestSource | None = None,
+        evidence: ProviderChangeEvidence | None = None,
+        order: list[str] | None = None,
+    ) -> None:
+        self.source = source or _source()
+        self.evidence = evidence or _evidence("passed")
+        self.order = order if order is not None else []
+        self.resolve_calls: list[tuple[str, int, str]] = []
+        self.collect_calls: list[tuple[str, int, str]] = []
+        self.approve_calls: list[tuple[str, int, str]] = []
+
+    async def resolve_source(self, repo: str, number: int, *, expected_sha: str = ""):
+        self.order.append("resolve")
+        self.resolve_calls.append((repo, number, expected_sha))
+        if expected_sha and expected_sha != self.source.head_sha:
+            raise SchemaError(
+                "provider_sha_mismatch",
+                "GitHub PR head SHA changed after release approval",
+                "Create a fresh receipt.",
+            )
+        return self.source
+
+    async def collect(self, repo: str, number: int, *, expected_sha: str = ""):
+        self.order.append("collect")
+        self.collect_calls.append((repo, number, expected_sha))
+        return self.evidence
+
+    async def approve(self, repo: str, number: int, *, commit_id: str, body: str = ""):
+        self.order.append("approve")
+        self.approve_calls.append((repo, number, commit_id))
+        return PullRequestReviewEvidence(
+            91,
+            "https://github.com/owner/repo/pull/17#pullrequestreview-91",
+            "APPROVED",
+            commit_id,
+        )
+
+
+class FakeReleaseVercel:
+    def __init__(self, *, order: list[str] | None = None, error: Exception | None = None):
+        self.order = order if order is not None else []
+        self.error = error
+        self.calls: list[tuple[PullRequestSource, str]] = []
+
+    async def deploy_production(self, source: PullRequestSource, *, action_id: str):
+        self.order.append("deploy")
+        self.calls.append((source, action_id))
+        if self.error is not None:
+            raise self.error
+        return VercelDeployment(
+            "dpl_release",
+            "release-app-a1b2c3.vercel.app",
+            "READY",
+            "production",
+            True,
+            ("release.example.com",),
+            source.head_sha,
+        )
+
+
+def test_parse_pull_request_reference_requires_one_exact_github_url() -> None:
+    assert parse_pull_request_reference(
+        "请发布 https://github.com/Owner/Repo/pull/17。"
+    ) == PullRequestReference("Owner/Repo", 17)
+    assert parse_pull_request_reference("https://github.example.com/owner/repo/pull/17") is None
+
+    with pytest.raises(SchemaError, match="one GitHub pull request"):
+        parse_pull_request_reference(
+            "https://github.com/owner/repo/pull/17 "
+            "https://github.com/owner/repo/pull/18"
+        )
+
+
+async def test_release_workflow_prepares_frozen_high_risk_receipt(tmp_path: Path) -> None:
+    github = FakeReleaseGitHub()
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    receipt = await workflow.prepare(_event(), "run_release")
+
+    assert isinstance(receipt, ActionReceipt)
+    assert receipt.target_system == "github_vercel_release"
+    assert receipt.target_object == "owner/repo#17 -> Vercel release-app (Production)"
+    assert receipt.risk == "high"
+    assert receipt.state == "needs_approval"
+    assert receipt.required_permissions == ("write",)
+    assert receipt.principal == _event().principal
+    assert receipt.apply_payload == {
+        "operation": "approve_and_deploy",
+        "repository": "owner/repo",
+        "number": 17,
+        "pull_url": "https://github.com/owner/repo/pull/17",
+        "head_sha": "a" * 40,
+        "head_ref": "feature/release",
+        "vercel_team_id": "team_test",
+        "vercel_project_id": "prj_test",
+        "vercel_project_name": "release-app",
+    }
+    assert {check.status for check in receipt.verification} == {"pass"}
+    assert github.approve_calls == []
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        _event(chat_id="oc_other"),
+        _event(chat_type="private"),
+        _event("请发布 https://github.com/other/repo/pull/17"),
+    ],
+)
+async def test_release_workflow_refuses_out_of_scope_notifications(
+    tmp_path: Path, event: NormalizedEvent
+) -> None:
+    github = FakeReleaseGitHub()
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    with pytest.raises(SchemaError):
+        await workflow.prepare(event, "run_release")
+
+    assert github.resolve_calls == []
+
+
+@pytest.mark.parametrize("states", [(), ("pending",), ("failed",), ("passed", "pending")])
+async def test_release_workflow_requires_at_least_one_all_passing_check(
+    tmp_path: Path, states: tuple[str, ...]
+) -> None:
+    github = FakeReleaseGitHub(evidence=_evidence(*states))
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await workflow.prepare(_event(), "run_release")
+
+    assert excinfo.value.code in {"provider_checks_missing", "provider_checks_incomplete"}
+    assert github.approve_calls == []
+
+
+async def test_release_workflow_ignores_non_pr_text_and_disabled_feature(tmp_path: Path) -> None:
+    github = FakeReleaseGitHub()
+    disabled = GitHubVercelReleaseWorkflow(_config(tmp_path), github=github)
+    enabled = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    assert await disabled.prepare(_event(), "run_release") is None
+    assert await enabled.prepare(_event("请总结今天的进展"), "run_release") is None
+    assert github.resolve_calls == []
+
+
+async def test_composite_executor_revalidates_then_approves_then_deploys(
+    tmp_path: Path,
+) -> None:
+    order: list[str] = []
+    github = FakeReleaseGitHub(order=order)
+    vercel = FakeReleaseVercel(order=order)
+    config = _enabled_config(tmp_path)
+    workflow = GitHubVercelReleaseWorkflow(config, github=github)
+    receipt = await workflow.prepare(_event(), "run_release")
+    assert isinstance(receipt, ActionReceipt)
+    executor = GitHubVercelReleaseExecutor(config, github=github, vercel=vercel)
+
+    evidence = await executor.apply(receipt.with_state("applying"))
+
+    assert order == ["resolve", "collect", "resolve", "collect", "approve", "deploy"]
+    assert github.resolve_calls[-1] == ("owner/repo", 17, "a" * 40)
+    assert github.approve_calls == [("owner/repo", 17, "a" * 40)]
+    assert vercel.calls[0][0] == _source()
+    assert "pullrequestreview-91" in evidence
+    assert "https://release.example.com" in evidence
+
+
+async def test_composite_executor_stops_before_writes_when_sha_drifted(tmp_path: Path) -> None:
+    config = _enabled_config(tmp_path)
+    initial_github = FakeReleaseGitHub()
+    receipt = await GitHubVercelReleaseWorkflow(config, github=initial_github).prepare(
+        _event(), "run_release"
+    )
+    assert isinstance(receipt, ActionReceipt)
+    drifted = FakeReleaseGitHub(source=_source(sha="b" * 40))
+    vercel = FakeReleaseVercel()
+    executor = GitHubVercelReleaseExecutor(config, github=drifted, vercel=vercel)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await executor.apply(receipt.with_state("applying"))
+
+    assert excinfo.value.code == "provider_sha_mismatch"
+    assert drifted.approve_calls == []
+    assert vercel.calls == []
+
+
+async def test_composite_executor_reports_partial_failure_without_token(tmp_path: Path) -> None:
+    config = _enabled_config(tmp_path)
+    github = FakeReleaseGitHub()
+    receipt = await GitHubVercelReleaseWorkflow(config, github=github).prepare(
+        _event(), "run_release"
+    )
+    assert isinstance(receipt, ActionReceipt)
+    vercel = FakeReleaseVercel(
+        error=VercelAPIError(f"failed with {config.vercel_access_token}")
+    )
+    executor = GitHubVercelReleaseExecutor(config, github=github, vercel=vercel)
+
+    with pytest.raises(GitHubVercelPartialFailure) as excinfo:
+        await executor.apply(receipt.with_state("applying"))
+
+    assert "pullrequestreview-91" in str(excinfo.value)
+    assert config.vercel_access_token not in str(excinfo.value)
