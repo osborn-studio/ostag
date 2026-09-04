@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Synced the portable security semantics from OpenTag 0.11 while preserving
+  OStag's multi-platform and multi-runner product contract. GitHub completion
+  evidence now carries an explicit, digest-bound `checksComplete` fact sourced
+  from bounded current-head check-run and commit-status reads.
+- Empty, truncated, malformed, or cross-SHA GitHub check observations fail
+  closed and cannot authorize the receipt-governed GitHub/Vercel Production
+  flow. Historical schema-v1 evidence remains readable but is treated as
+  incomplete when it has no completeness proof.
+- Recorded the 2026-09-04 upstream Agent Presence reset classification and the
+  OStag-native follow-up candidates in `docs/upgrade/2026-09-04-opentag-sync.md`.
+
 ## 0.5.0 — 2026-08-02
 
 OpenTag v0.8/v0.9 benchmark release, delivered as independently reviewed P0,

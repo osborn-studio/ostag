@@ -166,10 +166,7 @@ class GitHubIssuesConnector:
 class GitHubPullRequestConnector:
     """Collect read-only PR, check, merge, and commit evidence."""
 
-    _FIELDS = (
-        "number,url,state,isDraft,mergedAt,headRefOid,mergeCommit,updatedAt,"
-        "statusCheckRollup"
-    )
+    _FIELDS = "number,url,state,isDraft,mergedAt,headRefOid,mergeCommit,updatedAt"
 
     def __init__(self, cli: GhCLI, config: Settings):
         self.cli = cli
@@ -293,6 +290,7 @@ class GitHubPullRequestConnector:
     async def collect(
         self, repo: str, number: int, *, expected_sha: str = ""
     ) -> ProviderChangeEvidence:
+        _require_pull_target(repo, number)
         raw = await self.cli.run(
             "pr", "view", str(number), "--repo", repo, "--json", self._FIELDS
         )
@@ -310,17 +308,69 @@ class GitHubPullRequestConnector:
             raise SchemaError(
                 "invalid_provider_evidence", "GitHub PR response is malformed", "Retry the read."
             )
-        checks = payload.get("statusCheckRollup", ())
-        if not isinstance(checks, list) or len(checks) > self.config.provider_evidence_max_checks:
-            raise SchemaError(
-                "provider_evidence_limit", "GitHub check count exceeded its bound", "Reduce checks."
-            )
         head_sha = payload.get("headRefOid", "")
+        if not isinstance(head_sha, str) or _GITHUB_SHA.fullmatch(head_sha) is None:
+            raise SchemaError(
+                "invalid_provider_evidence",
+                "GitHub PR head SHA is invalid",
+                "Retry the provider read.",
+            )
         if expected_sha and head_sha != expected_sha:
             raise SchemaError(
                 "provider_sha_mismatch", "GitHub PR head SHA changed", "Refresh expected SHA."
             )
-        normalized_checks = tuple(self._check(item, head_sha) for item in checks)
+        page_size = min(self.config.provider_evidence_max_checks, 100)
+        # GitHub exposes total_count beside both bounded lists. A page is evidence
+        # of completeness only when its length matches that provider-authored total.
+        # Sources:
+        # https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference
+        # https://docs.github.com/en/rest/commits/statuses#get-the-combined-status-for-a-specific-reference
+        check_page = _provider_object(
+            await self.cli.run(
+                "api",
+                f"repos/{repo}/commits/{head_sha}/check-runs?filter=latest&per_page={page_size}",
+            ),
+            "check runs",
+        )
+        status_page = _provider_object(
+            await self.cli.run(
+                "api", f"repos/{repo}/commits/{head_sha}/status?per_page={page_size}"
+            ),
+            "commit statuses",
+        )
+        check_total = self._total_count(check_page, "check runs")
+        raw_check_runs = check_page.get("check_runs")
+        status_total = self._total_count(status_page, "commit statuses")
+        raw_statuses = status_page.get("statuses")
+        if not isinstance(raw_check_runs, list) or not isinstance(raw_statuses, list):
+            raise SchemaError(
+                "invalid_provider_evidence",
+                "GitHub check response is malformed",
+                "Retry the provider read.",
+            )
+        if len(raw_check_runs) > page_size or len(raw_statuses) > page_size:
+            raise SchemaError(
+                "provider_evidence_limit",
+                "GitHub check count exceeded its bound",
+                "Reduce checks or raise the configured evidence bound.",
+            )
+        status_sha = status_page.get("sha")
+        status_page_matches = isinstance(status_sha, str) and status_sha == head_sha
+        check_runs = tuple(self._check_run(item, head_sha) for item in raw_check_runs)
+        statuses = tuple(
+            self._commit_status(item, head_sha)
+            for item in raw_statuses
+            if status_page_matches
+        )
+        checks_complete = (
+            len(raw_check_runs) == check_total
+            and len(raw_statuses) == status_total
+            and all(check.sha == head_sha for check in check_runs)
+            and status_page_matches
+        )
+        normalized_checks = tuple(
+            check for check in (*check_runs, *statuses) if check.sha == head_sha
+        )
         merged_at = payload.get("mergedAt")
         raw_state = str(payload.get("state", "")).upper()
         if raw_state not in {"OPEN", "CLOSED", "MERGED"}:
@@ -341,40 +391,76 @@ class GitHubPullRequestConnector:
             merge_sha=merge_sha,
             observed_at=normalize_utc_timestamp(payload.get("updatedAt", "")),
             checks=normalized_checks,
+            checks_complete=checks_complete,
         )
 
     @staticmethod
-    def _check(payload: object, head_sha: str) -> ProviderCheck:
+    def _total_count(payload: dict[str, Any], description: str) -> int:
+        total_count = payload.get("total_count")
+        if (
+            isinstance(total_count, bool)
+            or not isinstance(total_count, int)
+            or total_count < 0
+        ):
+            raise SchemaError(
+                "invalid_provider_evidence",
+                f"GitHub {description} total_count is invalid",
+                "Retry the provider read.",
+            )
+        return total_count
+
+    @staticmethod
+    def _check_run(payload: object, head_sha: str) -> ProviderCheck:
         if not isinstance(payload, dict):
             raise SchemaError(
                 "invalid_provider_evidence", "GitHub check is malformed", "Retry the read."
             )
-        kind = payload.get("__typename")
-        if kind not in {"CheckRun", "StatusContext"}:
+        name = payload.get("name")
+        status = payload.get("status")
+        conclusion = payload.get("conclusion")
+        observed_sha = payload.get("head_sha")
+        if (
+            not isinstance(name, str)
+            or not name.strip()
+            or not isinstance(status, str)
+            or not status.strip()
+            or (conclusion is not None and not isinstance(conclusion, str))
+            or not isinstance(observed_sha, str)
+            or _GITHUB_SHA.fullmatch(observed_sha) is None
+        ):
             raise SchemaError(
-                "invalid_provider_evidence", "GitHub check type is unknown", "Retry the read."
+                "invalid_provider_evidence", "GitHub check is malformed", "Retry the read."
             )
-        if kind == "StatusContext":
-            name = payload.get("context", "status")
-            raw_state = str(payload.get("state", "")).upper()
-            url = payload.get("targetUrl") or ""
-            state = "passed" if raw_state == "SUCCESS" else "failed" if raw_state in {
-                "ERROR", "FAILURE"
-            } else "pending"
+        normalized_status = status.casefold()
+        normalized_conclusion = conclusion.casefold() if conclusion is not None else None
+        if normalized_status != "completed" or normalized_conclusion is None:
+            state = "pending"
         else:
-            name = payload.get("name", "check")
-            conclusion = str(payload.get("conclusion") or "").upper()
-            status = str(payload.get("status") or "").upper()
-            url = payload.get("detailsUrl") or ""
-            if conclusion in {"SUCCESS", "NEUTRAL", "SKIPPED"}:
-                state = "passed"
-            elif conclusion in {
-                "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE"
-            }:
-                state = "failed"
-            else:
-                state = "pending" if status != "COMPLETED" or not conclusion else "failed"
-        return ProviderCheck(str(name), state, head_sha, str(url))
+            state = "passed" if normalized_conclusion == "success" else "failed"
+        return ProviderCheck(name.strip(), state, observed_sha, str(payload.get("html_url") or ""))
+
+    @staticmethod
+    def _commit_status(payload: object, head_sha: str) -> ProviderCheck:
+        if not isinstance(payload, dict):
+            raise SchemaError(
+                "invalid_provider_evidence", "GitHub status is malformed", "Retry the read."
+            )
+        context = payload.get("context")
+        raw_state = payload.get("state")
+        if (
+            not isinstance(context, str)
+            or not context.strip()
+            or not isinstance(raw_state, str)
+            or not raw_state.strip()
+        ):
+            raise SchemaError(
+                "invalid_provider_evidence", "GitHub status is malformed", "Retry the read."
+            )
+        normalized = raw_state.casefold()
+        state = "passed" if normalized == "success" else "pending" if normalized == "pending" else "failed"
+        return ProviderCheck(
+            context.strip(), state, head_sha, str(payload.get("target_url") or "")
+        )
 
 
 class GitHubApplyExecutor:

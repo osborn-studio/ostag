@@ -112,10 +112,12 @@ def _ensure_release_evidence(
             "GitHub PR has no status checks to authorize a Production release",
             "Configure required checks or explicitly disable the check requirement.",
         )
-    if any(check.state != "passed" for check in evidence.checks):
+    if not evidence.checks_complete or any(
+        check.state != "passed" for check in evidence.checks
+    ):
         raise SchemaError(
             "provider_checks_incomplete",
-            "GitHub PR checks are pending or failed",
+            "GitHub PR checks are incomplete, pending, or failed",
             "Wait for all checks to pass and create a fresh release receipt.",
         )
 

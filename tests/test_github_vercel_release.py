@@ -479,7 +479,17 @@ def _evidence(*states: str) -> ProviderChangeEvidence:
         merge_sha="",
         observed_at="2026-08-17T08:00:00+00:00",
         checks=checks,
+        checks_complete=True,
     )
+
+
+def _incomplete_passing_evidence() -> ProviderChangeEvidence:
+    payload = _evidence("passed").to_dict()
+    payload["schemaVersion"] = 2
+    payload["checksComplete"] = False
+    payload.pop("checksState")
+    payload.pop("completionState")
+    return ProviderChangeEvidence.from_dict(payload)
 
 
 class FakeReleaseGitHub:
@@ -618,6 +628,17 @@ async def test_release_workflow_requires_at_least_one_all_passing_check(
         await workflow.prepare(_event(), "run_release")
 
     assert excinfo.value.code in {"provider_checks_missing", "provider_checks_incomplete"}
+    assert github.approve_calls == []
+
+
+async def test_release_workflow_rejects_incomplete_all_passing_checks(tmp_path: Path) -> None:
+    github = FakeReleaseGitHub(evidence=_incomplete_passing_evidence())
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await workflow.prepare(_event(), "run_release")
+
+    assert excinfo.value.code == "provider_checks_incomplete"
     assert github.approve_calls == []
 
 
