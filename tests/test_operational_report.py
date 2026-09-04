@@ -249,11 +249,19 @@ def test_operational_report_scopes_member_and_owner_without_raw_data(report_fixt
     assert [item["instanceId"] for item in member["instances"]] == ["member-mac"]
     assert [item["workstreamId"] for item in member["workstreams"]] == [member_workstream]
     assert member["summary"]["costCredits"] == 3
+    assert member["presence"]["state"] == "needs_attention"
+    assert member["presence"]["counts"]["needs_attention"] == 1
+    assert member["instances"][0]["presence"]["reasonCode"] == "escalation_active"
     assert {item["workstreamId"] for item in team["workstreams"]} == {
         member_workstream,
         owner_workstream,
     }
     assert team["summary"]["costCredits"] == 10
+    assert team["presence"]["state"] == "needs_attention"
+    assert {item["instanceId"]: item["presence"]["state"] for item in team["instances"]} == {
+        "member-mac": "needs_attention",
+        "owner-mac": "available",
+    }
     serialized = json.dumps(team)
     for forbidden in (
         "never-show-this",
@@ -295,6 +303,8 @@ def test_operational_report_handles_empty_stale_and_component_errors(tmp_path: P
     report = service.build(MEMBER, scope="personal").to_dict()
 
     assert report["instances"][0]["freshness"]["state"] == "offline"
+    assert report["instances"][0]["presence"]["state"] == "offline"
+    assert report["presence"]["state"] == "offline"
     assert report["workstreams"] == []
     assert report["completion"] == []
     assert report["escalations"] == []
@@ -305,6 +315,51 @@ def test_operational_report_handles_empty_stale_and_component_errors(tmp_path: P
     assert "broken-workstreams" not in json.dumps(report)
 
 
+def test_presence_does_not_reuse_legacy_heartbeat_after_device_revocation(
+    tmp_path: Path,
+) -> None:
+    store = MonitorStore(tmp_path / "monitor.sqlite3")
+    identities = IdentityStore(store.path)
+    _bind(identities, MEMBER, "revoked-mac", role="member", display_name="Revoked Mac")
+    with store.connect() as connection:
+        connection.execute(
+            "INSERT INTO instances VALUES(?,?,?)",
+            ("revoked-mac", 1, NOW.isoformat()),
+        )
+        connection.execute(
+            "INSERT INTO monitor_devices(device_id,principal_platform,actor_id,display_name,"
+            "public_key,paired_at,last_seen_at,revoked_at) VALUES(?,?,?,?,?,?,?,?)",
+            (
+                "revoked-mac",
+                "feishu",
+                "member",
+                "Revoked Mac",
+                "test-public-key",
+                "2026-08-01T00:00:00Z",
+                NOW.isoformat(),
+                "2026-08-02T11:59:00Z",
+            ),
+        )
+    service = OperationalReportService(
+        store,
+        identities,
+        workstream_path=tmp_path / "workstreams.sqlite3",
+        connector_evidence_dir=tmp_path / "evidence",
+        degraded_seconds=120,
+        offline_seconds=600,
+        clock=lambda: NOW,
+    )
+
+    report = service.build(MEMBER, scope="personal").to_dict()
+
+    assert report["instances"][0]["freshness"] == {
+        "state": "unknown",
+        "lastSeenAt": None,
+    }
+    assert report["instances"][0]["presence"]["state"] == "setup_required"
+    assert report["instances"][0]["presence"]["reasonCode"] == "instance_missing"
+
+
 def test_operational_report_json_is_stable_and_html_escapes(report_fixture) -> None:
     _, _, service, _, _, _, _, _, _ = report_fixture
 
@@ -313,7 +368,9 @@ def test_operational_report_json_is_stable_and_html_escapes(report_fixture) -> N
     html = render_operational_report_html(first)
 
     assert first == second
-    assert first["schemaVersion"] == 1
+    assert first["schemaVersion"] == 2
+    assert first["presence"]["state"] == "needs_attention"
+    assert "Presence needs_attention" in html
     assert "Owner &amp; Mac" in html
     assert "Member &lt;Mac&gt;" in html
     assert "<script>" not in html
@@ -362,6 +419,7 @@ def test_operational_report_http_authorization_and_feature_flag(report_fixture) 
         assert member.status_code == 200
         assert member.headers["cache-control"] == "no-store"
         assert [item["instanceId"] for item in member.json()["instances"]] == ["member-mac"]
+        assert member.json()["presence"]["state"] == "needs_attention"
         denied = client.get(
             "/v1/report?scope=team", headers={"Authorization": "Bearer member-token"}
         )

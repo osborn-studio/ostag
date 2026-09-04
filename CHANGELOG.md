@@ -12,6 +12,11 @@
   incomplete when it has no completeness proof.
 - Recorded the 2026-09-04 upstream Agent Presence reset classification and the
   OStag-native follow-up candidates in `docs/upgrade/2026-09-04-opentag-sync.md`.
+- Adapted OpenTag's read-only Agent Presence into OStag's multi-platform monitor.
+  Schema-v2 operational reports now derive `setup_required`, `needs_attention`,
+  `offline`, `working`, `queued`, or `available` from authorized heartbeat,
+  task/session, decision, and escalation facts without storing presence or
+  granting it execution/completion authority.
 
 ## 0.5.0 — 2026-08-02
 

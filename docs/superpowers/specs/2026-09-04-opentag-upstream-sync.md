@@ -103,8 +103,8 @@ interpolation, token handling, or mutation command is added.
 
 ## Open Questions
 
-- A later approved slice may add OStag-native Agent Presence as a read-only
-  projection over its existing multi-device monitor. It is intentionally not
-  coupled to this security fix.
+- The approved follow-up Agent Presence slice is specified separately in
+  `2026-09-04-ostag-agent-presence.md` and remains decoupled from this security
+  fix.
 - Durable reassessment obligations and accepted-progress attribution remain
   candidates for later slices after this evidence contract is trustworthy.

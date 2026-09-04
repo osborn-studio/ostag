@@ -27,7 +27,7 @@ Authoritative references:
 | Upstream area | OStag decision | Reason |
 | --- | --- | --- |
 | OpenTag 0.11 complete GitHub check rollup | `ported` | Prevents empty, truncated, or cross-SHA checks from satisfying completion. |
-| Agent Presence read-only projection | `deferred` | Valuable, but it needs an OStag-native projection over existing device/runtime ownership. |
+| Agent Presence read-only projection | `ported` (adapted) | Schema-v2 operational reports derive the same six states from OStag's authorized multi-device monitor facts without a second lifecycle. |
 | Self-hosted PostgreSQL team relay | `deferred` | OStag already has a deployed SQLite work monitor and multi-device relay; adopting a second authority needs a separate migration design. |
 | Slack-only Source App and one paired Runner | `deleted` (not applicable) | Conflicts with OStag's Feishu/Lark, DingTalk, Slack, Telegram, and multi-runner product contract. |
 | Removal of recipes/workstreams and non-Slack adapters | `deleted` (not applicable) | OStag 0.5.0 intentionally ships these governed, tested surfaces. Removing them would be a product regression. |
@@ -72,7 +72,34 @@ contract at both authority boundaries.
    when a complete GitHub rollup contains zero checks.
 4. No upstream platform or workstream deletion is ported.
 
+## OStag-native Agent Presence mapping
+
+OpenTag derives presence from one active Slack binding, one Project Target, a
+paired Runner readiness receipt, and the binding's canonical Run. OStag keeps
+the same read-model rule and six public states, but maps them onto its existing
+multi-platform authority boundaries:
+
+| OpenTag fact | OStag fact |
+| --- | --- |
+| active Slack binding | identity-authorized instance binding on any supported platform |
+| registered paired Runner | registered monitor device or legacy signed instance projection |
+| fresh readiness receipt | fresh device/instance heartbeat under report freshness policy |
+| queued canonical Run | projected task in `triage`, `todo`, or `ready` |
+| current assigned/running Attempt | projected running task or relay session under a fresh heartbeat |
+| approval/reconciliation needed | pending relay decision, active human escalation, or blocked work |
+
+OStag does not claim that a heartbeat or running projection is a lease. Presence
+therefore remains UI/report status and cannot authorize execution, completion,
+retry, cancellation, publication, or provider mutation. The implementation adds
+no database table or migration; it aggregates already-authorized counts and
+timestamps at read time. Because OStag may run several work items on one device,
+fresh active work takes precedence over that device's additional queued items;
+an offline durable queue remains `queued` rather than disappearing into
+`offline`.
+
 ## Rollback
 
-Revert the evidence-model and GitHub connector slice together. No database
-migration is introduced. Historical schema-v1 evidence remains intact.
+Revert the evidence-model and GitHub connector slice together. The independent
+Presence slice can be reverted separately to restore operational-report schema
+v1. Neither slice introduces a database migration, and historical schema-v1
+provider evidence remains intact.

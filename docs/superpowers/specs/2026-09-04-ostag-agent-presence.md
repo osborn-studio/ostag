@@ -94,8 +94,11 @@ Presence uses the upstream six states with OStag-native facts:
    blocked task/session exists. This takes precedence over connectivity.
 3. `queued`: a `triage`, `todo`, or `ready` task is durably projected. Like
    upstream, queued work remains visible even when its device is offline.
-4. `offline`: setup exists but heartbeat freshness is not `fresh`.
-5. `working`: a task or relay session is `running` under a fresh heartbeat.
+4. `offline`: setup exists but heartbeat freshness is not `fresh` and no
+   durable queue needs to remain visible.
+5. `working`: a task or relay session is `running` under a fresh heartbeat;
+   active work takes precedence over additional queued work on the same OStag
+   instance.
 6. `available`: setup and fresh heartbeat exist with no queued, running, or
    attention-requiring work.
 

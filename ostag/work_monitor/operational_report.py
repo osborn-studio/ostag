@@ -12,6 +12,11 @@ from typing import Callable, Literal
 
 from ostag.core.identity import Principal
 from ostag.work_monitor.identity import IdentityStore
+from ostag.work_monitor.presence import (
+    AgentPresence,
+    derive_agent_presence,
+    summarize_agent_presence,
+)
 from ostag.work_monitor.redaction import sanitize_public_text
 from ostag.work_monitor.store import MonitorStore
 
@@ -49,6 +54,7 @@ class OperationalReport:
     generated_at: str
     scope: ReportScope
     summary: dict[str, object]
+    presence: dict[str, object]
     instances: tuple[dict[str, object], ...]
     workstreams: tuple[dict[str, object], ...]
     completion: tuple[dict[str, object], ...]
@@ -58,10 +64,11 @@ class OperationalReport:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "generatedAt": self.generated_at,
             "scope": self.scope,
             "summary": dict(self.summary),
+            "presence": dict(self.presence),
             "instances": [dict(item) for item in self.instances],
             "workstreams": [dict(item) for item in self.workstreams],
             "completion": [dict(item) for item in self.completion],
@@ -104,7 +111,7 @@ class OperationalReportService:
         now = now.astimezone(UTC)
         instance_ids = self._instance_scope(principal, scope)
         errors: list[dict[str, str]] = []
-        instances = self._instances(instance_ids, now)
+        instances, agent_presences = self._instances(instance_ids, now)
         completion = self._completion(instance_ids, errors)
         escalations = self._escalations(instance_ids)
         workstreams = self._workstreams(instance_ids, errors)
@@ -129,6 +136,7 @@ class OperationalReportService:
             generated_at=_iso(now),
             scope=scope,
             summary=summary,
+            presence=summarize_agent_presence(agent_presences).to_dict(),
             instances=instances,
             workstreams=workstreams,
             completion=completion,
@@ -158,10 +166,10 @@ class OperationalReportService:
         self,
         instance_ids: frozenset[str],
         now: datetime,
-    ) -> tuple[dict[str, object], ...]:
+    ) -> tuple[tuple[dict[str, object], ...], tuple[AgentPresence, ...]]:
         if not instance_ids:
-            return ()
-        ordered = tuple(sorted(instance_ids))
+            return (), ()
+        ordered = tuple(sorted(instance_ids))[: self.max_items]
         placeholders = ",".join("?" for _ in ordered)
         with self.store.connect() as connection:
             rows = connection.execute(
@@ -174,31 +182,88 @@ class OperationalReportService:
                 f"WHERE instance_id IN ({placeholders}) GROUP BY instance_id,status",
                 ordered,
             ).fetchall()
-        seen = {str(row["instance_id"]): row["last_seen_at"] for row in rows}
+            device_rows = connection.execute(
+                f"SELECT device_id,last_seen_at,revoked_at FROM monitor_devices "  # noqa: S608
+                f"WHERE device_id IN ({placeholders})",
+                ordered,
+            ).fetchall()
+            session_rows = connection.execute(
+                f"SELECT instance_id,state,COUNT(*) AS count FROM relay_sessions "  # noqa: S608
+                f"WHERE instance_id IN ({placeholders}) GROUP BY instance_id,state",
+                ordered,
+            ).fetchall()
+            decision_rows = connection.execute(
+                f"SELECT instance_id,COUNT(*) AS count FROM relay_decisions "  # noqa: S608
+                f"WHERE state='pending' AND instance_id IN ({placeholders}) "
+                "GROUP BY instance_id",
+                ordered,
+            ).fetchall()
+            escalation_rows = connection.execute(
+                f"SELECT instance_id,COUNT(*) AS count FROM human_escalations "  # noqa: S608
+                f"WHERE state IN ('open','acknowledged') AND instance_id IN ({placeholders}) "
+                "GROUP BY instance_id",
+                ordered,
+            ).fetchall()
+        legacy_seen = {str(row["instance_id"]): row["last_seen_at"] for row in rows}
+        registered_devices = {str(row["device_id"]) for row in device_rows}
+        device_seen = {
+            str(row["device_id"]): row["last_seen_at"]
+            for row in device_rows
+            if not row["revoked_at"]
+        }
         task_counts = {
             (str(row["instance_id"]), str(row["status"])): int(row["count"])
             for row in task_rows
         }
+        session_counts: dict[str, dict[str, int]] = {}
+        for row in session_rows:
+            session_counts.setdefault(str(row["instance_id"]), {})[
+                str(row["state"]).casefold()
+            ] = int(row["count"])
+        decision_counts = {
+            str(row["instance_id"]): int(row["count"]) for row in decision_rows
+        }
+        escalation_counts = {
+            str(row["instance_id"]): int(row["count"]) for row in escalation_rows
+        }
         names = self.identities.instance_display_names(instance_ids)
         output = []
-        for instance_id in ordered[: self.max_items]:
+        presences = []
+        for instance_id in ordered:
             state_counts = {
                 state: task_counts.get((instance_id, state), 0)
                 for state in _TASK_STATES
             }
-            last_seen = seen.get(instance_id)
+            if instance_id in registered_devices:
+                last_seen = device_seen.get(instance_id)
+                configured = instance_id in device_seen
+            else:
+                last_seen = legacy_seen.get(instance_id)
+                configured = instance_id in legacy_seen
+            freshness = self._freshness(last_seen, now)
+            presence = derive_agent_presence(
+                instance_id=instance_id,
+                configured=configured,
+                freshness_state=str(freshness["state"]),
+                task_counts=state_counts,
+                session_counts=session_counts.get(instance_id, {}),
+                pending_decisions=decision_counts.get(instance_id, 0),
+                active_escalations=escalation_counts.get(instance_id, 0),
+            )
             output.append(
                 {
                     "instanceId": _bounded_id(instance_id),
                     "displayName": _bounded_id(names.get(instance_id, instance_id), 80),
-                    "freshness": self._freshness(last_seen, now),
+                    "freshness": freshness,
+                    "presence": presence.to_dict(),
                     "tasks": {
                         "total": sum(state_counts.values()),
                         "byState": state_counts,
                     },
                 }
             )
-        return tuple(output)
+            presences.append(presence)
+        return tuple(output), tuple(presences)
 
     def _freshness(self, value: object, now: datetime) -> dict[str, object]:
         observed = _parse_timestamp(value)
@@ -448,6 +513,7 @@ def render_operational_report_html(report: dict[str, object]) -> str:
         return escape(str(value if value is not None else "-"), quote=True)
 
     summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    presence = report.get("presence") if isinstance(report.get("presence"), dict) else {}
     instances = report.get("instances") if isinstance(report.get("instances"), list) else []
     workstreams = report.get("workstreams") if isinstance(report.get("workstreams"), list) else []
     completion = report.get("completion") if isinstance(report.get("completion"), list) else []
@@ -469,16 +535,18 @@ def render_operational_report_html(report: dict[str, object]) -> str:
         if not isinstance(item, dict):
             continue
         freshness = item.get("freshness") if isinstance(item.get("freshness"), dict) else {}
+        agent_presence = item.get("presence") if isinstance(item.get("presence"), dict) else {}
         tasks = item.get("tasks") if isinstance(item.get("tasks"), dict) else {}
         instance_rows.append(
             "<tr>"
             f"<td>{text(item.get('displayName'))}</td>"
             f"<td>{text(item.get('instanceId'))}</td>"
+            f"<td>{text(agent_presence.get('state'))}</td>"
             f"<td>{text(freshness.get('state'))}</td>"
             f"<td>{text(tasks.get('total'))}</td>"
             "</tr>"
         )
-    instance_body = "".join(instance_rows) or '<tr><td colspan="4">-</td></tr>'
+    instance_body = "".join(instance_rows) or '<tr><td colspan="5">-</td></tr>'
     style = (
         "body{font-family:system-ui,sans-serif;margin:24px;color:#171717;background:#fff}"
         "h1{font-size:22px}h2{font-size:16px;margin-top:24px}"
@@ -491,11 +559,12 @@ def render_operational_report_html(report: dict[str, object]) -> str:
         f"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>{style}</style>"
         "<title>OStag Operational Report</title></head><body>"
         "<h1>OStag Operational Report</h1>"
-        f"<div class=\"summary\"><span class=\"metric\">Instances {text(summary.get('instanceCount'))}</span>"
+        f"<div class=\"summary\"><span class=\"metric\">Presence {text(presence.get('state'))}</span>"
+        f"<span class=\"metric\">Instances {text(summary.get('instanceCount'))}</span>"
         f"<span class=\"metric\">Workstreams {text(summary.get('workstreamCount'))}</span>"
         f"<span class=\"metric\">Cost {text(summary.get('costCredits'))}</span>"
         f"<span>{text(report.get('generatedAt'))}</span></div>"
-        "<h2>Instances</h2><table><thead><tr><th>Name</th><th>ID</th><th>Freshness</th><th>Tasks</th></tr></thead>"
+        "<h2>Instances</h2><table><thead><tr><th>Name</th><th>ID</th><th>Presence</th><th>Freshness</th><th>Tasks</th></tr></thead>"
         f"<tbody>{instance_body}</tbody></table>"
         "<h2>Workstreams</h2><table><thead><tr><th>ID</th><th>Instance</th><th>State</th><th>Cost</th></tr></thead><tbody>"
         f"{rows(workstreams, ('workstreamId', 'instanceId', 'state', 'costCredits'))}</tbody></table>"
