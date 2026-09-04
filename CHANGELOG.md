@@ -17,6 +17,9 @@
   `offline`, `working`, `queued`, or `available` from authorized heartbeat,
   task/session, decision, and escalation facts without storing presence or
   granting it execution/completion authority.
+- Documented why accepted-progress attribution remains fail-closed until OStag
+  has durable artifact/Run lineage, and why the reassessment-obligation worker
+  retired by the current upstream profile is not being introduced.
 
 ## 0.5.0 — 2026-08-02
 

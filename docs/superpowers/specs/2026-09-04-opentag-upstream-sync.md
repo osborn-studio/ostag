@@ -106,5 +106,9 @@ interpolation, token handling, or mutation command is added.
 - The approved follow-up Agent Presence slice is specified separately in
   `2026-09-04-ostag-agent-presence.md` and remains decoupled from this security
   fix.
-- Durable reassessment obligations and accepted-progress attribution remain
-  candidates for later slices after this evidence contract is trustworthy.
+- Accepted-progress attribution remains deferred until OStag durably stores
+  trusted artifact provenance and complete WorkThread-to-Run lineage; guessing
+  from the latest/triggering Run is forbidden by the upstream ADR.
+- Durable reassessment obligations are not part of the current upstream Agent
+  Presence profile, so OStag will not add the retired worker/table design solely
+  for parity.
