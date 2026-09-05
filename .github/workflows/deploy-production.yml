@@ -1,0 +1,195 @@
+name: OStag Production Deploy
+
+on:
+  workflow_run:
+    workflows: ["OS Tag CI"]
+    branches: ["main"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Current main commit SHA to redeploy (blank uses current main)"
+        required: false
+        type: string
+
+permissions:
+  checks: read
+  contents: read
+
+concurrency:
+  group: ostag-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    env:
+      PRODUCTION_SSH_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+      PRODUCTION_SSH_USER: ${{ vars.PRODUCTION_SSH_USER }}
+      PRODUCTION_SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT }}
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+      PRODUCTION_DEPLOY_SCRIPT_SHA256: ${{ vars.PRODUCTION_DEPLOY_SCRIPT_SHA256 }}
+      PRODUCTION_SSH_WRAPPER_SHA256: ${{ vars.PRODUCTION_SSH_WRAPPER_SHA256 }}
+      WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      INPUT_SHA: ${{ inputs.sha }}
+
+    steps:
+      - name: Check out main
+        # actions/checkout v7.0.1, pinned to the immutable commit.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
+
+      - name: Resolve and validate release commit
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          main_sha="$(git rev-parse origin/main)"
+          candidate="$main_sha"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            candidate="$WORKFLOW_RUN_SHA"
+          elif [[ -n "$INPUT_SHA" ]]; then
+            candidate="$INPUT_SHA"
+          fi
+          [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Release SHA must be 40 lowercase hexadecimal characters." >&2
+            exit 1
+          }
+          [[ "$candidate" == "$main_sha" ]] || {
+            echo "Refusing to deploy a stale commit; current main is $main_sha." >&2
+            exit 1
+          }
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            gh api "/repos/$GITHUB_REPOSITORY/commits/$candidate/check-runs" > "$RUNNER_TEMP/check-runs.json"
+            jq -e '[.check_runs[] | select(.name == "release-check" and .conclusion == "success")] | length > 0' \
+              "$RUNNER_TEMP/check-runs.json" >/dev/null || {
+                echo "The selected main commit has no successful release-check." >&2
+                exit 1
+              }
+          fi
+          echo "sha=$candidate" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${candidate:0:12}" >> "$GITHUB_OUTPUT"
+          echo "image=ostag-work-monitor:sha-${candidate:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Build immutable production image
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          set -euo pipefail
+          docker build \
+            --pull \
+            --platform linux/amd64 \
+            --label "org.opencontainers.image.revision=$DEPLOY_SHA" \
+            --file deploy/work-monitor/Dockerfile \
+            --tag "$IMAGE" \
+            .
+
+      - name: Package immutable release
+        id: package
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+          IMAGE: ${{ steps.release.outputs.image }}
+        run: |
+          set -euo pipefail
+          source_archive="$RUNNER_TEMP/ostag-$DEPLOY_SHA-source.tar.gz"
+          image_archive="$RUNNER_TEMP/ostag-$DEPLOY_SHA-image.tar.gz"
+          git archive --format=tar "$DEPLOY_SHA" | gzip -9 > "$source_archive"
+          docker save "$IMAGE" | gzip -1 > "$image_archive"
+          echo "source_archive=$source_archive" >> "$GITHUB_OUTPUT"
+          echo "image_archive=$image_archive" >> "$GITHUB_OUTPUT"
+          echo "source_sha256=$(sha256sum "$source_archive" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "image_sha256=$(sha256sum "$image_archive" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Configure production SSH identity
+        shell: bash
+        env:
+          PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          PRODUCTION_SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCTION_SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]]
+          [[ "$PRODUCTION_SSH_USER" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]
+          [[ "$PRODUCTION_SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          [[ "$PRODUCTION_URL" == https://* ]]
+          [[ "$PRODUCTION_DEPLOY_SCRIPT_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$PRODUCTION_SSH_WRAPPER_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ -n "$PRODUCTION_SSH_PRIVATE_KEY" ]]
+          [[ -n "$PRODUCTION_SSH_KNOWN_HOSTS" ]]
+          install -d -m 0700 "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$PRODUCTION_SSH_PRIVATE_KEY" > "$HOME/.ssh/ostag-production"
+          printf '%s\n' "$PRODUCTION_SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/ostag-production" >/dev/null
+          installed_versions="$(ssh \
+            -i "$HOME/.ssh/ostag-production" \
+            -p "$PRODUCTION_SSH_PORT" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST" version)"
+          grep -Fxq "deploy_script_sha256=$PRODUCTION_DEPLOY_SCRIPT_SHA256" <<< "$installed_versions"
+          grep -Fxq "ssh_wrapper_sha256=$PRODUCTION_SSH_WRAPPER_SHA256" <<< "$installed_versions"
+
+      - name: Upload and deploy release
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+          SOURCE_ARCHIVE: ${{ steps.package.outputs.source_archive }}
+          SOURCE_SHA256: ${{ steps.package.outputs.source_sha256 }}
+          IMAGE_ARCHIVE: ${{ steps.package.outputs.image_archive }}
+          IMAGE_SHA256: ${{ steps.package.outputs.image_sha256 }}
+        run: |
+          set -euo pipefail
+          target="$PRODUCTION_SSH_USER@$PRODUCTION_SSH_HOST"
+          ssh_options=(
+            -i "$HOME/.ssh/ostag-production"
+            -p "$PRODUCTION_SSH_PORT"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+          )
+          ssh "${ssh_options[@]}" "$target" \
+            upload-source "$DEPLOY_SHA" "$SOURCE_SHA256" < "$SOURCE_ARCHIVE"
+          ssh "${ssh_options[@]}" "$target" \
+            upload-image "$DEPLOY_SHA" "$IMAGE_SHA256" < "$IMAGE_ARCHIVE"
+          ssh "${ssh_options[@]}" "$target" \
+            deploy "$DEPLOY_SHA" "$SOURCE_SHA256" "$IMAGE_SHA256"
+
+      - name: Verify public production health
+        shell: bash
+        env:
+          DEPLOY_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 15 \
+              "$PRODUCTION_URL/healthz" > "$RUNNER_TEMP/health.json"; then
+              jq -e '.status == "ok"' "$RUNNER_TEMP/health.json" >/dev/null
+              {
+                echo "## Production deployment"
+                echo "- Commit: \`$DEPLOY_SHA\`"
+                echo "- URL: $PRODUCTION_URL"
+                echo "- Health: passed"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Health check attempt $attempt/30 failed; retrying in 5 seconds."
+            sleep 5
+          done
+          echo "Public production health did not recover within 150 seconds." >&2
+          exit 1

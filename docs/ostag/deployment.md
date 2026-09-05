@@ -344,6 +344,66 @@ an incompatible migration requires it.
   connector smoke evidence, and the protected workstream path have been verified.
   See [operational_report.md](operational_report.md).
 
+## GitHub Actions production deployment
+
+The production workflow in `.github/workflows/deploy-production.yml` runs only
+after `OS Tag CI` succeeds on `main`, or by an explicit manual dispatch of the
+current `main` commit. It refuses malformed SHAs, stale commits, and manual
+deployments without a successful `release-check` for the exact commit.
+
+Configure the GitHub `production` environment with these values:
+
+| Type | Name | Purpose |
+|---|---|---|
+| Variable | `PRODUCTION_SSH_HOST` | Tencent Lighthouse origin address |
+| Variable | `PRODUCTION_SSH_USER` | Production SSH account selected for the forced-command key |
+| Variable | `PRODUCTION_SSH_PORT` | SSH port |
+| Variable | `PRODUCTION_URL` | `https://ostag-monitor.ihiking.me` |
+| Variable | `PRODUCTION_DEPLOY_SCRIPT_SHA256` | Expected hash of the trusted server deploy script |
+| Variable | `PRODUCTION_SSH_WRAPPER_SHA256` | Expected hash of the forced-command SSH wrapper |
+| Secret | `PRODUCTION_SSH_PRIVATE_KEY` | OStag-only deployment identity |
+| Secret | `PRODUCTION_SSH_KNOWN_HOSTS` | Pinned origin host key; never use runtime `ssh-keyscan` as trust |
+
+Restrict the environment to the `main` branch. The repository's protected
+`main` branch requires one approval, dismisses stale approvals, requires the
+last push to be approved, and enforces those rules for administrators. The
+environment does not replace that review gate.
+
+The workflow builds a `linux/amd64` image tagged from the full commit SHA,
+creates a source archive with `git archive`, checksums both artifacts, and
+streams them over strict-host-key SSH. The dedicated key is installed with
+OpenSSH `restrict` and a forced command. The wrapper accepts only version
+checks, preflight, two checksum-bound archive uploads, and one bounded deploy
+command; it cannot open an interactive shell or forward ports. The trusted
+server-side `scripts/deploy_work_monitor_release.sh` then:
+
+1. verifies the current container, local health endpoint, protected mode-0600
+   environment file, and SQLite integrity;
+2. verifies both artifact checksums and rejects unsafe archive paths;
+3. installs the source under `/opt/ostag-releases/<commit-sha>` and loads the
+   immutable image;
+4. creates and integrity-checks an online SQLite backup inside the existing
+   named volume;
+5. recreates the `work-monitor` Compose project with the base Compose file and
+   waits for container health;
+6. records the previous image, Compose file, and backup path in
+   `deploy-receipt.json` before GitHub checks the public `/healthz` endpoint.
+
+If the new container does not become healthy, the deploy script restores the
+previous image and Compose file. It deliberately does not restore the database
+automatically: retain the failed database and use the verified backup only
+after an operator confirms that a migration is incompatible.
+
+Run a non-mutating server check at any time:
+
+```bash
+/usr/local/sbin/ostag-deploy-work-monitor preflight
+```
+
+Rotate the GitHub deployment identity independently of developer SSH keys.
+Install the replacement public key first, update the environment secret, prove
+one preflight/deploy connection, and only then remove the previous key.
+
 ## Production work monitor on Tencent Cloud
 
 Prepare a CVM or Lighthouse Linux host with Docker, a protected registry login,

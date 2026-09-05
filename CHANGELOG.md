@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a CI-gated GitHub Actions production deployment for the Tencent
+  Lighthouse work monitor. Each release is commit-bound, checksum-verified,
+  backed up online before Compose switches images, health-checked through the
+  public endpoint, and able to restore the previous image without automatically
+  overwriting production data.
 - Synced the portable security semantics from OpenTag 0.11 while preserving
   OStag's multi-platform and multi-runner product contract. GitHub completion
   evidence now carries an explicit, digest-bound `checksComplete` fact sourced
