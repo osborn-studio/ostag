@@ -98,6 +98,7 @@ def test_enabled_release_requires_complete_server_configuration(
         ({"github_vercel_release_channels": ("oc_release",)}, "platform:chat_id"),
         ({"github_vercel_release_channels": ("unknown:chat",)}, "platform"),
         ({"github_vercel_release_base_branch": "release..main"}, "base_branch"),
+        ({"github_vercel_required_checks": "release-check"}, "tuple"),
         ({"github_vercel_required_checks": ("release-check", "release-check")}, "unique"),
         ({"vercel_deploy_timeout_seconds": 29}, "30..3600"),
         ({"vercel_deploy_timeout_seconds": 3601}, "30..3600"),

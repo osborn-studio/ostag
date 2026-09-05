@@ -295,12 +295,17 @@ class Settings:
                 )
             base_branch = self.github_vercel_release_base_branch
             if (
-                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", base_branch)
+                not isinstance(base_branch, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", base_branch)
                 or ".." in base_branch
                 or "//" in base_branch
                 or base_branch.endswith((".", "/"))
             ):
                 raise ValueError("github_vercel_release_base_branch is invalid")
+            if not isinstance(self.github_vercel_required_checks, tuple) or not all(
+                isinstance(check, str) for check in self.github_vercel_required_checks
+            ):
+                raise ValueError("github_vercel_required_checks must be a tuple of names")
             if len(set(self.github_vercel_required_checks)) != len(
                 self.github_vercel_required_checks
             ):
