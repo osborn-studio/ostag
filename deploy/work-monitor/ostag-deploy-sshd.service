@@ -1,0 +1,19 @@
+[Unit]
+Description=OStag restricted production deployment listener
+Documentation=man:sshd(8) man:sshd_config(5)
+After=network.target ssh.service
+Requires=ssh.service
+ConditionPathExists=/etc/ssh/ostag-deploy-authorized-keys
+ConditionFileIsExecutable=/usr/local/sbin/ostag-github-actions-ssh
+
+[Service]
+Type=simple
+ExecStartPre=/usr/sbin/sshd -t -f /etc/ssh/sshd_config_ostag_deploy
+ExecStart=/usr/sbin/sshd -D -e -f /etc/ssh/sshd_config_ostag_deploy
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
