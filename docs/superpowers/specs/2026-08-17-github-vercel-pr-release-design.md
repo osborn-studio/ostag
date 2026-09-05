@@ -147,7 +147,8 @@ repository、PR number、SHA、deployment ID 和 deployment URL。
 OSTAG_GITHUB_VERCEL_RELEASE_ENABLED=false
 OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY=owner/repo
 OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS=feishu:oc_xxx
-OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS=true
+OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH=main
+OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS=release-check
 OSTAG_VERCEL_ACCESS_TOKEN=
 OSTAG_VERCEL_TEAM_ID=team_xxx
 OSTAG_VERCEL_PROJECT_ID=prj_xxx
@@ -155,6 +156,13 @@ OSTAG_VERCEL_PROJECT_NAME=my-project
 OSTAG_VERCEL_DEPLOY_TIMEOUT_SECONDS=600
 OSTAG_VERCEL_POLL_INTERVAL_SECONDS=2
 ```
+
+2026-09-04 的 fail-closed 加固取消了 checks 可选开关；Production 发布始终要求
+current-head checks 完整、非空、包含配置的可信检查且全部通过；目标 base branch 也会冻结并在
+apply 时重验。
+
+该 JSONL receipt/ledger 部署模型要求单写者；进程在 provider 响应确认前退出时，`applying`
+视为不确定状态，必须先人工核对 GitHub/Vercel，禁止自动重放 Production 写入。
 
 启用时所有必填项必须存在，channel 必须采用 `platform:chat_id`，repository 必须为规范化
 `owner/name`，Vercel timeout/poll 必须在有界范围内。Vercel endpoint 不可由群文本或普通

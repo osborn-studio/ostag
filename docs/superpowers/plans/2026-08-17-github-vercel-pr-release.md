@@ -62,7 +62,8 @@ Spec: `docs/superpowers/specs/2026-08-17-github-vercel-pr-release-design.md`
   source evidence and no mutation.
 - [ ] Private/non-allowlisted/wrong-repository/draft/fork/check-failing inputs are deterministic
   refusals.
-- [ ] Apply revalidates SHA/ref/checks, then orders GitHub APPROVE before Vercel deploy.
+- [ ] Apply revalidates SHA/head ref/base ref and the configured trusted checks,
+  then orders GitHub APPROVE before Vercel deploy.
 
 **Verification:** `uv run pytest -q tests/test_github_vercel_release.py tests/test_approvals.py`
 
@@ -108,7 +109,7 @@ Spec: `docs/superpowers/specs/2026-08-17-github-vercel-pr-release-design.md`
 |---|---|---|
 | PR changes after group approval | Wrong code approved/deployed | Freeze SHA/ref and re-read immediately before mutation |
 | Unauthorized group/repository | Privilege escalation | Explicit channel/repository allowlists and trusted adapter identity |
-| Checks pending or failed | Unsafe release | Require at least one check by default and require all checks passed |
+| Checks missing, untrusted, pending, or failed | Unsafe release | Require the configured trusted checks and require all observed checks passed |
 | GitHub succeeds, Vercel fails | Partial completion | Ordered execution, failed receipt evidence, no false success claim |
 | Vercel token leakage | Account compromise | Server-only env, fixed endpoint, bounded sanitized errors, secret scan |
 | Deployment ready but not serving | False online claim | Require production target and assigned alias |

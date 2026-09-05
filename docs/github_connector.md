@@ -70,6 +70,11 @@ receipt becomes `failed` with bounded partial-failure evidence; it never claims
 that Production is online. Inspect the providers and create a fresh receipt
 instead of applying a failed receipt again.
 
+Run the ledger and live chat adapter as a single writer. A process exit after a
+provider accepts a write can leave the receipt in `applying`; OStag deliberately
+does not retry an indeterminate Production write automatically. Inspect GitHub
+and Vercel, then create a fresh receipt only after reconciling provider state.
+
 ## Configuration
 
 - `OSTAG_GH_BIN` — path to the `gh` binary (default `gh`).
@@ -79,8 +84,12 @@ instead of applying a failed receipt again.
 - `OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY` — the only accepted `owner/name`.
 - `OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS` — comma-separated
   `platform:chat_id` group allowlist.
-- `OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS` — require at least one check (default
-  `true`); any present check must pass even when set to `false`.
+- `OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH` — the only Production target branch
+  (default `main`); retargeting a PR invalidates its receipt.
+- `OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS` — comma-separated trusted check names
+  that must all be present and passing (for example `release-check,security-scan`).
+- At least one complete, current-head GitHub check is mandatory and every
+  observed check must pass; this production gate cannot be disabled.
 - `OSTAG_VERCEL_ACCESS_TOKEN` — server-only, team-scoped Vercel Access Token.
 - `OSTAG_VERCEL_TEAM_ID`, `OSTAG_VERCEL_PROJECT_ID`,
   `OSTAG_VERCEL_PROJECT_NAME` — fixed Production target.

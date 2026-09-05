@@ -9,8 +9,9 @@ without creating a second lifecycle, changing execution authority, or removing
 any OStag platform.
 
 The existing identity-scoped operational report becomes schema v2 and exposes
-one presence summary plus one derived presence value per authorized instance.
-No presence row is stored and no command is emitted by a presence read.
+one presence summary plus one derived presence value per authorized instance in
+the report's existing deterministic `max_items` projection. No presence row is
+stored and no command is emitted by a presence read.
 
 ## Tech Stack
 
@@ -108,7 +109,8 @@ The overall summary selects the highest-priority visible state in this order:
 ## Success Criteria
 
 1. Schema-v2 operational reports contain a deterministic `presence` summary and
-   a presence object for every authorized instance.
+   a presence object for every authorized instance returned within the existing
+   configured report bound; the summary is derived from that same projection.
 2. All six states and their precedence are covered by tests.
 3. `working` and `available` require fresh heartbeat evidence; presence never
    changes task, session, command, completion, or escalation data.

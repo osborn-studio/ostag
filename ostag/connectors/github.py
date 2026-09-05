@@ -48,6 +48,7 @@ class PullRequestSource:
     url: str
     head_sha: str
     head_ref: str
+    base_ref: str = "main"
 
 
 @dataclass(frozen=True)
@@ -194,6 +195,7 @@ class GitHubPullRequestConnector:
         base_name = base_repo.get("full_name") if isinstance(base_repo, dict) else None
         head_sha = head.get("sha")
         head_ref = head.get("ref")
+        base_ref = base.get("ref")
         url = _valid_pull_url(payload.get("html_url"), repo, number)
         valid = (
             payload.get("number") == number
@@ -206,6 +208,9 @@ class GitHubPullRequestConnector:
             and isinstance(head_ref, str)
             and 0 < len(head_ref) <= 255
             and not any(ord(char) < 32 or ord(char) == 127 for char in head_ref)
+            and isinstance(base_ref, str)
+            and 0 < len(base_ref) <= 255
+            and not any(ord(char) < 32 or ord(char) == 127 for char in base_ref)
             and isinstance(head_name, str)
             and isinstance(base_name, str)
             and bool(url)
@@ -228,7 +233,7 @@ class GitHubPullRequestConnector:
                 "GitHub PR head SHA changed after release approval",
                 "Create a fresh release receipt for the new SHA.",
             )
-        return PullRequestSource(repo, number, url, head_sha, head_ref)
+        return PullRequestSource(repo, number, url, head_sha, head_ref, base_ref)
 
     async def approve(
         self,

@@ -36,6 +36,8 @@ _APPLY_KEYS = frozenset(
         "pull_url",
         "head_sha",
         "head_ref",
+        "base_ref",
+        "required_checks",
         "vercel_team_id",
         "vercel_project_id",
         "vercel_project_name",
@@ -88,8 +90,7 @@ def parse_pull_request_reference(text: str) -> PullRequestReference | None:
 def _ensure_release_evidence(
     evidence: ProviderChangeEvidence,
     source: PullRequestSource,
-    *,
-    require_checks: bool,
+    required_checks: tuple[str, ...],
 ) -> None:
     consistent = (
         evidence.provider == "github"
@@ -106,11 +107,19 @@ def _ensure_release_evidence(
             "GitHub PR evidence does not match the frozen release source",
             "Refresh the PR and create a new release receipt.",
         )
-    if require_checks and not evidence.checks:
+    if not evidence.checks:
         raise SchemaError(
             "provider_checks_missing",
             "GitHub PR has no status checks to authorize a Production release",
-            "Configure required checks or explicitly disable the check requirement.",
+            "Configure at least one required check and create a fresh release receipt.",
+        )
+    observed_names = {check.name for check in evidence.checks}
+    missing = [name for name in required_checks if name not in observed_names]
+    if missing:
+        raise SchemaError(
+            "provider_required_checks_missing",
+            "GitHub PR is missing configured Production release checks",
+            "Wait for the required checks to appear and create a fresh release receipt.",
         )
     if not evidence.checks_complete or any(
         check.state != "passed" for check in evidence.checks
@@ -181,13 +190,19 @@ class GitHubVercelReleaseWorkflow:
                 f"Use a PR from {repository}.",
             )
         source = await self.github.resolve_source(repository, reference.number)
+        if source.base_ref != self.config.github_vercel_release_base_branch:
+            raise SchemaError(
+                "release_base_branch_denied",
+                "GitHub PR does not target the configured Production base branch",
+                f"Use a PR targeting {self.config.github_vercel_release_base_branch}.",
+            )
         evidence = await self.github.collect(
             repository, reference.number, expected_sha=source.head_sha
         )
         _ensure_release_evidence(
             evidence,
             source,
-            require_checks=self.config.github_vercel_require_checks,
+            self.config.github_vercel_required_checks,
         )
         return ActionReceipt(
             action_id=new_id("action"),
@@ -219,6 +234,8 @@ class GitHubVercelReleaseWorkflow:
                 "pull_url": source.url,
                 "head_sha": source.head_sha,
                 "head_ref": source.head_ref,
+                "base_ref": source.base_ref,
+                "required_checks": list(self.config.github_vercel_required_checks),
                 "vercel_team_id": self.config.vercel_team_id,
                 "vercel_project_id": self.config.vercel_project_id,
                 "vercel_project_name": self.config.vercel_project_name,
@@ -260,6 +277,8 @@ class GitHubVercelReleaseExecutor:
         expected = {
             "operation": "approve_and_deploy",
             "repository": self.config.github_vercel_release_repository,
+            "base_ref": self.config.github_vercel_release_base_branch,
+            "required_checks": list(self.config.github_vercel_required_checks),
             "vercel_team_id": self.config.vercel_team_id,
             "vercel_project_id": self.config.vercel_project_id,
             "vercel_project_name": self.config.vercel_project_name,
@@ -271,7 +290,7 @@ class GitHubVercelReleaseExecutor:
                 "Create a fresh release receipt for the configured target.",
             )
         number = payload.get("number")
-        strings = ("pull_url", "head_sha", "head_ref")
+        strings = ("pull_url", "head_sha", "head_ref", "base_ref")
         if (
             isinstance(number, bool)
             or not isinstance(number, int)
@@ -294,10 +313,14 @@ class GitHubVercelReleaseExecutor:
             number,
             expected_sha=payload["head_sha"],
         )
-        if source.url != payload["pull_url"] or source.head_ref != payload["head_ref"]:
+        if (
+            source.url != payload["pull_url"]
+            or source.head_ref != payload["head_ref"]
+            or source.base_ref != payload["base_ref"]
+        ):
             raise SchemaError(
                 "provider_ref_mismatch",
-                "GitHub PR URL or head ref changed after release approval",
+                "GitHub PR URL, head ref, or base ref changed after release approval",
                 "Create a fresh release receipt for the current PR source.",
             )
         evidence = await self.github.collect(
@@ -308,7 +331,7 @@ class GitHubVercelReleaseExecutor:
         _ensure_release_evidence(
             evidence,
             source,
-            require_checks=self.config.github_vercel_require_checks,
+            self.config.github_vercel_required_checks,
         )
         review = await self.github.approve(
             repository,

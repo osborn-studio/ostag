@@ -72,6 +72,7 @@ def test_doctor_reports_github_vercel_release_readiness_without_token(
         github_vercel_release_enabled=True,
         github_vercel_release_repository="owner/repo",
         github_vercel_release_channels=("feishu:oc_release",),
+        github_vercel_required_checks=("release-check",),
         vercel_access_token=token,
         vercel_team_id="team_test",
         vercel_project_id="prj_test",

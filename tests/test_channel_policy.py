@@ -187,6 +187,59 @@ async def test_channel_grant_elevates_actor_in_channel_only(
     assert excinfo.value.code == "permission_denied"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("platform", "chat_id"),
+    [("feishu", "chat2"), ("slack", "chat1")],
+)
+async def test_action_id_cannot_cross_receipt_channel_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform: str,
+    chat_id: str,
+) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "brains"))
+    config = _config(tmp_path, default_permission_level="write", apply_enabled=True)
+    ledger = RunLedger(config.run_ledger_path)
+    receipt = _receipt()
+    ledger.record_receipt(receipt, chat_id="chat1", platform="feishu")
+    service = ApprovalService(config, ledger, {"feishu_base": OkExecutor()})
+
+    with pytest.raises(SchemaError) as excinfo:
+        await service.execute(
+            ReceiptCommand(verb="approve", reference=receipt.action_id),
+            actor_id="dev",
+            chat_id=chat_id,
+            platform=platform,
+        )
+
+    assert excinfo.value.code == "receipt_scope_mismatch"
+    assert ledger.get_receipt(receipt.action_id).state == "needs_approval"
+
+
+@pytest.mark.asyncio
+async def test_approved_action_id_cannot_be_applied_from_another_channel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSTAG_MEMORY_ROOT", str(tmp_path / "brains"))
+    config = _config(tmp_path, default_permission_level="write", apply_enabled=True)
+    ledger = RunLedger(config.run_ledger_path)
+    receipt = _receipt().with_state("ready_to_apply")
+    ledger.record_receipt(receipt, chat_id="release-chat", platform="feishu")
+    service = ApprovalService(config, ledger, {"feishu_base": OkExecutor()})
+
+    with pytest.raises(SchemaError) as excinfo:
+        await service.execute(
+            ReceiptCommand(verb="apply", reference=receipt.action_id),
+            actor_id="dev",
+            chat_id="other-chat",
+            platform="feishu",
+        )
+
+    assert excinfo.value.code == "receipt_scope_mismatch"
+    assert ledger.get_receipt(receipt.action_id).state == "ready_to_apply"
+
+
 async def test_cli_channel_policy_show_and_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -96,7 +96,8 @@ class Settings:
     github_vercel_release_enabled: bool = False
     github_vercel_release_repository: str = ""
     github_vercel_release_channels: tuple[str, ...] = ()
-    github_vercel_require_checks: bool = True
+    github_vercel_release_base_branch: str = "main"
+    github_vercel_required_checks: tuple[str, ...] = ()
     vercel_access_token: str = ""
     vercel_team_id: str = ""
     vercel_project_id: str = ""
@@ -278,6 +279,7 @@ class Settings:
             required = {
                 "github_vercel_release_repository": self.github_vercel_release_repository,
                 "github_vercel_release_channels": self.github_vercel_release_channels,
+                "github_vercel_required_checks": self.github_vercel_required_checks,
                 "vercel_access_token": self.vercel_access_token,
                 "vercel_team_id": self.vercel_team_id,
                 "vercel_project_id": self.vercel_project_id,
@@ -291,6 +293,23 @@ class Settings:
                 raise ValueError(
                     "github_vercel_release_repository must use GitHub owner/name syntax"
                 )
+            base_branch = self.github_vercel_release_base_branch
+            if (
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", base_branch)
+                or ".." in base_branch
+                or "//" in base_branch
+                or base_branch.endswith((".", "/"))
+            ):
+                raise ValueError("github_vercel_release_base_branch is invalid")
+            if len(set(self.github_vercel_required_checks)) != len(
+                self.github_vercel_required_checks
+            ):
+                raise ValueError("github_vercel_required_checks must be unique")
+            if any(
+                not check or len(check) > 200 or any(ord(char) < 32 for char in check)
+                for check in self.github_vercel_required_checks
+            ):
+                raise ValueError("github_vercel_required_checks contains an invalid name")
             allowed_platforms = {"slack", "feishu", "lark", "dingtalk", "telegram"}
             for channel in self.github_vercel_release_channels:
                 platform, separator, chat_id = channel.partition(":")
@@ -463,9 +482,10 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
             "OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY", ""
         ),
         github_vercel_release_channels=_csv("OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS"),
-        github_vercel_require_checks=_bool(
-            "OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS", True
+        github_vercel_release_base_branch=os.getenv(
+            "OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH", "main"
         ),
+        github_vercel_required_checks=_csv("OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS"),
         vercel_access_token=os.getenv("OSTAG_VERCEL_ACCESS_TOKEN", ""),
         vercel_team_id=os.getenv("OSTAG_VERCEL_TEAM_ID", ""),
         vercel_project_id=os.getenv("OSTAG_VERCEL_PROJECT_ID", ""),

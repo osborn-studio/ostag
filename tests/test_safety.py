@@ -12,12 +12,18 @@ from ostag.core.safety import check_message_length, redact_secrets, validate_sco
 
 
 def test_redact_secrets() -> None:
-    text = "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz xoxb-123-abc AKIA1234567890ABCDEF"
+    text = (
+        "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz xoxb-123-abc "
+        "AKIA1234567890ABCDEF OSTAG_VERCEL_ACCESS_TOKEN=vercel-production-secret"
+    )
 
-    assert "[REDACTED]" in redact_secrets(text)
-    assert "sk-" not in redact_secrets(text)
-    assert "xoxb-" not in redact_secrets(text)
-    assert "AKIA" not in redact_secrets(text)
+    redacted = redact_secrets(text)
+
+    assert "[REDACTED]" in redacted
+    assert "sk-" not in redacted
+    assert "xoxb-" not in redacted
+    assert "AKIA" not in redacted
+    assert "vercel-production-secret" not in redacted
 
 
 def test_message_length_rejects_oversized_input() -> None:

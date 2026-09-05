@@ -4,7 +4,8 @@ The operational report is an identity-scoped, read-only projection over the
 existing work monitor. It summarizes instance freshness, governed workstreams,
 completion evidence counts, connector smoke status, attached-run cost, and human
 escalations. Schema v2 also includes a read-only Agent Presence summary and a
-presence value for each authorized instance. Raw prompts, task titles,
+presence value for each authorized instance returned within the configured
+`OSTAG_OPERATIONAL_REPORT_MAX_ITEMS` bound. Raw prompts, task titles,
 summaries, logs, repository paths, credentials, connector targets, and
 escalation reasons are never projected.
 
@@ -69,9 +70,10 @@ Authorization: Bearer <human credential>
 
 The HTML renderer escapes every dynamic value and contains no client-side script.
 Both surfaces share the same schema-v2 report projection. The top-level
-`presence` object contains the highest-priority authorized state and counts for
-all six states. Each `instances[]` item contains its own `presence` object with a
-stable `reasonCode` and bounded human-readable reason.
+`presence` object contains the highest-priority state among the deterministically
+bounded `instances[]` projection and counts for all six states. Each returned
+instance contains its own `presence` object with a stable `reasonCode` and
+bounded human-readable reason.
 
 ## Deployment and rollback
 

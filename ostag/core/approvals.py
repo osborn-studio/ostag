@@ -85,9 +85,18 @@ class ApprovalService:
         )
         return receipt
 
-    def _resolve_receipt(self, reference: str, chat_id: str | None) -> ActionReceipt:
+    def _resolve_receipt(
+        self,
+        reference: str,
+        chat_id: str | None,
+        platform: str | None,
+    ) -> ActionReceipt:
         if reference.isdigit():
-            pending = self.ledger.list_receipts(chat_id=chat_id, states=PENDING_STATES)
+            pending = self.ledger.list_receipts(
+                chat_id=chat_id,
+                platform=platform,
+                states=PENDING_STATES,
+            )
             index = int(reference)
             if index < 1 or index > len(pending):
                 raise SchemaError(
@@ -97,7 +106,11 @@ class ApprovalService:
                 )
             return pending[index - 1]
         if reference.startswith("action_"):
-            return self.ledger.get_receipt(reference)
+            return self.ledger.get_receipt(
+                reference,
+                chat_id=chat_id,
+                platform=platform,
+            )
         raise SchemaError(
             code="invalid_reference",
             message=f"{reference!r} does not identify an action receipt",
@@ -193,13 +206,13 @@ class ApprovalService:
         if command.verb == "status":
             if command.reference.startswith("run_"):
                 return {"run": self.ledger.run_status(command.reference)}
-            receipt = self._resolve_receipt(command.reference, chat_id)
+            receipt = self._resolve_receipt(command.reference, chat_id, platform or None)
             return {"action": receipt.to_dict()}
 
         if command.verb == "continue":
             run_id = command.reference
             if not run_id.startswith("run_"):
-                receipt = self._resolve_receipt(command.reference, chat_id)
+                receipt = self._resolve_receipt(command.reference, chat_id, platform or None)
                 run_id = receipt.run_id
             snapshot = self.ledger.run_status(run_id)
             followups = FollowUpService(self.config, self.ledger)
@@ -221,7 +234,7 @@ class ApprovalService:
                 "note": f"follow-up scheduled at {due_at}",
             }
 
-        receipt = self._resolve_receipt(command.reference, chat_id)
+        receipt = self._resolve_receipt(command.reference, chat_id, platform or None)
         self._check_stale(receipt, actor_id)
 
         if command.verb == "approve":

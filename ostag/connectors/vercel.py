@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -72,7 +73,7 @@ def _http_error_message(exc: urllib.error.HTTPError) -> str:
     return f"HTTP {exc.code}"
 
 
-def _open_vercel_json(request: urllib.request.Request, timeout: int) -> dict[str, Any]:
+def _open_vercel_json(request: urllib.request.Request, timeout: float) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
@@ -141,15 +142,22 @@ class VercelClient:
         self,
         config: Settings,
         *,
-        opener: Callable[[urllib.request.Request, int], dict[str, Any]] = _open_vercel_json,
+        opener: Callable[[urllib.request.Request, float], dict[str, Any]] = _open_vercel_json,
         sleeper: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.config = config
         self._opener = opener
         self._sleep = sleeper
+        self._monotonic = monotonic
 
     async def _request(
-        self, method: str, path: str, *, payload: dict[str, Any] | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         query = {"teamId": self.config.vercel_team_id}
         if method == "GET":
@@ -167,11 +175,17 @@ class VercelClient:
                 "User-Agent": "OStag-GitHub-Vercel-Release/1",
             },
         )
+        request_timeout = min(
+            30.0,
+            float(self.config.vercel_deploy_timeout_seconds),
+            timeout_seconds if timeout_seconds is not None else 30.0,
+        )
+        if request_timeout <= 0:
+            raise VercelAPIError("Vercel request deadline expired")
         try:
-            return await asyncio.to_thread(
-                self._opener,
-                request,
-                min(30, self.config.vercel_deploy_timeout_seconds),
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._opener, request, request_timeout),
+                timeout=request_timeout,
             )
         except Exception as exc:
             safe = str(exc)
@@ -180,7 +194,11 @@ class VercelClient:
             raise VercelAPIError(f"Vercel request failed: {safe[-500:]}") from exc
 
     async def create_production_deployment(
-        self, source: PullRequestSource, *, action_id: str
+        self,
+        source: PullRequestSource,
+        *,
+        action_id: str,
+        _timeout_seconds: float | None = None,
     ) -> VercelDeployment:
         owner, repo = source.repository.split("/", 1)
         payload = {
@@ -200,18 +218,38 @@ class VercelClient:
                 "githubCommitSha": source.head_sha,
             },
         }
-        return _parse_deployment(await self._request("POST", "/v13/deployments", payload=payload))
+        return _parse_deployment(
+            await self._request(
+                "POST",
+                "/v13/deployments",
+                payload=payload,
+                timeout_seconds=_timeout_seconds,
+            )
+        )
 
-    async def get_deployment(self, deployment_id: str) -> VercelDeployment:
+    async def get_deployment(
+        self,
+        deployment_id: str,
+        *,
+        _timeout_seconds: float | None = None,
+    ) -> VercelDeployment:
         if not _DEPLOYMENT_ID.fullmatch(deployment_id):
             raise VercelDeploymentError("Vercel deployment ID is invalid")
         path = f"/v13/deployments/{quote(deployment_id, safe='')}"
-        return _parse_deployment(await self._request("GET", path))
+        return _parse_deployment(
+            await self._request("GET", path, timeout_seconds=_timeout_seconds)
+        )
 
     async def deploy_production(
         self, source: PullRequestSource, *, action_id: str
     ) -> VercelDeployment:
-        current = await self.create_production_deployment(source, action_id=action_id)
+        timeout = float(self.config.vercel_deploy_timeout_seconds)
+        deadline = self._monotonic() + timeout
+        current = await self.create_production_deployment(
+            source,
+            action_id=action_id,
+            _timeout_seconds=max(0.0, deadline - self._monotonic()),
+        )
         attempts = max(
             1,
             self.config.vercel_deploy_timeout_seconds
@@ -233,8 +271,17 @@ class VercelClient:
                         "Vercel READY deployment did not confirm the frozen GitHub SHA"
                     )
                 return current
-            await self._sleep(self.config.vercel_poll_interval_seconds)
-            current = await self.get_deployment(current.deployment_id)
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                break
+            await self._sleep(min(self.config.vercel_poll_interval_seconds, remaining))
+            remaining = deadline - self._monotonic()
+            if remaining <= 0:
+                break
+            current = await self.get_deployment(
+                current.deployment_id,
+                _timeout_seconds=remaining,
+            )
         raise VercelDeploymentError(
             f"Vercel deployment {current.deployment_id} timed out before Production alias"
         )

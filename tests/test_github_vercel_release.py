@@ -48,6 +48,7 @@ def _enabled_config(tmp_path: Path, **overrides: object):
         "github_vercel_release_enabled": True,
         "github_vercel_release_repository": "owner/repo",
         "github_vercel_release_channels": ("feishu:oc_release",),
+        "github_vercel_required_checks": ("release-check",),
         "vercel_access_token": "vercel-test-token",
         "vercel_team_id": "team_test",
         "vercel_project_id": "prj_test",
@@ -63,7 +64,8 @@ def test_github_vercel_release_defaults_disabled(tmp_path: Path) -> None:
     assert config.github_vercel_release_enabled is False
     assert config.github_vercel_release_repository == ""
     assert config.github_vercel_release_channels == ()
-    assert config.github_vercel_require_checks is True
+    assert config.github_vercel_release_base_branch == "main"
+    assert config.github_vercel_required_checks == ()
     assert config.vercel_access_token == ""
     assert config.vercel_deploy_timeout_seconds == 600
     assert config.vercel_poll_interval_seconds == 2
@@ -74,6 +76,7 @@ def test_github_vercel_release_defaults_disabled(tmp_path: Path) -> None:
     [
         ("github_vercel_release_repository", "github_vercel_release_repository"),
         ("github_vercel_release_channels", "github_vercel_release_channels"),
+        ("github_vercel_required_checks", "github_vercel_required_checks"),
         ("vercel_access_token", "vercel_access_token"),
         ("vercel_team_id", "vercel_team_id"),
         ("vercel_project_id", "vercel_project_id"),
@@ -94,6 +97,8 @@ def test_enabled_release_requires_complete_server_configuration(
         ({"github_vercel_release_repository": "https://github.com/owner/repo"}, "owner/name"),
         ({"github_vercel_release_channels": ("oc_release",)}, "platform:chat_id"),
         ({"github_vercel_release_channels": ("unknown:chat",)}, "platform"),
+        ({"github_vercel_release_base_branch": "release..main"}, "base_branch"),
+        ({"github_vercel_required_checks": ("release-check", "release-check")}, "unique"),
         ({"vercel_deploy_timeout_seconds": 29}, "30..3600"),
         ({"vercel_deploy_timeout_seconds": 3601}, "30..3600"),
         ({"vercel_poll_interval_seconds": 0}, "1..60"),
@@ -124,7 +129,8 @@ def test_release_settings_load_from_documented_environment(
         "OSTAG_GITHUB_VERCEL_RELEASE_ENABLED": "true",
         "OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY": "owner/repo",
         "OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS": "feishu:oc_one,slack:C123",
-        "OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS": "false",
+        "OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH": "production",
+        "OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS": "release-check,security-scan",
         "OSTAG_VERCEL_ACCESS_TOKEN": "test-token",
         "OSTAG_VERCEL_TEAM_ID": "team_test",
         "OSTAG_VERCEL_PROJECT_ID": "prj_test",
@@ -143,7 +149,8 @@ def test_release_settings_load_from_documented_environment(
 
     assert config.github_vercel_release_enabled is True
     assert config.github_vercel_release_channels == ("feishu:oc_one", "slack:C123")
-    assert config.github_vercel_require_checks is False
+    assert config.github_vercel_release_base_branch == "production"
+    assert config.github_vercel_required_checks == ("release-check", "security-scan")
     assert config.vercel_deploy_timeout_seconds == 900
     assert config.vercel_poll_interval_seconds == 3
 
@@ -158,7 +165,12 @@ class FakeGh:
         return self.outputs.pop(0)
 
 
-def _github_pr_payload(*, sha: str = "a" * 40, head_repo: str = "owner/repo"):
+def _github_pr_payload(
+    *,
+    sha: str = "a" * 40,
+    head_repo: str = "owner/repo",
+    base_ref: str = "main",
+):
     return {
         "number": 17,
         "html_url": "https://github.com/owner/repo/pull/17",
@@ -170,7 +182,7 @@ def _github_pr_payload(*, sha: str = "a" * 40, head_repo: str = "owner/repo"):
             "ref": "feature/release",
             "repo": {"full_name": head_repo},
         },
-        "base": {"repo": {"full_name": "owner/repo"}},
+        "base": {"ref": base_ref, "repo": {"full_name": "owner/repo"}},
     }
 
 
@@ -186,6 +198,7 @@ async def test_github_resolves_strict_same_repository_pr_source() -> None:
         url="https://github.com/owner/repo/pull/17",
         head_sha="a" * 40,
         head_ref="feature/release",
+        base_ref="main",
     )
     assert gh.calls == [("api", "repos/owner/repo/pulls/17")]
 
@@ -398,6 +411,41 @@ async def test_vercel_does_not_treat_ready_without_production_alias_as_live(
         await client.deploy_production(source, action_id="action_release")
 
 
+async def test_vercel_total_deadline_includes_slow_http_requests(tmp_path: Path) -> None:
+    class Clock:
+        now = 0.0
+
+        def __call__(self) -> float:
+            return self.now
+
+        async def sleep(self, seconds: float) -> None:
+            self.now += seconds
+
+    clock = Clock()
+    requests: list[float] = []
+
+    def slow_open(request, timeout: float):
+        del request
+        requests.append(timeout)
+        clock.now += timeout
+        return _deployment("BUILDING")
+
+    config = _enabled_config(
+        tmp_path, vercel_deploy_timeout_seconds=30, vercel_poll_interval_seconds=1
+    )
+    client = VercelClient(
+        config,
+        opener=slow_open,
+        sleeper=clock.sleep,
+        monotonic=clock,
+    )
+
+    with pytest.raises(VercelDeploymentError, match="timed out"):
+        await client.deploy_production(_source(), action_id="action_release")
+
+    assert requests == [30]
+
+
 async def test_vercel_ready_deployment_must_confirm_frozen_sha(tmp_path: Path) -> None:
     payload = _deployment("READY", alias_assigned=True)
     payload["gitSource"] = {"sha": "b" * 40}
@@ -448,20 +496,26 @@ def _event(
     )
 
 
-def _source(*, sha: str = "a" * 40, ref: str = "feature/release") -> PullRequestSource:
+def _source(
+    *,
+    sha: str = "a" * 40,
+    ref: str = "feature/release",
+    base_ref: str = "main",
+) -> PullRequestSource:
     return PullRequestSource(
         "owner/repo",
         17,
         "https://github.com/owner/repo/pull/17",
         sha,
         ref,
+        base_ref,
     )
 
 
 def _evidence(*states: str) -> ProviderChangeEvidence:
     checks = tuple(
         ProviderCheck(
-            f"check-{index}",
+            "release-check" if index == 1 else f"check-{index}",
             state,
             "a" * 40,
             f"https://github.com/owner/repo/actions/runs/{index}",
@@ -589,6 +643,8 @@ async def test_release_workflow_prepares_frozen_high_risk_receipt(tmp_path: Path
         "pull_url": "https://github.com/owner/repo/pull/17",
         "head_sha": "a" * 40,
         "head_ref": "feature/release",
+        "base_ref": "main",
+        "required_checks": ["release-check"],
         "vercel_team_id": "team_test",
         "vercel_project_id": "prj_test",
         "vercel_project_name": "release-app",
@@ -617,6 +673,19 @@ async def test_release_workflow_refuses_out_of_scope_notifications(
     assert github.resolve_calls == []
 
 
+async def test_release_workflow_rejects_pr_targeting_another_base_branch(
+    tmp_path: Path,
+) -> None:
+    github = FakeReleaseGitHub(source=_source(base_ref="develop"))
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await workflow.prepare(_event(), "run_release")
+
+    assert excinfo.value.code == "release_base_branch_denied"
+    assert github.approve_calls == []
+
+
 @pytest.mark.parametrize("states", [(), ("pending",), ("failed",), ("passed", "pending")])
 async def test_release_workflow_requires_at_least_one_all_passing_check(
     tmp_path: Path, states: tuple[str, ...]
@@ -642,6 +711,28 @@ async def test_release_workflow_rejects_incomplete_all_passing_checks(tmp_path: 
     assert github.approve_calls == []
 
 
+async def test_release_workflow_rejects_untrusted_passing_check_when_required_is_missing(
+    tmp_path: Path,
+) -> None:
+    evidence = _evidence("passed")
+    untrusted = ProviderChangeEvidence.from_dict(
+        evidence.to_dict()
+        | {
+            "checks": [
+                evidence.checks[0].to_dict() | {"name": "unrelated-preview"}
+            ]
+        }
+    )
+    github = FakeReleaseGitHub(evidence=untrusted)
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await workflow.prepare(_event(), "run_release")
+
+    assert excinfo.value.code == "provider_required_checks_missing"
+    assert github.approve_calls == []
+
+
 async def test_release_workflow_ignores_non_pr_text_and_disabled_feature(tmp_path: Path) -> None:
     github = FakeReleaseGitHub()
     disabled = GitHubVercelReleaseWorkflow(_config(tmp_path), github=github)
@@ -652,16 +743,17 @@ async def test_release_workflow_ignores_non_pr_text_and_disabled_feature(tmp_pat
     assert github.resolve_calls == []
 
 
-async def test_release_workflow_can_allow_repository_without_configured_checks(
-    tmp_path: Path,
+async def test_release_workflow_rejects_empty_checks_even_when_legacy_flag_is_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS", "false")
     github = FakeReleaseGitHub(evidence=_evidence())
-    config = _enabled_config(tmp_path, github_vercel_require_checks=False)
-    workflow = GitHubVercelReleaseWorkflow(config, github=github)
+    workflow = GitHubVercelReleaseWorkflow(_enabled_config(tmp_path), github=github)
 
-    receipt = await workflow.prepare(_event(), "run_release")
+    with pytest.raises(SchemaError) as excinfo:
+        await workflow.prepare(_event(), "run_release")
 
-    assert isinstance(receipt, ActionReceipt)
+    assert excinfo.value.code == "provider_checks_missing"
     assert github.approve_calls == []
 
 
@@ -703,6 +795,55 @@ async def test_composite_executor_stops_before_writes_when_sha_drifted(tmp_path:
 
     assert excinfo.value.code == "provider_sha_mismatch"
     assert drifted.approve_calls == []
+    assert vercel.calls == []
+
+
+async def test_composite_executor_stops_before_writes_when_pr_is_retargeted(
+    tmp_path: Path,
+) -> None:
+    config = _enabled_config(tmp_path)
+    receipt = await GitHubVercelReleaseWorkflow(
+        config, github=FakeReleaseGitHub()
+    ).prepare(_event(), "run_release")
+    assert isinstance(receipt, ActionReceipt)
+    retargeted = FakeReleaseGitHub(source=_source(base_ref="develop"))
+    vercel = FakeReleaseVercel()
+    executor = GitHubVercelReleaseExecutor(config, github=retargeted, vercel=vercel)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await executor.apply(receipt.with_state("applying"))
+
+    assert excinfo.value.code == "provider_ref_mismatch"
+    assert retargeted.approve_calls == []
+    assert vercel.calls == []
+
+
+async def test_composite_executor_rechecks_trusted_checks_before_writes(
+    tmp_path: Path,
+) -> None:
+    config = _enabled_config(tmp_path)
+    receipt = await GitHubVercelReleaseWorkflow(
+        config, github=FakeReleaseGitHub()
+    ).prepare(_event(), "run_release")
+    assert isinstance(receipt, ActionReceipt)
+    untrusted = _evidence("passed")
+    untrusted = ProviderChangeEvidence.from_dict(
+        untrusted.to_dict()
+        | {
+            "checks": [
+                untrusted.checks[0].to_dict() | {"name": "unrelated-preview"}
+            ]
+        }
+    )
+    github = FakeReleaseGitHub(evidence=untrusted)
+    vercel = FakeReleaseVercel()
+    executor = GitHubVercelReleaseExecutor(config, github=github, vercel=vercel)
+
+    with pytest.raises(SchemaError) as excinfo:
+        await executor.apply(receipt.with_state("applying"))
+
+    assert excinfo.value.code == "provider_required_checks_missing"
+    assert github.approve_calls == []
     assert vercel.calls == []
 
 
