@@ -413,6 +413,58 @@ Rotate the GitHub deployment identity independently of developer SSH keys.
 Install the replacement public key first, update the environment secret, prove
 one preflight/deploy connection, and only then remove the previous key.
 
+### Network access from GitHub-hosted runners
+
+The Lighthouse firewall restricts administrative TCP/22 to the deployment
+workstation's fixed IP. GitHub-hosted runners have changing egress addresses, so
+using TCP/22 from GitHub times out before authentication. Production uses a
+separate TCP/2222 listener for automation, configured by
+`deploy/work-monitor/sshd_config_ostag_deploy` and
+`deploy/work-monitor/ostag-deploy-sshd.service`.
+
+The separate daemon reads only `/etc/ssh/ostag-deploy-authorized-keys`, containing
+the OStag deployment public key with the existing
+`restrict,command="/usr/local/sbin/ostag-github-actions-ssh"` restrictions. Both
+the daemon and the key enforce the deployment wrapper. Password authentication,
+PTYs, user startup scripts, and all forwarding are disabled. General-purpose
+administrator keys are not accepted. This follows OpenSSH's
+[`forced-commands-only` and `DisableForwarding` settings](https://man.openbsd.org/sshd_config).
+The trusted wrapper still runs as root because loading images and switching the
+Compose service require host privileges; compromise of the deployment identity
+must therefore be treated as a production incident.
+
+Install the two configuration files as root, mode `0644`, at
+`/etc/ssh/sshd_config_ostag_deploy` and
+`/etc/systemd/system/ostag-deploy-sshd.service`. Install the restricted key file
+as root, mode `0600`. Validate before starting:
+
+```bash
+sshd -t -f /etc/ssh/sshd_config_ostag_deploy
+systemctl daemon-reload
+systemctl enable --now ostag-deploy-sshd.service
+ufw limit proto tcp from 0.0.0.0/0 to any port 2222 comment 'OStag restricted deploy'
+```
+
+Add a Lighthouse TCP/2222 ACCEPT rule for IPv4 runners while retaining the
+existing administrative TCP/22 rule unchanged. The dedicated deployment port is
+publicly reachable; authentication is limited to the dedicated key and its
+forced commands. Do not allow password login or general-purpose keys on it.
+Set the GitHub production variable `PRODUCTION_SSH_PORT=2222`. Pin the existing,
+independently verified server host key in `PRODUCTION_SSH_KNOWN_HOSTS` under
+`[<production-host>]:2222`; do not trust a fresh network scan.
+
+Before enabling automated releases, prove that `version` and `preflight` work
+with the deployment key, an arbitrary shell command is refused, and a developer
+key cannot authenticate on TCP/2222. Rerun the production GitHub workflow for
+the current, CI-approved `main` commit and verify its release receipt, image
+revision, database backup, and public health endpoint.
+
+To withdraw the automation ingress, stop and disable
+`ostag-deploy-sshd.service`, remove only the TCP/2222 cloud and UFW rules, and
+set `PRODUCTION_SSH_PORT=22`. Workstation deployment through the existing
+restricted key remains available; GitHub-hosted deployment will again require
+a network path. Key rotation must update the separate authorized-keys file too.
+
 ## Production work monitor on Tencent Cloud
 
 Prepare a CVM or Lighthouse Linux host with Docker, a protected registry login,

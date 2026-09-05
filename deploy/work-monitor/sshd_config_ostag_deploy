@@ -1,0 +1,41 @@
+# A separate listener for GitHub-hosted deploys. Never include the host's
+# administrative sshd configuration or general-purpose authorized_keys here.
+Port 2222
+AddressFamily inet
+ListenAddress 0.0.0.0
+PidFile /run/ostag-deploy-sshd.pid
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+AllowUsers root
+PermitRootLogin forced-commands-only
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+AuthorizedKeysFile /etc/ssh/ostag-deploy-authorized-keys
+AuthorizedKeysCommand none
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+HostbasedAuthentication no
+UsePAM yes
+StrictModes yes
+
+ForceCommand /usr/local/sbin/ostag-github-actions-ssh
+DisableForwarding yes
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+AllowAgentForwarding no
+X11Forwarding no
+PermitTunnel no
+PermitTTY no
+PermitUserRC no
+PermitUserEnvironment no
+
+LoginGraceTime 20
+MaxAuthTries 2
+MaxStartups 3:30:10
+MaxSessions 1
+ClientAliveInterval 30
+ClientAliveCountMax 3
+UseDNS no
+PrintMotd no
+LogLevel VERBOSE
