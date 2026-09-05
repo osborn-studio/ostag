@@ -89,7 +89,8 @@ Prerequisites:
 OSTAG_GITHUB_VERCEL_RELEASE_ENABLED=true
 OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY=owner/repo
 OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS=feishu:oc_release_group
-OSTAG_GITHUB_VERCEL_REQUIRE_CHECKS=true
+OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH=main
+OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS=release-check
 OSTAG_VERCEL_ACCESS_TOKEN=<server-only-team-scoped-token>
 OSTAG_VERCEL_TEAM_ID=team_xxx
 OSTAG_VERCEL_PROJECT_ID=prj_xxx
@@ -99,6 +100,14 @@ OSTAG_VERCEL_POLL_INTERVAL_SECONDS=2
 OSTAG_ACTOR_PERMISSIONS=feishu:ou_release_owner:write
 OSTAG_APPLY_ENABLED=true
 ```
+
+The release workflow always requires every configured trusted check to be
+present and passing in the complete check set for the current PR head SHA.
+This Production safety gate has no disable switch.
+
+Operate this JSONL-ledger workflow with one OStag writer process. If the process
+exits while a provider call is in flight, treat an `applying` receipt as
+indeterminate: inspect GitHub and Vercel and do not automatically replay it.
 
 Run the non-mutating startup/config check before enabling a live group:
 

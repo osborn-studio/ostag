@@ -15,6 +15,10 @@
   closed and cannot authorize the receipt-governed GitHub/Vercel Production
   flow. Historical schema-v1 evidence remains readable but is treated as
   incomplete when it has no completeness proof.
+- Hardened governed Production releases by binding receipts to their source
+  channel, freezing the configured base branch and trusted check names,
+  scrubbing the Vercel token from non-Vercel subprocesses, and enforcing a
+  wall-clock deployment deadline.
 - Recorded the 2026-09-04 upstream Agent Presence reset classification and the
   OStag-native follow-up candidates in `docs/upgrade/2026-09-04-opentag-sync.md`.
 - Adapted OpenTag's read-only Agent Presence into OStag's multi-platform monitor.
