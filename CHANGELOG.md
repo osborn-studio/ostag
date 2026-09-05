@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+- Added a CI-gated GitHub Actions production deployment for the Tencent
+  Lighthouse work monitor. Each release is commit-bound, checksum-verified,
+  backed up online before Compose switches images, health-checked through the
+  public endpoint, and able to restore the previous image without automatically
+  overwriting production data.
+- Synced the portable security semantics from OpenTag 0.11 while preserving
+  OStag's multi-platform and multi-runner product contract. GitHub completion
+  evidence now carries an explicit, digest-bound `checksComplete` fact sourced
+  from bounded current-head check-run and commit-status reads.
+- Empty, truncated, malformed, or cross-SHA GitHub check observations fail
+  closed and cannot authorize the receipt-governed GitHub/Vercel Production
+  flow. Historical schema-v1 evidence remains readable but is treated as
+  incomplete when it has no completeness proof.
+- Hardened governed Production releases by binding receipts to their source
+  channel, freezing the configured base branch and trusted check names,
+  scrubbing the Vercel token from non-Vercel subprocesses, and enforcing a
+  wall-clock deployment deadline.
+- Recorded the 2026-09-04 upstream Agent Presence reset classification and the
+  OStag-native follow-up candidates in `docs/upgrade/2026-09-04-opentag-sync.md`.
+- Adapted OpenTag's read-only Agent Presence into OStag's multi-platform monitor.
+  Schema-v2 operational reports now derive `setup_required`, `needs_attention`,
+  `offline`, `working`, `queued`, or `available` from authorized heartbeat,
+  task/session, decision, and escalation facts without storing presence or
+  granting it execution/completion authority.
+- Documented why accepted-progress attribution remains fail-closed until OStag
+  has durable artifact/Run lineage, and why the reassessment-obligation worker
+  retired by the current upstream profile is not being introduced.
+
 ## 0.5.0 — 2026-08-02
 
 OpenTag v0.8/v0.9 benchmark release, delivered as independently reviewed P0,

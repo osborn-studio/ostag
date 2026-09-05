@@ -133,12 +133,13 @@ class ProviderChangeEvidence:
     merge_sha: str
     observed_at: str
     checks: tuple[ProviderCheck, ...] = ()
-    schema_version: int = 1
+    checks_complete: bool = False
+    schema_version: int = 2
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
+        if self.schema_version not in {1, 2}:
             raise SchemaError(
-                "invalid_provider_evidence", "Unsupported evidence schema", "Use schema version 1."
+                "invalid_provider_evidence", "Unsupported evidence schema", "Use schema version 1 or 2."
             )
         if self.provider not in {"github", "gitlab"}:
             raise SchemaError(
@@ -161,6 +162,12 @@ class ProviderChangeEvidence:
             raise SchemaError(
                 "invalid_provider_evidence", "draft must be boolean", "Refresh provider evidence."
             )
+        if not isinstance(self.checks_complete, bool):
+            raise SchemaError(
+                "invalid_provider_evidence",
+                "checksComplete must be boolean",
+                "Refresh provider evidence.",
+            )
         object.__setattr__(self, "url", require_https_url(self.url, "url"))
         object.__setattr__(self, "head_sha", require_sha(self.head_sha, "headSha"))
         if self.state == "merged":
@@ -180,7 +187,7 @@ class ProviderChangeEvidence:
         states = {check.state for check in self.checks}
         if "failed" in states:
             return "failed"
-        if self.checks and states == {"passed"}:
+        if self.checks_complete and self.checks and states == {"passed"}:
             return "passed"
         return "pending"
 
@@ -204,6 +211,7 @@ class ProviderChangeEvidence:
             "headSha": self.head_sha,
             "observedAt": self.observed_at,
             "checks": [check.to_dict() for check in self.checks],
+            "checksComplete": self.checks_complete,
             "checksState": self.checks_state,
             "completionState": self.completion_state,
         }
@@ -241,6 +249,7 @@ class ProviderChangeEvidence:
                     "mergeSha",
                     "observedAt",
                     "checks",
+                    "checksComplete",
                     "checksState",
                     "completionState",
                 }
@@ -266,14 +275,28 @@ class ProviderChangeEvidence:
             merge_sha=data.get("mergeSha", ""),
             observed_at=data.get("observedAt", ""),
             checks=tuple(ProviderCheck.from_dict(item) for item in checks),
+            checks_complete=(
+                data.get("checksComplete", False)
+                if data.get("schemaVersion") == 1 or "checksComplete" in data
+                else None
+            ),
         )
-        if data.get("checksState", result.checks_state) != result.checks_state:
+        legacy_without_completeness = (
+            data.get("schemaVersion") == 1 and "checksComplete" not in data
+        )
+        if (
+            not legacy_without_completeness
+            and data.get("checksState", result.checks_state) != result.checks_state
+        ):
             raise SchemaError(
                 "invalid_provider_evidence",
                 "checksState does not match normalized checks",
                 "Regenerate provider evidence.",
             )
-        if data.get("completionState", result.completion_state) != result.completion_state:
+        if (
+            not legacy_without_completeness
+            and data.get("completionState", result.completion_state) != result.completion_state
+        ):
             raise SchemaError(
                 "invalid_provider_evidence",
                 "completionState does not match provider state and checks",
@@ -296,7 +319,7 @@ class ProviderChangeEvidence:
         )
         provenance = EvidenceProvenance(
             adapter=f"ostag-{self.provider}",
-            adapter_version="1",
+            adapter_version=str(self.schema_version),
             payload_digest=self.payload_digest,
         )
         prefix = self.payload_digest[:12]
@@ -326,7 +349,11 @@ class ProviderChangeEvidence:
             claim=EvidenceClaim(
                 predicate="checks",
                 outcome=self.checks_state,
-                observations={"count": str(len(self.checks)), "headSha": self.head_sha},
+                observations={
+                    "count": str(len(self.checks)),
+                    "headSha": self.head_sha,
+                    "complete": str(self.checks_complete).lower(),
+                },
             ),
             provenance=provenance,
             observed_at=self.observed_at,

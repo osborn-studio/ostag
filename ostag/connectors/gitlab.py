@@ -159,6 +159,7 @@ class GitLabMergeRequestConnector:
             merge_sha=payload.get("merge_commit_sha") or "",
             observed_at=normalize_utc_timestamp(payload.get("updated_at", "")),
             checks=checks,
+            checks_complete=len(pipelines) < 20,
         )
 
     @staticmethod

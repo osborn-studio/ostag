@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+deploy_script="/usr/local/sbin/ostag-deploy-work-monitor"
+original_command="${SSH_ORIGINAL_COMMAND:-}"
+
+refuse() {
+  echo "OStag production deploy key refused this command" >&2
+  exit 126
+}
+
+upload_archive() {
+  local kind="$1"
+  local release_sha="$2"
+  local expected_sha="$3"
+  local maximum_bytes
+  case "$kind" in
+    source) maximum_bytes=$((256 * 1024 * 1024)) ;;
+    image) maximum_bytes=$((4 * 1024 * 1024 * 1024)) ;;
+    *) refuse ;;
+  esac
+  local destination="/var/tmp/ostag-$release_sha-$kind.tar.gz"
+  local temporary
+  temporary="$(mktemp "/var/tmp/.ostag-$release_sha-$kind.XXXXXX")"
+  trap 'rm -f "$temporary"' EXIT
+  umask 077
+  head -c "$((maximum_bytes + 1))" > "$temporary"
+  local actual_sha uploaded_bytes
+  uploaded_bytes="$(stat -c '%s' "$temporary")"
+  [[ "$uploaded_bytes" -le "$maximum_bytes" ]] || {
+    echo "uploaded $kind archive exceeds the size limit" >&2
+    exit 1
+  }
+  actual_sha="$(sha256sum "$temporary" | awk '{print $1}')"
+  [[ "$actual_sha" == "$expected_sha" ]] || {
+    echo "uploaded $kind archive checksum mismatch" >&2
+    exit 1
+  }
+  if [[ -e "$destination" || -L "$destination" ]]; then
+    [[ -f "$destination" && ! -L "$destination" ]] || refuse
+  fi
+  chmod 0600 "$temporary"
+  mv -f "$temporary" "$destination"
+  trap - EXIT
+  echo "uploaded_$kind=$actual_sha"
+}
+
+[[ -x "$deploy_script" ]] || {
+  echo "trusted OStag production deploy script is unavailable" >&2
+  exit 1
+}
+
+case "$original_command" in
+  version)
+    printf 'deploy_script_sha256=%s\n' "$(sha256sum "$deploy_script" | awk '{print $1}')"
+    printf 'ssh_wrapper_sha256=%s\n' "$(sha256sum "$0" | awk '{print $1}')"
+    ;;
+  preflight)
+    exec "$deploy_script" preflight
+    ;;
+  upload-source\ [0-9a-f]*\ [0-9a-f]*)
+    if [[ "$original_command" =~ ^upload-source\ ([0-9a-f]{40})\ ([0-9a-f]{64})$ ]]; then
+      upload_archive source "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    else
+      refuse
+    fi
+    ;;
+  upload-image\ [0-9a-f]*\ [0-9a-f]*)
+    if [[ "$original_command" =~ ^upload-image\ ([0-9a-f]{40})\ ([0-9a-f]{64})$ ]]; then
+      upload_archive image "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    else
+      refuse
+    fi
+    ;;
+  deploy\ [0-9a-f]*\ [0-9a-f]*\ [0-9a-f]*)
+    if [[ "$original_command" =~ ^deploy\ ([0-9a-f]{40})\ ([0-9a-f]{64})\ ([0-9a-f]{64})$ ]]; then
+      release_sha="${BASH_REMATCH[1]}"
+      exec "$deploy_script" deploy \
+        "$release_sha" \
+        "/var/tmp/ostag-$release_sha-source.tar.gz" \
+        "${BASH_REMATCH[2]}" \
+        "/var/tmp/ostag-$release_sha-image.tar.gz" \
+        "${BASH_REMATCH[3]}"
+    else
+      refuse
+    fi
+    ;;
+  *)
+    refuse
+    ;;
+esac

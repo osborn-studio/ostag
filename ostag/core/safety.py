@@ -10,7 +10,10 @@ SECRET_PATTERNS = [
     re.compile(r"xoxb-[A-Za-z0-9\-]+"),
     re.compile(r"xapp-[A-Za-z0-9\-]+"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"(?i)(ANTHROPIC_API_KEY|OPENAI_API_KEY|FEISHU_APP_SECRET|LARK_APP_SECRET)\s*=\s*[^\s]+"),
+    re.compile(
+        r"(?i)(ANTHROPIC_API_KEY|OPENAI_API_KEY|FEISHU_APP_SECRET|LARK_APP_SECRET|"
+        r"OSTAG_VERCEL_ACCESS_TOKEN)\s*=\s*[^\s]+"
+    ),
 ]
 
 
@@ -60,6 +63,7 @@ PLATFORM_SECRET_ENV_VARS = (
     "SLACK_APP_TOKEN",
     "DINGTALK_CLIENT_SECRET",
     "DINGTALK_ROBOT_SECRET",
+    "OSTAG_VERCEL_ACCESS_TOKEN",
 )
 
 

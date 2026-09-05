@@ -41,6 +41,7 @@ def run_doctor(
         _check_backend(config),
         _check_mfs(config),
         _check_live_adapter(config),
+        _check_github_vercel_release(config),
     ]
     if event_path is not None:
         checks.append(_check_event_file(event_path))
@@ -193,6 +194,40 @@ def _check_live_adapter(config: Settings) -> DoctorCheck:
     if importlib.util.find_spec("lark_oapi") is None:
         return DoctorCheck("adapter", False, "error", "lark-oapi missing; run `uv sync --extra feishu`")
     return DoctorCheck("adapter", True, "error", f"{config.platform} live adapter dependencies found")
+
+
+def _check_github_vercel_release(config: Settings) -> DoctorCheck:
+    if not config.github_vercel_release_enabled:
+        return DoctorCheck(
+            "github_vercel_release",
+            True,
+            "error",
+            "GitHub/Vercel Production release workflow is disabled",
+        )
+    if shutil.which(config.gh_bin) is None:
+        return DoctorCheck(
+            "github_vercel_release",
+            False,
+            "error",
+            f"GitHub CLI not found on PATH: {config.gh_bin}",
+        )
+    target = (
+        f"{config.github_vercel_release_repository} -> {config.vercel_project_name} "
+        f"({len(config.github_vercel_release_channels)} allowlisted group(s))"
+    )
+    if not config.apply_enabled:
+        return DoctorCheck(
+            "github_vercel_release",
+            False,
+            "warn",
+            f"configured for {target}; OSTAG_APPLY_ENABLED remains false",
+        )
+    return DoctorCheck(
+        "github_vercel_release",
+        True,
+        "error",
+        f"configured for {target}; live provider writes are not probed by doctor",
+    )
 
 
 def _check_event_file(event_path: Path) -> DoctorCheck:

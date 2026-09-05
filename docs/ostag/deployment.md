@@ -68,6 +68,90 @@ Example group commands:
 If multiple records match, OS Tag refuses to update and asks for a more specific
 requirement keyword or code.
 
+## Governed GitHub PR -> Vercel Production release
+
+This optional workflow lets collaborators without direct Vercel project access
+request a release from an authorized group while OStag retains the service
+credentials and audit trail. It does not grant collaborators a Vercel token and
+does not merge the PR.
+
+Prerequisites:
+
+1. Authenticate `gh` as a dedicated reviewer identity that is not the PR author
+   and has GitHub `Pull requests: write` on the one release repository.
+2. Connect the Vercel Project to that GitHub repository.
+3. Create a Vercel Access Token scoped to the owning Team with access to the
+   target Project. Keep it only in the OStag host's `.env`/secret manager.
+4. Grant intended release operators platform-scoped OStag `write` permission.
+5. Configure exactly one repository, one Vercel Project, and the allowed groups:
+
+```dotenv
+OSTAG_GITHUB_VERCEL_RELEASE_ENABLED=true
+OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY=owner/repo
+OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS=feishu:oc_release_group
+OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH=main
+OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS=release-check
+OSTAG_VERCEL_ACCESS_TOKEN=<server-only-team-scoped-token>
+OSTAG_VERCEL_TEAM_ID=team_xxx
+OSTAG_VERCEL_PROJECT_ID=prj_xxx
+OSTAG_VERCEL_PROJECT_NAME=release-app
+OSTAG_VERCEL_DEPLOY_TIMEOUT_SECONDS=600
+OSTAG_VERCEL_POLL_INTERVAL_SECONDS=2
+OSTAG_ACTOR_PERMISSIONS=feishu:ou_release_owner:write
+OSTAG_APPLY_ENABLED=true
+```
+
+The release workflow always requires every configured trusted check to be
+present and passing in the complete check set for the current PR head SHA.
+This Production safety gate has no disable switch.
+
+Operate this JSONL-ledger workflow with one OStag writer process. If the process
+exits while a provider call is in flight, treat an `applying` receipt as
+indeterminate: inspect GitHub and Vercel and do not automatically replay it.
+
+Run the non-mutating startup/config check before enabling a live group:
+
+```bash
+python -m ostag.main --platform feishu --live --doctor
+gh auth status
+ostag connector list --platform github --json
+```
+
+The doctor confirms local executable/config readiness and never prints the
+Vercel token; it deliberately does not create a review or deployment. Then use
+a designated test PR in the allowlisted repository:
+
+```text
+@OS Tag PR 已提交，请处理 https://github.com/owner/repo/pull/123
+@OS Tag approve 1
+@OS Tag apply 1
+```
+
+Acceptance evidence must show all of the following:
+
+- proposal output contains the exact PR number, head SHA, Vercel Project and
+  Production target, while provider write count is still zero;
+- GitHub shows an `APPROVED` review for that exact commit SHA;
+- Vercel shows the same SHA, `READY`, `target=production`, and an assigned
+  Production alias;
+- `ostag ledger export --run <run_id> --json` contains the applied receipt and
+  bounded provider URLs without credentials.
+
+If GitHub approves but Vercel fails, treat the run as partial failure: inspect
+GitHub/Vercel, resolve the provider issue, and send a new PR notification to
+create a fresh receipt. Failed receipts cannot be replayed. Do not report the
+release as online unless the alias evidence is present.
+
+Rollback admission immediately by setting:
+
+```dotenv
+OSTAG_GITHUB_VERCEL_RELEASE_ENABLED=false
+```
+
+and restarting OStag. This prevents new release receipts without altering
+provider state or historical audit evidence. Provider rollback is intentionally
+out of scope and must use the project's existing Vercel rollback procedure.
+
 ## Daily FDE Requirement Dashboard
 
 OStag can read the original requirement Base and send one interactive dashboard
@@ -268,6 +352,66 @@ an incompatible migration requires it.
 - Keep `OSTAG_OPERATIONAL_REPORT_ENABLED=false` until human identity bindings,
   connector smoke evidence, and the protected workstream path have been verified.
   See [operational_report.md](operational_report.md).
+
+## GitHub Actions production deployment
+
+The production workflow in `.github/workflows/deploy-production.yml` runs only
+after `OS Tag CI` succeeds on `main`, or by an explicit manual dispatch of the
+current `main` commit. It refuses malformed SHAs, stale commits, and manual
+deployments without a successful `release-check` for the exact commit.
+
+Configure the GitHub `production` environment with these values:
+
+| Type | Name | Purpose |
+|---|---|---|
+| Variable | `PRODUCTION_SSH_HOST` | Tencent Lighthouse origin address |
+| Variable | `PRODUCTION_SSH_USER` | Production SSH account selected for the forced-command key |
+| Variable | `PRODUCTION_SSH_PORT` | SSH port |
+| Variable | `PRODUCTION_URL` | `https://ostag-monitor.ihiking.me` |
+| Variable | `PRODUCTION_DEPLOY_SCRIPT_SHA256` | Expected hash of the trusted server deploy script |
+| Variable | `PRODUCTION_SSH_WRAPPER_SHA256` | Expected hash of the forced-command SSH wrapper |
+| Secret | `PRODUCTION_SSH_PRIVATE_KEY` | OStag-only deployment identity |
+| Secret | `PRODUCTION_SSH_KNOWN_HOSTS` | Pinned origin host key; never use runtime `ssh-keyscan` as trust |
+
+Restrict the environment to the `main` branch. The repository's protected
+`main` branch requires one approval, dismisses stale approvals, requires the
+last push to be approved, and enforces those rules for administrators. The
+environment does not replace that review gate.
+
+The workflow builds a `linux/amd64` image tagged from the full commit SHA,
+creates a source archive with `git archive`, checksums both artifacts, and
+streams them over strict-host-key SSH. The dedicated key is installed with
+OpenSSH `restrict` and a forced command. The wrapper accepts only version
+checks, preflight, two checksum-bound archive uploads, and one bounded deploy
+command; it cannot open an interactive shell or forward ports. The trusted
+server-side `scripts/deploy_work_monitor_release.sh` then:
+
+1. verifies the current container, local health endpoint, protected mode-0600
+   environment file, and SQLite integrity;
+2. verifies both artifact checksums and rejects unsafe archive paths;
+3. installs the source under `/opt/ostag-releases/<commit-sha>` and loads the
+   immutable image;
+4. creates and integrity-checks an online SQLite backup inside the existing
+   named volume;
+5. recreates the `work-monitor` Compose project with the base Compose file and
+   waits for container health;
+6. records the previous image, Compose file, and backup path in
+   `deploy-receipt.json` before GitHub checks the public `/healthz` endpoint.
+
+If the new container does not become healthy, the deploy script restores the
+previous image and Compose file. It deliberately does not restore the database
+automatically: retain the failed database and use the verified backup only
+after an operator confirms that a migration is incompatible.
+
+Run a non-mutating server check at any time:
+
+```bash
+/usr/local/sbin/ostag-deploy-work-monitor preflight
+```
+
+Rotate the GitHub deployment identity independently of developer SSH keys.
+Install the replacement public key first, update the environment secret, prove
+one preflight/deploy connection, and only then remove the previous key.
 
 ## Production work monitor on Tencent Cloud
 

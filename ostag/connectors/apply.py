@@ -159,4 +159,7 @@ def build_apply_executors(workflow: Any) -> dict[str, Any]:
         registry["gitlab_issues"] = GitLabApplyExecutor(
             GitLabIssuesConnector(GlabCLI(workflow.config)), workflow.config
         )
+        from ostag.workflows.github_vercel_release import GitHubVercelReleaseExecutor
+
+        registry["github_vercel_release"] = GitHubVercelReleaseExecutor(workflow.config)
     return registry

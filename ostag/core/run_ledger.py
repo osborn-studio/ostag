@@ -468,7 +468,13 @@ class RunLedger:
                     )
         return entries
 
-    def get_receipt(self, action_id: str) -> ActionReceipt:
+    def get_receipt(
+        self,
+        action_id: str,
+        *,
+        chat_id: str | None = None,
+        platform: str | None = None,
+    ) -> ActionReceipt:
         entry = self._fold_receipts().get(action_id)
         if entry is None:
             raise SchemaError(
@@ -479,15 +485,29 @@ class RunLedger:
                     "or check the run with 'ostag ledger export'."
                 ),
             )
+        if (chat_id is not None and entry["chat_id"] != chat_id) or (
+            platform is not None and entry["platform"] != platform
+        ):
+            raise SchemaError(
+                code="receipt_scope_mismatch",
+                message=f"Action {action_id!r} does not belong to this source channel",
+                recovery_hint="Run the command in the channel where the receipt was proposed.",
+            )
         return ActionReceipt.from_dict(entry["receipt"])
 
     def list_receipts(
-        self, *, chat_id: str | None = None, states: tuple[str, ...] | None = None
+        self,
+        *,
+        chat_id: str | None = None,
+        platform: str | None = None,
+        states: tuple[str, ...] | None = None,
     ) -> list[ActionReceipt]:
         """Receipts in proposal order, optionally filtered by chat and states."""
         receipts: list[ActionReceipt] = []
         for entry in self._fold_receipts().values():
             if chat_id is not None and entry["chat_id"] != chat_id:
+                continue
+            if platform is not None and entry["platform"] != platform:
                 continue
             receipt = ActionReceipt.from_dict(entry["receipt"])
             if states is not None and receipt.state not in states:

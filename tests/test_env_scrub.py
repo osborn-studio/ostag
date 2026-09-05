@@ -23,6 +23,7 @@ def test_scrub_environment_removes_platform_secrets() -> None:
         "SLACK_BOT_TOKEN": "xoxb-leak",
         "DINGTALK_CLIENT_SECRET": "leak2",
         "LARK_ENCRYPT_KEY": "leak3",
+        "OSTAG_VERCEL_ACCESS_TOKEN": "vercel-leak",
     }
 
     scrubbed = scrub_environment(env)
@@ -84,6 +85,23 @@ async def test_codex_backend_spawns_with_scrubbed_env(
     assert result == "ok"
     assert captured["env"] is not None
     assert "SLACK_BOT_TOKEN" not in captured["env"]
+
+
+@pytest.mark.asyncio
+async def test_codex_backend_never_inherits_vercel_release_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OSTAG_VERCEL_ACCESS_TOKEN", "vercel-production-secret")
+    captured: dict = {}
+    monkeypatch.setattr(
+        codex_cli_module.asyncio, "create_subprocess_exec", _capture_exec(captured)
+    )
+    config = load_settings(None, audit_log=tmp_path / "audit.log")
+
+    await CodexCLIBackend(config).run("hello")
+
+    assert captured["env"] is not None
+    assert "OSTAG_VERCEL_ACCESS_TOKEN" not in captured["env"]
 
 
 @pytest.mark.asyncio

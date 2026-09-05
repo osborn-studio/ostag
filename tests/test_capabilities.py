@@ -39,6 +39,20 @@ def test_github_issues_available_without_destructive_ops() -> None:
     assert capability.destructive_requires_approval is True
 
 
+def test_github_pull_request_release_is_review_only_and_approval_gated() -> None:
+    capability = get_capability("github", "pull_requests")
+
+    assert capability.can("can_read_pull_requests")
+    assert capability.can("can_read_checks")
+    assert capability.can("can_approve_reviews")
+    assert capability.can("can_deploy_vercel_production")
+    assert capability.can("can_apply_action")
+    assert not capability.can("can_merge")
+    assert not capability.can("can_close")
+    assert capability.default_mode == "propose"
+    assert capability.destructive_requires_approval is True
+
+
 def test_gitlab_issues_available_without_destructive_ops() -> None:
     capability = get_capability("gitlab", "issues")
     assert capability.status == "available"

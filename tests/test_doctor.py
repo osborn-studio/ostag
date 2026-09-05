@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
 import sqlite3
+import sys
 
 from ostag.config import load_settings
 from ostag.core.doctor import doctor_exit_code, format_checks, run_doctor
@@ -59,6 +60,31 @@ def test_doctor_warns_but_does_not_fail_for_explicit_unsafe_switch(tmp_path: Pat
 
     assert doctor_exit_code(checks) == 0
     assert "[warn] safety:" in format_checks(checks)
+
+
+def test_doctor_reports_github_vercel_release_readiness_without_token(
+    tmp_path: Path,
+) -> None:
+    token = "vercel-secret-never-render"
+    config = load_settings(
+        None,
+        audit_log=tmp_path / "audit.log",
+        github_vercel_release_enabled=True,
+        github_vercel_release_repository="owner/repo",
+        github_vercel_release_channels=("feishu:oc_release",),
+        github_vercel_required_checks=("release-check",),
+        vercel_access_token=token,
+        vercel_team_id="team_test",
+        vercel_project_id="prj_test",
+        vercel_project_name="release-app",
+        gh_bin=sys.executable,
+    )
+
+    output = format_checks(run_doctor(config))
+
+    assert "github_vercel_release" in output
+    assert "owner/repo -> release-app" in output
+    assert token not in output
 
 
 def test_live_cli_doctor_requires_credentials(monkeypatch, tmp_path: Path) -> None:

@@ -31,7 +31,7 @@ def _config(tmp_path: Path, **overrides: object):
     return load_settings(None, audit_log=tmp_path / "audit.log", **overrides)
 
 
-def _github_payload(*, state: str = "MERGED", conclusion: str = "SUCCESS") -> dict:
+def _github_payload(*, state: str = "MERGED") -> dict:
     return {
         "number": 12,
         "url": "https://github.com/owner/repo/pull/12",
@@ -41,20 +41,185 @@ def _github_payload(*, state: str = "MERGED", conclusion: str = "SUCCESS") -> di
         "headRefOid": HEAD,
         "mergeCommit": {"oid": MERGE} if state == "MERGED" else None,
         "updatedAt": "2026-08-02T01:02:03Z",
-        "statusCheckRollup": [
-            {
-                "__typename": "CheckRun",
-                "name": "tests",
-                "status": "COMPLETED",
-                "conclusion": conclusion,
-                "detailsUrl": "https://github.com/owner/repo/actions/runs/1",
-            }
-        ],
     }
 
 
+def _github_check_pages(
+    *,
+    check_total: int = 1,
+    status_total: int = 1,
+    check_sha: str = HEAD,
+    status_sha: str = HEAD,
+) -> tuple[dict, dict]:
+    return (
+        {
+            "total_count": check_total,
+            "check_runs": [
+                {
+                    "name": "tests",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "head_sha": check_sha,
+                    "html_url": "https://github.com/owner/repo/actions/runs/1",
+                }
+            ],
+        },
+        {
+            "sha": status_sha,
+            "total_count": status_total,
+            "statuses": [
+                {
+                    "context": "lint",
+                    "state": "success",
+                    "target_url": "https://github.com/owner/repo/actions/runs/2",
+                }
+            ],
+        },
+    )
+
+
+async def test_github_requires_complete_current_head_check_pages(tmp_path: Path) -> None:
+    check_runs, statuses = _github_check_pages()
+    cli = FakeCLI(_github_payload(), check_runs, statuses)
+    connector = GitHubPullRequestConnector(cli, _config(tmp_path))  # type: ignore[arg-type]
+
+    evidence = await connector.collect("owner/repo", 12, expected_sha=HEAD)
+
+    assert evidence.checks_complete is True
+    assert evidence.checks_state == "passed"
+    assert [check.name for check in evidence.checks] == ["tests", "lint"]
+    assert cli.calls[1:] == [
+        (
+            "api",
+            f"repos/owner/repo/commits/{HEAD}/check-runs?filter=latest&per_page=100",
+        ),
+        ("api", f"repos/owner/repo/commits/{HEAD}/status?per_page=100"),
+    ]
+
+
+async def test_github_truncated_all_passing_page_stays_pending(tmp_path: Path) -> None:
+    check_runs, statuses = _github_check_pages(check_total=2)
+    evidence = await GitHubPullRequestConnector(  # type: ignore[arg-type]
+        FakeCLI(_github_payload(), check_runs, statuses), _config(tmp_path)
+    ).collect("owner/repo", 12, expected_sha=HEAD)
+
+    assert evidence.checks_complete is False
+    assert evidence.checks_state == "pending"
+    assert evidence.completion_state == "pending"
+
+
+async def test_github_empty_complete_pages_stay_pending(tmp_path: Path) -> None:
+    check_runs = {"total_count": 0, "check_runs": []}
+    statuses = {"sha": HEAD, "total_count": 0, "statuses": []}
+    evidence = await GitHubPullRequestConnector(  # type: ignore[arg-type]
+        FakeCLI(_github_payload(), check_runs, statuses), _config(tmp_path)
+    ).collect("owner/repo", 12, expected_sha=HEAD)
+
+    assert evidence.checks_complete is True
+    assert evidence.checks == ()
+    assert evidence.checks_state == "pending"
+
+
+async def test_github_cross_sha_check_page_stays_pending(tmp_path: Path) -> None:
+    check_runs, statuses = _github_check_pages(check_sha="c" * 40)
+    evidence = await GitHubPullRequestConnector(  # type: ignore[arg-type]
+        FakeCLI(_github_payload(), check_runs, statuses), _config(tmp_path)
+    ).collect("owner/repo", 12, expected_sha=HEAD)
+
+    assert evidence.checks_complete is False
+    assert [check.name for check in evidence.checks] == ["lint"]
+    assert evidence.checks_state == "pending"
+
+
+async def test_github_rejects_invalid_repository_before_provider_read(tmp_path: Path) -> None:
+    cli = FakeCLI()
+    connector = GitHubPullRequestConnector(cli, _config(tmp_path))  # type: ignore[arg-type]
+
+    with pytest.raises(SchemaError):
+        await connector.collect("owner/repo?per_page=1", 12)
+
+    assert cli.calls == []
+
+
+def test_legacy_github_evidence_without_completeness_fails_closed() -> None:
+    payload = {
+        "schemaVersion": 1,
+        "provider": "github",
+        "repository": "owner/repo",
+        "number": 12,
+        "url": "https://github.com/owner/repo/pull/12",
+        "state": "merged",
+        "draft": False,
+        "headSha": HEAD,
+        "mergeSha": MERGE,
+        "observedAt": "2026-08-02T01:02:03+00:00",
+        "checks": [
+            {
+                "name": "tests",
+                "state": "passed",
+                "sha": HEAD,
+                "url": "https://github.com/owner/repo/actions/runs/1",
+            }
+        ],
+        "checksState": "passed",
+        "completionState": "passed",
+    }
+
+    evidence = ProviderChangeEvidence.from_dict(payload)
+
+    assert evidence.checks_complete is False
+    assert evidence.checks_state == "pending"
+    assert evidence.completion_state == "pending"
+
+
+def test_check_completeness_changes_semantic_digest() -> None:
+    complete = ProviderChangeEvidence.from_dict(
+        {
+            "schemaVersion": 2,
+            "provider": "github",
+            "repository": "owner/repo",
+            "number": 12,
+            "url": "https://github.com/owner/repo/pull/12",
+            "state": "open",
+            "draft": False,
+            "headSha": HEAD,
+            "observedAt": "2026-08-02T01:02:03+00:00",
+            "checks": [
+                {"name": "tests", "state": "passed", "sha": HEAD}
+            ],
+            "checksComplete": True,
+        }
+    )
+    incomplete_payload = complete.to_dict()
+    incomplete_payload["checksComplete"] = False
+    incomplete_payload.pop("checksState")
+    incomplete_payload.pop("completionState")
+    incomplete = ProviderChangeEvidence.from_dict(incomplete_payload)
+
+    assert complete.payload_digest != incomplete.payload_digest
+
+
+def test_schema_v2_requires_explicit_check_completeness() -> None:
+    payload = {
+        "schemaVersion": 2,
+        "provider": "github",
+        "repository": "owner/repo",
+        "number": 12,
+        "url": "https://github.com/owner/repo/pull/12",
+        "state": "open",
+        "draft": False,
+        "headSha": HEAD,
+        "observedAt": "2026-08-02T01:02:03+00:00",
+        "checks": [],
+    }
+
+    with pytest.raises(SchemaError, match="checksComplete"):
+        ProviderChangeEvidence.from_dict(payload)
+
+
 async def test_github_collects_merged_sha_bound_checks_without_mutation(tmp_path: Path) -> None:
-    cli = FakeCLI(_github_payload())
+    check_runs, statuses = _github_check_pages()
+    cli = FakeCLI(_github_payload(), check_runs, statuses)
     connector = GitHubPullRequestConnector(cli, _config(tmp_path))  # type: ignore[arg-type]
 
     evidence = await connector.collect("owner/repo", 12, expected_sha=HEAD)
@@ -72,8 +237,13 @@ async def test_github_collects_merged_sha_bound_checks_without_mutation(tmp_path
             "--repo",
             "owner/repo",
             "--json",
-            "number,url,state,isDraft,mergedAt,headRefOid,mergeCommit,updatedAt,statusCheckRollup",
-        )
+            "number,url,state,isDraft,mergedAt,headRefOid,mergeCommit,updatedAt",
+        ),
+        (
+            "api",
+            f"repos/owner/repo/commits/{HEAD}/check-runs?filter=latest&per_page=100",
+        ),
+        ("api", f"repos/owner/repo/commits/{HEAD}/status?per_page=100"),
     ]
     assert all("merge" not in call[:2] and "close" not in call for call in cli.calls)
 
@@ -85,8 +255,11 @@ async def test_github_collects_merged_sha_bound_checks_without_mutation(tmp_path
 async def test_github_normalizes_pending_and_failed_states(
     tmp_path: Path, state: str, conclusion: str, expected: str
 ) -> None:
+    check_runs, statuses = _github_check_pages()
+    check_runs["check_runs"][0]["conclusion"] = conclusion.casefold() or None
     evidence = await GitHubPullRequestConnector(  # type: ignore[arg-type]
-        FakeCLI(_github_payload(state=state, conclusion=conclusion)), _config(tmp_path)
+        FakeCLI(_github_payload(state=state), check_runs, statuses),
+        _config(tmp_path),
     ).collect("owner/repo", 12)
 
     assert evidence.completion_state == expected
@@ -105,10 +278,11 @@ async def test_github_rejects_sha_mismatch_malformed_and_unbounded_checks(tmp_pa
         await malformed.collect("owner/repo", 12)
     assert malformed_error.value.code == "invalid_provider_evidence"
 
-    payload = _github_payload()
-    payload["statusCheckRollup"] = payload["statusCheckRollup"] * 3
+    check_runs, statuses = _github_check_pages()
+    check_runs["check_runs"] = check_runs["check_runs"] * 3
     bounded = GitHubPullRequestConnector(  # type: ignore[arg-type]
-        FakeCLI(payload), _config(tmp_path, provider_evidence_max_checks=2)
+        FakeCLI(_github_payload(), check_runs, statuses),
+        _config(tmp_path, provider_evidence_max_checks=2),
     )
     with pytest.raises(SchemaError) as limit:
         await bounded.collect("owner/repo", 12)
@@ -153,7 +327,7 @@ async def test_gitlab_collects_one_bounded_pipeline_page_and_binds_sha(tmp_path:
 def test_provider_evidence_emits_completion_facts_bound_to_same_subject() -> None:
     evidence = ProviderChangeEvidence.from_dict(
         {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "provider": "github",
             "repository": "owner/repo",
             "number": 12,
@@ -171,6 +345,7 @@ def test_provider_evidence_emits_completion_facts_bound_to_same_subject() -> Non
                     "url": "https://github.com/owner/repo/actions/runs/1",
                 }
             ],
+            "checksComplete": True,
         }
     )
 
@@ -193,8 +368,14 @@ async def test_provider_evidence_cli_emits_normalized_facts(
     monkeypatch.setenv("OSTAG_PROVIDER_EVIDENCE_ENABLED", "true")
     monkeypatch.setenv("OSTAG_GITHUB_DEFAULT_REPO", "owner/repo")
 
+    check_runs, statuses = _github_check_pages()
+
     async def fake_run(self, *args: str) -> str:
-        return json.dumps(_github_payload())
+        if args[0] == "pr":
+            return json.dumps(_github_payload())
+        if "check-runs" in args[1]:
+            return json.dumps(check_runs)
+        return json.dumps(statuses)
 
     monkeypatch.setattr(GhCLI, "run", fake_run)
 

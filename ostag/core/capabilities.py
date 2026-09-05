@@ -5,7 +5,7 @@ renderers can degrade gracefully and policy can refuse operations a platform
 does not support. Declarations reflect the actual implementation state of
 this repo: chat adapters currently render plain text and can send proactive
 messages; requirement-table connectors can read/create/update records but are
-never allowed to delete. GitHub/GitLab are declared as planned stubs.
+never allowed to delete. GitHub PR release writes remain explicitly receipt-gated.
 """
 
 from __future__ import annotations
@@ -102,11 +102,17 @@ CONNECTOR_CAPABILITIES: tuple[ConnectorCapability, ...] = (
             "can_read_pull_requests": True,
             "can_read_checks": True,
             "can_read_merge_evidence": True,
+            "can_approve_reviews": True,
+            "can_deploy_vercel_production": True,
             "can_merge": False,
             "can_close": False,
-            "can_apply_action": False,
+            "can_apply_action": True,
         },
-        limits={"max_checks": 100, "pagination": "single bounded projection"},
+        limits={
+            "max_checks": 100,
+            "pagination": "single bounded projection",
+            "release_mapping": "one allowlisted GitHub repository to one Vercel project",
+        },
     ),
     ConnectorCapability(
         platform="gitlab",

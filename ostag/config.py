@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -92,6 +93,17 @@ class Settings:
     four_eyes_enabled: bool = False
     gh_bin: str = "gh"
     github_default_repo: str = ""
+    github_vercel_release_enabled: bool = False
+    github_vercel_release_repository: str = ""
+    github_vercel_release_channels: tuple[str, ...] = ()
+    github_vercel_release_base_branch: str = "main"
+    github_vercel_required_checks: tuple[str, ...] = ()
+    vercel_access_token: str = ""
+    vercel_team_id: str = ""
+    vercel_project_id: str = ""
+    vercel_project_name: str = ""
+    vercel_deploy_timeout_seconds: int = 600
+    vercel_poll_interval_seconds: int = 2
     glab_bin: str = "glab"
     gitlab_default_repo: str = ""
     run_cost_credits: int = 0
@@ -263,6 +275,64 @@ class Settings:
             raise ValueError("OSTAG_EXECUTOR_OSSTACK_REGISTERED contains an unknown executor")
         if any(not item or ":" not in item for item in self.query_lane_channels):
             raise ValueError("OSTAG_QUERY_LANE_CHANNELS entries must use platform:chat_id")
+        if self.github_vercel_release_enabled:
+            required = {
+                "github_vercel_release_repository": self.github_vercel_release_repository,
+                "github_vercel_release_channels": self.github_vercel_release_channels,
+                "github_vercel_required_checks": self.github_vercel_required_checks,
+                "vercel_access_token": self.vercel_access_token,
+                "vercel_team_id": self.vercel_team_id,
+                "vercel_project_id": self.vercel_project_id,
+                "vercel_project_name": self.vercel_project_name,
+            }
+            missing = next((name for name, value in required.items() if not value), "")
+            if missing:
+                raise ValueError(f"GitHub/Vercel release requires {missing}")
+            repository_pattern = r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*"
+            if not re.fullmatch(repository_pattern, self.github_vercel_release_repository):
+                raise ValueError(
+                    "github_vercel_release_repository must use GitHub owner/name syntax"
+                )
+            base_branch = self.github_vercel_release_base_branch
+            if (
+                not isinstance(base_branch, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,254}", base_branch)
+                or ".." in base_branch
+                or "//" in base_branch
+                or base_branch.endswith((".", "/"))
+            ):
+                raise ValueError("github_vercel_release_base_branch is invalid")
+            if not isinstance(self.github_vercel_required_checks, tuple) or not all(
+                isinstance(check, str) for check in self.github_vercel_required_checks
+            ):
+                raise ValueError("github_vercel_required_checks must be a tuple of names")
+            if len(set(self.github_vercel_required_checks)) != len(
+                self.github_vercel_required_checks
+            ):
+                raise ValueError("github_vercel_required_checks must be unique")
+            if any(
+                not check or len(check) > 200 or any(ord(char) < 32 for char in check)
+                for check in self.github_vercel_required_checks
+            ):
+                raise ValueError("github_vercel_required_checks contains an invalid name")
+            allowed_platforms = {"slack", "feishu", "lark", "dingtalk", "telegram"}
+            for channel in self.github_vercel_release_channels:
+                platform, separator, chat_id = channel.partition(":")
+                if not separator or not chat_id:
+                    raise ValueError(
+                        "github_vercel_release_channels entries must use platform:chat_id"
+                    )
+                if platform not in allowed_platforms:
+                    raise ValueError(
+                        "github_vercel_release_channels contains an unknown platform"
+                    )
+            project_pattern = r"[a-z0-9](?:[a-z0-9._-]{0,98}[a-z0-9])?"
+            if not re.fullmatch(project_pattern, self.vercel_project_name):
+                raise ValueError("vercel_project_name must be a lowercase Vercel project name")
+            if not 30 <= self.vercel_deploy_timeout_seconds <= 3600:
+                raise ValueError("vercel_deploy_timeout_seconds must be in 30..3600")
+            if not 1 <= self.vercel_poll_interval_seconds <= 60:
+                raise ValueError("vercel_poll_interval_seconds must be in 1..60")
         if not 0 <= self.ambient_daily_board_hour <= 23:
             raise ValueError("OSTAG_AMBIENT_DAILY_BOARD_HOUR must be between 0 and 23")
         if self.ambient_daily_board_window_minutes <= 0:
@@ -410,6 +480,23 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         four_eyes_enabled=_bool("OSTAG_FOUR_EYES_ENABLED", False),
         gh_bin=os.getenv("OSTAG_GH_BIN", "gh"),
         github_default_repo=os.getenv("OSTAG_GITHUB_DEFAULT_REPO", ""),
+        github_vercel_release_enabled=_bool(
+            "OSTAG_GITHUB_VERCEL_RELEASE_ENABLED", False
+        ),
+        github_vercel_release_repository=os.getenv(
+            "OSTAG_GITHUB_VERCEL_RELEASE_REPOSITORY", ""
+        ),
+        github_vercel_release_channels=_csv("OSTAG_GITHUB_VERCEL_RELEASE_CHANNELS"),
+        github_vercel_release_base_branch=os.getenv(
+            "OSTAG_GITHUB_VERCEL_RELEASE_BASE_BRANCH", "main"
+        ),
+        github_vercel_required_checks=_csv("OSTAG_GITHUB_VERCEL_REQUIRED_CHECKS"),
+        vercel_access_token=os.getenv("OSTAG_VERCEL_ACCESS_TOKEN", ""),
+        vercel_team_id=os.getenv("OSTAG_VERCEL_TEAM_ID", ""),
+        vercel_project_id=os.getenv("OSTAG_VERCEL_PROJECT_ID", ""),
+        vercel_project_name=os.getenv("OSTAG_VERCEL_PROJECT_NAME", ""),
+        vercel_deploy_timeout_seconds=_int("OSTAG_VERCEL_DEPLOY_TIMEOUT_SECONDS", 600),
+        vercel_poll_interval_seconds=_int("OSTAG_VERCEL_POLL_INTERVAL_SECONDS", 2),
         glab_bin=os.getenv("OSTAG_GLAB_BIN", "glab"),
         gitlab_default_repo=os.getenv("OSTAG_GITLAB_DEFAULT_REPO", ""),
         run_cost_credits=_int("OSTAG_RUN_COST_CREDITS", 0),

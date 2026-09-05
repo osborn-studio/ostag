@@ -3,8 +3,26 @@
 The operational report is an identity-scoped, read-only projection over the
 existing work monitor. It summarizes instance freshness, governed workstreams,
 completion evidence counts, connector smoke status, attached-run cost, and human
-escalations. Raw prompts, task titles, summaries, logs, repository paths,
-credentials, connector targets, and escalation reasons are never projected.
+escalations. Schema v2 also includes a read-only Agent Presence summary and a
+presence value for each authorized instance returned within the configured
+`OSTAG_OPERATIONAL_REPORT_MAX_ITEMS` bound. Raw prompts, task titles,
+summaries, logs, repository paths, credentials, connector targets, and
+escalation reasons are never projected.
+
+Agent Presence is derived on every read; there is no presence table. The six
+states are:
+
+| State | OStag meaning |
+| --- | --- |
+| `setup_required` | An authorized binding has no registered device or legacy instance projection. |
+| `needs_attention` | A human decision/escalation is pending, or work is blocked. |
+| `offline` | Setup exists but the monitor heartbeat is not fresh. |
+| `working` | A fresh instance projects a running task or relay session, even if more work is queued. |
+| `queued` | A `triage`, `todo`, or `ready` task is durably waiting, including while offline. |
+| `available` | The instance is fresh with no queued, running, or attention-requiring work. |
+
+These values are status projections only. They never claim, retry, cancel, or
+settle work and are not completion evidence.
 
 The feature is disabled by default:
 
@@ -51,7 +69,11 @@ Authorization: Bearer <human credential>
 ```
 
 The HTML renderer escapes every dynamic value and contains no client-side script.
-Both surfaces share the same schema-v1 report projection.
+Both surfaces share the same schema-v2 report projection. The top-level
+`presence` object contains the highest-priority state among the deterministically
+bounded `instances[]` projection and counts for all six states. Each returned
+instance contains its own `presence` object with a stable `reasonCode` and
+bounded human-readable reason.
 
 ## Deployment and rollback
 
@@ -62,3 +84,5 @@ the deployment host and place only the resulting structured JSON in
 
 To roll back, set `OSTAG_OPERATIONAL_REPORT_ENABLED=false` and restart the monitor.
 The two routes are no longer registered. No schema or data migration is required.
+Reverting only the Presence slice restores the schema-v1 response shape without
+altering stored monitor data.
