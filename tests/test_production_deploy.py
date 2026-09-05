@@ -117,12 +117,11 @@ def test_server_deploy_script_rejects_bad_inputs_before_touching_runtime() -> No
     assert "release SHA must be 40 lowercase hex characters" in result.stderr
 
 
-def test_deploy_configuration_is_persisted_for_future_release_runs() -> None:
-    agents = Path("AGENTS.md").read_text(encoding="utf-8")
+def test_deploy_runbook_is_persisted_for_future_release_runs() -> None:
     deployment = Path("docs/ostag/deployment.md").read_text(encoding="utf-8")
 
-    assert "## Deploy Configuration (configured by /setup-deploy)" in agents
-    assert "GitHub Actions to Tencent Cloud Lighthouse" in agents
-    assert "https://ostag-monitor.ihiking.me/healthz" in agents
     assert "## GitHub Actions production deployment" in deployment
+    assert ".github/workflows/deploy-production.yml" in deployment
+    assert "https://ostag-monitor.ihiking.me" in deployment
     assert "PRODUCTION_SSH_KNOWN_HOSTS" in deployment
+    assert "deploy-receipt.json" in deployment
