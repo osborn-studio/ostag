@@ -1,0 +1,12 @@
+{
+  "files": {
+    "README.md": "0b65ae1b8e3999a9fdf7b0b4fbf07bc84c86cf0b97f4fd9fbe9281ca7d33abea",
+    "TASKS.md": "738fc8afc713017ec551cee99cc4ef0c7a446427fb43c56b99b7ae3156964f03",
+    "VALIDATION.md": "7eb5095c6e12274e9d5efd6b1e51c2e214e55f893d7b634c17ae13e93e0e6fd4",
+    "DEPLOYMENT.md": "6c16622a88fffe23e9cf4416876e3307fd46bb10bed1ff2a39b693a5bbb40401",
+    "COLLABORATION.md": "341995dfcfc90833f94e0b662f3f3983fd2e02771184a5e75d4d5c1f15c513bb",
+    "backlog.json": "08ac69f03a0699574b4937cff3eef9706890266c379b2bceff2d3b845318c9e4",
+    "validate_plan.py": "77787f564c713d94afdca6401eb02e931cc1dd9ad7e82d6c689d83f2e1a6151f"
+  },
+  "reviewed_plan_hash": "865fd8f86c29adcff88aa2fb814d1965765b6e969513bfce35c85352841daddb"
+}

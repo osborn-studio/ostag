@@ -1,0 +1,1491 @@
+{
+  "base": "2689b07c50095974e224468fd1fb0f89d8c3c621",
+  "head": "3a3136dcb8395b6dda6c872a8398d21a70935a23",
+  "status": "ahead",
+  "total_commits": 59,
+  "returned_commits": 59,
+  "files_count": 199,
+  "commits": [
+    {
+      "sha": "e55cf4b989d19e420630d190466b6cf9389cd51d",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(store): remove legacy delivery sqlite surface",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "3e90e81a70f1c4b85dd030d10a949efa4a6aeec0",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "docs: define presence-first effect authority",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "675f7638c240fe951a09d8a87185857f3cdfb435",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): make sql the schema authority",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "4d457dd12c71ebaa4461816d3122d0a6b5899a9d",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): remove unused candidate repository",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "4471b81a7607a3db0d991fbe01967d849948d132",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(store): use one paired schema marker",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "49ba399abb36500338c436a1fa93fa60bb666460",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): bind source content lifetime to runs",
+      "category": "bounded_retention",
+      "tasks": [
+        "A02",
+        "A10",
+        "U01",
+        "U04"
+      ],
+      "decision": "adapt bounded retention without dropping unresolved evidence or old data",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "28ed5d133ae807cef4841ac9a8e2ba858dbf58ce",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "fix(store): bound empty claim retention",
+      "category": "bounded_retention",
+      "tasks": [
+        "A02",
+        "A10",
+        "U01",
+        "U04"
+      ],
+      "decision": "adapt bounded retention without dropping unresolved evidence or old data",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "ace90c2777fa18ef936a5e30b7273538e3130981",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): store job settlement on jobs",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "1eac14c73a3902f449fafa0d6a1b0e794d1cf5b6",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "feat(control-plane): bound terminal maintenance jobs",
+      "category": "bounded_retention",
+      "tasks": [
+        "A02",
+        "A10",
+        "U01",
+        "U04"
+      ],
+      "decision": "adapt bounded retention without dropping unresolved evidence or old data",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "a4095b7a39ab47c79b8fcadf08ae5b8e833694a1",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "fix(store): bound readiness retention",
+      "category": "bounded_retention",
+      "tasks": [
+        "A02",
+        "A10",
+        "U01",
+        "U04"
+      ],
+      "decision": "adapt bounded retention without dropping unresolved evidence or old data",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "769379a48b7648a12292fba1d42d8311fb48e185",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): collapse ingress resolution state",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "b130639b0d5d7cf921939848f0c033ead25a24ba",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "fix(store): bound lifecycle signal retention",
+      "category": "bounded_retention",
+      "tasks": [
+        "A02",
+        "A10",
+        "U01",
+        "U04"
+      ],
+      "decision": "adapt bounded retention without dropping unresolved evidence or old data",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "d6302e07c8e3fed26c4d526057b212f24c7d4665",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): bind claim evidence to attempts",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "808db77a91aac9ba80e21f98e48fe8f54a92763f",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(store): remove duplicate run event shadow",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "de1ef6da0204d9f286ecee7f433cde4f343044a1",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "feat(control): define closed effect authority protocol",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "8e814a6db26c3cebef17cdac7b484129312f5218",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(store): fold source delivery into hosted imports",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "3207d27935b8344ec1ec4d7895d21aca5860396c",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "docs: anchor teammate identity to channel binding",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "66b9fd0e126a9e4686d871d282781fce748491b3",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "feat(control-plane): establish effect authority",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "3bf7ccd58cb7dc0bb4bf20743af04ae8bf9e59ba",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "feat(local-runtime): add durable effect journal",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "05419bf1daaadfaae0b6eec29401d49c6ec5f233",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor: replace publication stages with effect authority",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "7d95056ab28d62d49e699d2253ad0478c235353f",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): collapse slack binding authority",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "5b16bc3ee7a5e1555b38e98a77acd482085b7806",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "feat(control-plane): make channel bindings teammates",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "47f7feb55987157dd37afa52ead321dfb693c20c",
+      "date": "2026-09-04T22:12:33Z",
+      "title": "refactor(control-plane): replace migrations with fresh baseline",
+      "category": "upstream_structural_reset",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "do not copy fresh-only/reset/table collapse; retain OStag stores/platforms and audit guarantees",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "39d2da52654a060dfa5a11c6f8f046bfc2af5b87",
+      "date": "2026-09-07T02:33:18Z",
+      "title": "test(store): pin effect permit validation time",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "2d91196fcd96d09f477dd9cba97fc9c20f3e46a4",
+      "date": "2026-09-07T02:44:50Z",
+      "title": "test(control-plane): bind smoke readiness generation",
+      "category": "bounded_retention",
+      "tasks": [
+        "A02",
+        "A10",
+        "U01",
+        "U04"
+      ],
+      "decision": "adapt bounded retention without dropping unresolved evidence or old data",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "91182405fca888dc4c6cac1c9030158c94edec75",
+      "date": "2026-09-07T03:31:54Z",
+      "title": "fix(control-plane): harden stored effect authority",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "63cf4bea0ea341b884fe5feff2700ced13b83afb",
+      "date": "2026-09-07T05:01:08Z",
+      "title": "fix(slack): accept signed provider URL verification payloads",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "1c5b4de5574dcdb9557eac78cc27999671a9a0b1",
+      "date": "2026-09-07T05:09:50Z",
+      "title": "fix(cli): register paired Runner execution capabilities",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "edb4e6a6a948f44b7f621bd12e9c0789c6c5fa2e",
+      "date": "2026-09-07T05:32:27Z",
+      "title": "fix(control-plane): persist offline ingress until readiness recovers",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "95b74843706135f3de4af813680d372d789a6338",
+      "date": "2026-09-07T05:49:25Z",
+      "title": "fix(runner): preserve typed evidence and serialize image builds",
+      "category": "release",
+      "tasks": [
+        "D02",
+        "D08"
+      ],
+      "decision": "adapt applicable artifact and credential-cleanup guarantees; keep Tencent deployment",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "b17cadca084425bd754e75f98855724207c1519b",
+      "date": "2026-09-07T07:42:21Z",
+      "title": "fix(lifecycle): share canonical evidence and retain primary failures",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "a511fb69f1dd55d2b5b8aa1a26d4f2ef95fe8dea",
+      "date": "2026-09-07T08:25:24Z",
+      "title": "fix(runner): synchronize renewed evidence and unblock safe heartbeats",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "c523a0c3181c64c15713dadaf1d571263a9f3029",
+      "date": "2026-09-07T10:31:51Z",
+      "title": "feat(slack): reconcile uncertain projections through fenced observations",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "a8f066402e0a29fb9cbc5eafb73744727c95e5f6",
+      "date": "2026-09-07T10:42:48Z",
+      "title": "fix(slack): skip stale observation ticks after downtime",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "481ec613c2b1c632fb01a530a22646dbbabc693d",
+      "date": "2026-09-07T13:02:36Z",
+      "title": "fix(runner): bind progress digest to protocol dispatch time",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "fe72f97ae4fe12d734a005b7adc932b3f5d7b6eb",
+      "date": "2026-09-07T13:02:36Z",
+      "title": "fix(slack): verify flattened fallback with exact blocks",
+      "category": "delivery_ingress",
+      "tasks": [
+        "U01"
+      ],
+      "decision": "adapt durable/uncertain delivery to Feishu; provider-specific wire changes require separate applicability check",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "296847f0df04e3cd235af2b49031ccb36b7942b3",
+      "date": "2026-09-08T00:10:08Z",
+      "title": "fix(slack): omit action controls from terminal projections",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "3d0ecd280eb11d45c1e3cea4e1c116e8c3af405c",
+      "date": "2026-09-08T00:18:50Z",
+      "title": "fix(slack): preserve source decisions when refreshing controls",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "acf0cc9650a72cf97987b02cbcba6ba46d6f266b",
+      "date": "2026-09-08T03:03:21Z",
+      "title": "fix(slack): accept exact inline permission approvals",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "68625787a687b8b5c1bdecb0bceebd89ab73fe7d",
+      "date": "2026-09-08T07:43:11Z",
+      "title": "fix(runner): finalize local commits within fenced worktrees",
+      "category": "workspace_attestation",
+      "tasks": [
+        "U03"
+      ],
+      "decision": "adapt to managed repository path; unsupported ordinary CLI remains unsupported",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "ec182796b3a0332a9de02d5100f62cb3abb39282",
+      "date": "2026-09-08T07:45:32Z",
+      "title": "fix(runner): retain containment checks for directory deletions",
+      "category": "workspace_attestation",
+      "tasks": [
+        "U03"
+      ],
+      "decision": "adapt to managed repository path; unsupported ordinary CLI remains unsupported",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "ff7fa70df28025b9514b6e310535c5f8236ccd78",
+      "date": "2026-09-08T08:36:29Z",
+      "title": "fix(evidence): bind candidate artifacts and observe local writes",
+      "category": "workspace_attestation",
+      "tasks": [
+        "U03"
+      ],
+      "decision": "adapt to managed repository path; unsupported ordinary CLI remains unsupported",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "8b2e9a5652fc50f90a8c2d5f06d42f4d5455e6ec",
+      "date": "2026-09-08T09:29:41Z",
+      "title": "Merge pull request #159 from amplifthq/codex/agent-presence-db-convergence",
+      "category": "merge_record",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "verify constituent commits; no duplicate feature",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "ba88ef341d385dc778f450763a66d5a844209843",
+      "date": "2026-09-08T10:30:01Z",
+      "title": "feat: publish verified control plane images and adapt container startup",
+      "category": "release",
+      "tasks": [
+        "D02",
+        "D08"
+      ],
+      "decision": "adapt applicable artifact and credential-cleanup guarantees; keep Tencent deployment",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "e6cc65577ac06263a92841833518143282405bb9",
+      "date": "2026-09-08T10:48:14Z",
+      "title": "Merge pull request #161 from amplifthq/codex/railway-image-release",
+      "category": "merge_record",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "verify constituent commits; no duplicate feature",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "65b831184422748c56d77952a6f6d2a10108dca6",
+      "date": "2026-09-08T11:13:08Z",
+      "title": "fix: honor Actions allowlist during image publication",
+      "category": "release",
+      "tasks": [
+        "D02",
+        "D08"
+      ],
+      "decision": "adapt applicable artifact and credential-cleanup guarantees; keep Tencent deployment",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "23eb909f0f9b9c13e1943f0db4ef3724dbf40c7b",
+      "date": "2026-09-08T11:43:00Z",
+      "title": "fix: remove temporary registry credentials on cleanup exit",
+      "category": "release",
+      "tasks": [
+        "D02",
+        "D08"
+      ],
+      "decision": "adapt applicable artifact and credential-cleanup guarantees; keep Tencent deployment",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "2f0fd668ac6791524ebfd85fa03b2283b5afe9a6",
+      "date": "2026-09-08T11:46:32Z",
+      "title": "test: isolate all registry cleanup path probes",
+      "category": "release",
+      "tasks": [
+        "D02",
+        "D08"
+      ],
+      "decision": "adapt applicable artifact and credential-cleanup guarantees; keep Tencent deployment",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "c389d85c2ea74d9f9375b2343ea072ff80dfe8c2",
+      "date": "2026-09-08T12:01:15Z",
+      "title": "Merge pull request #163 from amplifthq/codex/fix-image-publish-policy",
+      "category": "merge_record",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "verify constituent commits; no duplicate feature",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "5b0ffd2529f8ac52f206443c1814add16c85477e",
+      "date": "2026-09-08T14:35:57Z",
+      "title": "fix: bind writes to attempt workspace and settle approval feedback",
+      "category": "workspace_attestation",
+      "tasks": [
+        "U03"
+      ],
+      "decision": "adapt to managed repository path; unsupported ordinary CLI remains unsupported",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "87490127d1181bd4e9ed14c0bc8af6fbc92dba23",
+      "date": "2026-09-08T15:09:12Z",
+      "title": "fix: acknowledge publication approval without waiting for runner",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "c685418cbcbe70f7494941c5bfdd4af5413a668f",
+      "date": "2026-09-08T15:40:47Z",
+      "title": "fix: align feedback phases and bound runner clock skew",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "e37012e581d336161d479c4af142af037c84e019",
+      "date": "2026-09-08T15:59:32Z",
+      "title": "fix: preserve busy runner presence and parse native timing logs",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "077cfb480a72ca3a71e5216988575183c37f0f99",
+      "date": "2026-09-08T16:06:28Z",
+      "title": "test: separate projection and delivery queue timing",
+      "category": "feedback_presence",
+      "tasks": [
+        "U04"
+      ],
+      "decision": "adapt truthful multi-platform projection; do not claim heartbeat as lease",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "3c08268c3c8883b48492505cea76b8d1284d3293",
+      "date": "2026-09-08T16:31:08Z",
+      "title": "Merge pull request #165 from amplifthq/codex/railway-workspace-approval-fix",
+      "category": "merge_record",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "verify constituent commits; no duplicate feature",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "1d3b5e180b6740c47d3737e8ccb909c4684d7099",
+      "date": "2026-09-09T09:59:37Z",
+      "title": "fix: reject unattested repository writes before approval",
+      "category": "workspace_attestation",
+      "tasks": [
+        "U03"
+      ],
+      "decision": "adapt to managed repository path; unsupported ordinary CLI remains unsupported",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "9033783d282f6a1c1ca941cc8275d9fa93831189",
+      "date": "2026-09-09T10:50:28Z",
+      "title": "fix: enforce repository write evidence before resolver selection",
+      "category": "effect_authority",
+      "tasks": [
+        "U02",
+        "U03"
+      ],
+      "decision": "adapt authority/journal/evidence semantics, not TypeScript/Postgres topology",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "bf8d013b118d4c9527260dfe77ddad8a49458570",
+      "date": "2026-09-09T12:59:32Z",
+      "title": "fix: reject conflicting ACP write operations",
+      "category": "workspace_attestation",
+      "tasks": [
+        "U03"
+      ],
+      "decision": "adapt to managed repository path; unsupported ordinary CLI remains unsupported",
+      "status": "planned_mapping_not_ported"
+    },
+    {
+      "sha": "3a3136dcb8395b6dda6c872a8398d21a70935a23",
+      "date": "2026-09-09T13:26:49Z",
+      "title": "Merge pull request #166 from amplifthq/codex/reject-unattested-repository-writes",
+      "category": "merge_record",
+      "tasks": [
+        "D08"
+      ],
+      "decision": "verify constituent commits; no duplicate feature",
+      "status": "planned_mapping_not_ported"
+    }
+  ],
+  "files": [
+    {
+      "path": ".dockerignore",
+      "status": "modified"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "status": "modified"
+    },
+    {
+      "path": ".github/workflows/control-plane-image.yml",
+      "status": "added"
+    },
+    {
+      "path": "README.md",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/Dockerfile",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/drizzle.config.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0000_control_plane.sql",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/migrations/0001_permissions.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0001_slack_delivery_observation.sql",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/migrations/0002_material_actions.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0003_bind_session_tenant.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0004_login_throttle.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0005_source_content.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0006_source_ingress.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0007_hosted_run_offline_safe.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0008_slack_source_app.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0009_slack_action_authority_envelope.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0010_provider_delivery.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0011_slack_route_identity.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0012_attempt_workspace_evidence.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0013_publication_candidates.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0014_publication_operations.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0015_slack_projection_authority.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0016_projection_outbox_control_family.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0017_projection_authority_hardening.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0018_projection_event_anchor_wakeup.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0019_projection_event_sequence.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0020_projection_lineage_serialization.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/migrations/0021_projection_job_v2_fence.sql",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/package.json",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/application.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/container.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/src/database/migrations.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/database/postgres.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/database/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/audit/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/console-reads/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/effects/index.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/src/modules/hosted-runs/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/hosted-runs/material-actions.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/hosted-runs/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/hosted-runs/thread-feedback.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/src/modules/identity/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/jobs/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/jobs/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/provider-delivery/feedback-timing.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/src/modules/provider-delivery/reconciliation.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/src/modules/provider-delivery/repository.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/provider-delivery/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/provider-delivery/team-relay-projection.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/publication-candidates/index.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/publication-candidates/publisher.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/publication-candidates/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/runners/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/runners/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/slack-ingress/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/slack-ingress/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/slack-installation-bootstrap/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/source-content/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/source-content/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/source-ingress/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/modules/source-ingress/schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/src/modules/source-ingress/worker.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/src/runtime.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/application.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/console-api.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/console-http.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/console-reads.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/container.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/deployment-contract.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/effect-transport.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/effects.postgres.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/feedback-latency.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/feedback-timing.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/hosted-coordinator.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/image-publication-cleanup.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/job-worker.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/jobs.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/material-actions.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/migrations.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/migrations.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/permissions.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/projection-outbox.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/publication-candidates.postgres.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/test/publication-transport.postgres.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/test/publication.postgres.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/test/runner-directory.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/runtime.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/schema-parity.postgres.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "apps/control-plane/test/slack-ingress.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/slack-installation-bootstrap.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/slack-reconciliation.postgres.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "apps/control-plane/test/slack-team-profile.e2e.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/source-content-deletion.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/source-content-grants.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/source-content-purge.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/source-content.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/source-ingress-crash-boundaries.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/test/source-ingress.postgres.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/web/api.ts",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/web/router.tsx",
+      "status": "modified"
+    },
+    {
+      "path": "apps/control-plane/web/styles.css",
+      "status": "modified"
+    },
+    {
+      "path": "docs/adr/0003-node-postgresql-control-plane.md",
+      "status": "modified"
+    },
+    {
+      "path": "docs/adr/0004-always-on-channel-ingress-local-execution.md",
+      "status": "modified"
+    },
+    {
+      "path": "docs/adr/0005-versioned-source-app-adapter-contract.md",
+      "status": "modified"
+    },
+    {
+      "path": "docs/adr/0006-presence-first-effect-authority.md",
+      "status": "added"
+    },
+    {
+      "path": "docs/control-plane-clean-room-ledger.md",
+      "status": "modified"
+    },
+    {
+      "path": "docs/control-plane-deployment.md",
+      "status": "modified"
+    },
+    {
+      "path": "docs/control-plane-image-release.md",
+      "status": "added"
+    },
+    {
+      "path": "docs/control-plane-runtime-architecture.md",
+      "status": "modified"
+    },
+    {
+      "path": "docs/testing/team-relay-canary.md",
+      "status": "modified"
+    },
+    {
+      "path": "package.json",
+      "status": "modified"
+    },
+    {
+      "path": "packages/cli/README.md",
+      "status": "modified"
+    },
+    {
+      "path": "packages/cli/src/pair.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/cli/test/pair.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/cli/test/service.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/client/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/client/test/client.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/client/test/control-v1-effects.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/control-protocol/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/control-protocol/test/canonical-values.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/control-protocol/test/effect-authority.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/core/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/core/src/mention.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/core/src/presentation.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/core/src/schema.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/core/src/teammate.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/core/test/approval-feedback.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/core/test/control-protocol.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/core/test/protocol.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/core/test/schema.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/github/README.md",
+      "status": "modified"
+    },
+    {
+      "path": "packages/github/src/publisher.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/package.json",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/src/control-v1.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/src/daemon.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/src/effects/github-draft-pr.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/src/effects/index.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/src/effects/request.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/src/pr.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/local-runtime/test/acp-daemon.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/control-v1.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/daemon-executor-selection.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/daemon-security.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/daemon-session-profile.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/doctor.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/effect-control-loop.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/test/effect-request.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/test/effects.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/test/github-effect-adapter.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/local-runtime/test/paired-relay-recovery.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/test/publication-control-v1.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/local-runtime/test/runtime-authority.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/local-runtime/tsup.config.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/runner/src/acp-executor.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/runner/src/executor.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/runner/src/git.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/runner/src/local-commit.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/runner/src/local-write-observation.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/runner/test/acp-executor.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/runner/test/fixtures/acp-agent.mjs",
+      "status": "modified"
+    },
+    {
+      "path": "packages/runner/test/local-commit.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/runner/test/local-write-observation.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/runner/test/session-profile.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/src/delivery-adapter.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/src/normalize.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/src/observation.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/slack/src/render.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/src/source-app.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/test/normalize.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/slack/test/observation.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/slack/test/render.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/README.md",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/package.json",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/src/delivery-payload-custody.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/src/delivery-repository.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/src/delivery-schema.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/src/effect-journal.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/store/src/index.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/src/repository.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/src/schema.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/src/slack-installation-registry.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/test/control-plane-projection-outbox.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/test/delivery-journal.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/test/delivery-payload-custody.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/test/hosted-import.test.ts",
+      "status": "modified"
+    },
+    {
+      "path": "packages/store/test/local-effect-journal.test.ts",
+      "status": "added"
+    },
+    {
+      "path": "packages/store/test/slack-installation-registry.test.ts",
+      "status": "removed"
+    },
+    {
+      "path": "packages/store/tsconfig.json",
+      "status": "modified"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "status": "modified"
+    },
+    {
+      "path": "scripts/release/audit-control-plane-image.mjs",
+      "status": "added"
+    },
+    {
+      "path": "scripts/release/check-cli-package.mjs",
+      "status": "modified"
+    },
+    {
+      "path": "scripts/test/approval-feedback-latency.mjs",
+      "status": "added"
+    },
+    {
+      "path": "scripts/test/control-plane-browser-e2e.mjs",
+      "status": "modified"
+    },
+    {
+      "path": "scripts/test/control-plane-compose-smoke.ts",
+      "status": "modified"
+    },
+    {
+      "path": "scripts/test/control-plane-image-smoke.mjs",
+      "status": "added"
+    }
+  ]
+}

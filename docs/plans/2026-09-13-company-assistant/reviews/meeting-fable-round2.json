@@ -1,0 +1,56 @@
+{
+  "verdict": "approved_for_planning",
+  "reviewed_plan_hash": "6ca7ec537aaaf6ba680aa8103f66b0be5d95f7ffe53d4c3f312cc2c221027271",
+  "scope": "MEETING-PREP r2、UPSTREAM-SYNC、SOURCES、DEVELOPMENT-START、40任务backlog、validate_plan.py、DEPLOYMENT新增段。只核对规划内部矛盾与原部署门槛兼容性；不评产品代码、真实凭据、飞书或部署证据。基线OStag b73dc1d9，上游2689b07→3a3136dc。",
+  "resolved": [
+    "F1 接受：子预算/分区cursor/required partial禁止ready已入M02/M04；同意partial分区内已独立证实的合并事件可列“已覆盖部分”，只禁全量计数与无变化断言。",
+    "F2 接受：merged_at/merge_commit_sha锚、首次无旧head非PR合入unknown、compare非祖先单列，已入M03-AC1。",
+    "F3 接受：shareable_sources默认空、逐fact source_visibility、逐受众交集、禁止自动脱敏扩受众，已入M05-AC3。",
+    "F4 接受：production用配置环境+发布策略+同SHA receipt；preview only记unknown；main可达按项目规则。",
+    "F5 接受：每群子预算与visible_since不可得记unknown。",
+    "F6 接受Codex立场：不强制httpx+GraphQL；read-only transport复用executor_runtime限输出/kill-reap模式即可；20repo/200call/500fact/180s维持，超预算needs_input，重启不承诺零重复计费。",
+    "F7 撤回我上轮“D07不依赖M05”的说法，DAG D07→M07→M06→M05成立；M01冻结评测规格、M07不自改，U03缩为证明契约+能力门槛，真实路径unsupported。",
+    "F8 接受：outbox与material-effect journal分别定义去重/重试/对账；U02用briefs.sqlite3不加第三库；ActionReceipt JSONL唯一批准权威；U04保留六态。",
+    "F9 接受：源失败置顶、按决策/阻塞/矛盾/发布风险选题，bot高风险事件不排除。",
+    "原有门槛复核通过：单worker、30s lease/10s心跳、180s含重试、status与ENABLED解耦、boot默认off、控制文件只读bind、CI只能off、preflight not_ready不rollback、main一个release PR且D02先装、rollback含MEETINGS off。validate_plan闭包断言与backlog依赖一致，无环。"
+  ],
+  "findings": [
+    {
+      "severity": "medium",
+      "location": "MEETING-PREP 架构与资源预算；M02-AC3、M05-AC1、MC21",
+      "trigger": "180秒总deadline同时覆盖取数与模型生成，但未规定生成保留时间与受理前可行性判断。20repo上限下仅候选扫描每repo约6类调用即可耗尽大部分200次与时限，job可能在花完provider预算后于生成阶段超时，既无会议包也无可恢复产物。",
+      "minimal_fix": "M01在受理时按冻结清单×资料类型做最小调用数/时间可行性预检，不可行直接needs_input；M02设取数软截止=总deadline−固定生成保留，超软截止即停止采集、标partial并进入生成或needs_input。不改180秒。"
+    },
+    {
+      "severity": "low",
+      "location": "MEETING-PREP commits行；M03-AC1",
+      "trigger": "“上次可信head”未定义来源与可信条件。M06规定冻结窗口刷新head不变、扩窗为新request，因此旧head只能来自其他request的持久快照，跨request复用条件（同repo_id、同default_branch、同身份、TTL）缺失，可能把不同分支或改名后的head当祖先比较。",
+      "minimal_fix": "M03-AC1补一句：旧head仅取自持久SourceSnapshot且repo_id/default_branch/principal匹配并在TTL内，否则按首次处理记unknown。"
+    },
+    {
+      "severity": "low",
+      "location": "M02-AC2“1000搜索上限”；MC06",
+      "trigger": "MEETING-PREP的读取契约只用repository issues/pulls/timeline等列表接口，未列Search API；但验收要求1000搜索上限反例，读取面与测试面不一致。",
+      "minimal_fix": "M02注明Search不作主读取源，该反例仅断言reader拒绝以搜索结果宣称完整；或在读取表补充Search仅用于线索发现。"
+    },
+    {
+      "severity": "low",
+      "location": "MEETING-PREP 预算段、MC12；M04-AC3",
+      "trigger": "required分区partial→meeting_ready=false、超预算→needs_input、关键源无证据→needs_input三处表述并存，未给出统一状态映射，实施时容易出现ready=false但状态非needs_input的中间态。",
+      "minimal_fix": "M01契约给一张状态表：required partial/超预算/关键源失败统一为needs_input且附“已覆盖部分”；仅optional分区partial可ready并列gap。"
+    },
+    {
+      "severity": "low",
+      "location": "backlog file_status；DEVELOPMENT-START单writer规则",
+      "trigger": "rendering.py在A05/A06/M05/U04、store.py在A02/A06/B03/B04/M06/U01均标proposed_new，与“同一时段单writer”冲突且掩盖串行顺序；validate_plan只校验标签不校验重复。",
+      "minimal_fix": "后续任务改标existing并在TASKS.md为store/rendering/config写明写入顺序；不改任务数与依赖。"
+    }
+  ],
+  "implementation_gates": [
+    "M01完成前冻结：受理可行性预检、状态映射表、旧head可信条件三项契约文本，M02/M03据此写反例。",
+    "M02交付前证明取数软截止与生成保留在180秒内，cursor/消耗/deadline持久且恢复不重置，kill-reap与心跳互不阻塞。",
+    "M05开启MEETINGS前A11回归全off/降级/排空ack通过，rollback含MEETINGS off演练留证。",
+    "D07先2repo+两人权限真人验收，扩至冻结组织清单需清单覆盖证明；不用2repo结果冒称组织完整。",
+    "U02/U03/U04任何真实写入或受管路径声明只在D08放行，D07只读会议不因journal未定型阻塞。"
+  ]
+}

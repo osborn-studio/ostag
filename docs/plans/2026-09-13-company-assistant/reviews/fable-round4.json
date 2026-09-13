@@ -1,0 +1,54 @@
+{
+  "verdict": "approved_for_planning",
+  "reviewed_plan_hash": "865fd8f86c29adcff88aa2fb814d1965765b6e969513bfce35c85352841daddb",
+  "scope": "第四轮窄复核：仅审round3→final diff，核对F1–F6落实与新矛盾。工具关闭，未运行validator/CI/服务器，未独立核实源码与部署现状；不重做产品规划。批准仅指规划可进入实施，实施diff仍逐切片评审。",
+  "resolved_ids": [
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6"
+  ],
+  "resolution_notes": "F1：状态/ack写入器与ENABLED解耦，STATUS_DIR入表并声明主机bind mount，D02-AC2含三组故障注入。F2：A12依赖A11（闭包含A10），Q24分工明确，D03-AC1/第8步要求合并tree重跑16情景与关键case 3次。F3：A09/B02/B04/C02加A11与config.py/test_brief_flags.py，均≤5文件，无环，validator补断言。F4：brief-control show/set规范、hash同步、步骤3/8与R1/R3改引用命令。F5：admission环境变量删除。F6：integration分支与每窗口单release PR写入TASKS/COLLABORATION。非阻断建议（18/6划分、P95 120秒、成本入参数、validator标注检查、mock OAuth）均已采纳。",
+  "findings": [
+    {
+      "id": "F7",
+      "severity": "medium",
+      "location": "DEPLOYMENT.md“D02拟新增的受信控制命令”；D02候选文件deploy/work-monitor/ostag-github-actions-ssh",
+      "trigger": "set admission=on被放入固定SSH wrapper，而该wrapper文件名即GitHub Actions密钥的强制命令。“自动CI/deploy不调用on”只是约定，持有Actions密钥（含被攻破的CI）即可激活接单，与“on只允许显式操作者”冲突。",
+      "required_change": "文档加一句：on子命令按登录身份/密钥区分，Actions密钥的forced command只允许show与set off/*；on仅对操作者身份的受信入口开放。D02-AC1据此补一条“CI身份调用on被拒绝”的测试。"
+    },
+    {
+      "id": "F8",
+      "severity": "low",
+      "location": "DEPLOYMENT.md配置表OSTAG_BRIEF_STATUS_DIR；A11-AC1/AC3",
+      "trigger": "A11-AC1删除了“不改变旧路径”，写入器改为全off也常驻。未规定状态目录缺失/不可写时的行为：若启动严格检查，一次挂载错误会拖垮Monitor；若静默，与“不能缺文件冒充off”无冲突但需写明。",
+      "required_change": "写明：状态目录不可写只使brief-status进入degraded并在health单列，Monitor照常启动；后果由preflight以not_ready拦截。A11-AC3增加该项。"
+    },
+    {
+      "id": "F9",
+      "severity": "low",
+      "location": "TASKS.md开头段；COLLABORATION.md循环段；DEPLOYMENT第6步",
+      "trigger": "release PR以squash合入main后，integration分支与main分叉，下一窗口的release PR会重复携带旧diff或产生冲突。",
+      "required_change": "一句话规定每次release后integration分支同步策略（reset到新main SHA或合回main），并写入发布交接步骤。"
+    },
+    {
+      "id": "F10",
+      "severity": "low",
+      "location": "README.md预算段；VALIDATION.md成本条；A03-AC3",
+      "trigger": "每日成本上限进入不可变参数版本且“不同版本评测不得混算”，调一次日限额即产生新版本、令历史评测不可比，但日限额不影响单任务输出语义。",
+      "required_change": "区分：每任务上限属评测可比性键；每日上限只入config hash与审计，不入可比性键。三处文本同步。"
+    }
+  ],
+  "implementation_gates": [
+    "G1（D02）：brief-control on路径的身份隔离必须有测试与hash证据；Actions密钥调用on被拒绝、show/set off可用；D03第8步激活留操作者身份、boot_id、generation、ack时间记录。",
+    "G2（A11/D02）：全off镜像状态写入器常驻、目录不可写仅degraded、preflight三组故障注入（全off通过/有能力缺状态拒绝/legacy仅限无消费者旧版）全部有运行记录后，D03方可开始。",
+    "G3（B04/B02）：为满足≤5文件而删除的test_brief_routine_recovery.py与write-results.json，其覆盖（重启补偿窗口、readback负例）必须在保留测试文件中出现，PR评审逐项核对，不接受因合并而缩水。"
+  ],
+  "non_blocking_notes": [
+    "tests/test_brief_flags.py与ostag/config.py被五个任务同时列为候选，B02/B04同阶段并行时会在integration分支上冲突；建议A11先合入后其余任务rebase。",
+    "STATUS_DIR表项只给了容器路径，主机路径与所有权由D02定，宜与/etc/ostag/brief-control同页登记。",
+    "本轮结论基于diff文本，validator“27tasks/81AC passed”与Ruff结果未由我复跑。"
+  ]
+}

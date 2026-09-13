@@ -1,0 +1,1329 @@
+{
+  "schema_version": 1,
+  "kind": "planning_backlog_not_osstack_queue",
+  "base_sha": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
+  "tasks": [
+    {
+      "id": "P00",
+      "title": "基线与旧成果保护",
+      "phase": "prep",
+      "depends_on": [],
+      "files": [
+        "docs/plans/2026-09-13-company-assistant/EVIDENCE.json"
+      ],
+      "acceptance": [
+        "固定main/四工作树完整SHA和dirty清单；列M0/PR增量及保全方式；重查上游2689b07→3a3136d与组织可见范围，不将59提交直接批量合并",
+        "locked Python3.11基线与依赖差异明确；现有13任务不变",
+        "记录生产拓扑/容量/连接身份可见性，未知项不补成功"
+      ],
+      "verify": "uv run --locked pytest -q",
+      "checkpoint": "准备",
+      "status": "planned",
+      "size": "S",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "docs/plans/2026-09-13-company-assistant/EVIDENCE.json": "existing"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "P01",
+      "title": "osstack单任务执行准备",
+      "phase": "optional",
+      "depends_on": [
+        "P00"
+      ],
+      "files": [
+        "scripts/engineering/runner_probe.py",
+        "tests/test_engineering_runner_probe.py",
+        "docs/plans/2026-09-13-company-assistant/COLLABORATION.md"
+      ],
+      "acceptance": [
+        "先复用8b0dd3d9探针并复验installed0.19接口，不复制未审全分支",
+        "单attempt隔离旧队列、超时/失败存证、模型错/空verifier拒绝",
+        "自动loop不可用时受控Codex+Fable继续合成切片，不自行开启旧daemon"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_engineering_runner_probe.py",
+      "checkpoint": "协作",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "scripts/engineering/runner_probe.py": "proposed_new",
+        "tests/test_engineering_runner_probe.py": "proposed_new",
+        "docs/plans/2026-09-13-company-assistant/COLLABORATION.md": "existing"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A01",
+      "title": "来源和最小授权契约",
+      "phase": "A",
+      "depends_on": [
+        "P00"
+      ],
+      "files": [
+        "ostag/briefs/models.py",
+        "ostag/briefs/grants.py",
+        "tests/test_brief_contracts.py",
+        "tests/test_brief_grants.py"
+      ],
+      "acceptance": [
+        "严格类型/未知字段/时间窗/作用域及A1出网校验",
+        "PilotGrant与原身份权限取交集，当前revision/撤销可查",
+        "来源ID可追溯，建议/承诺/事实分开"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_contracts.py tests/test_brief_grants.py",
+      "checkpoint": "合约",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/models.py": "proposed_new",
+        "ostag/briefs/grants.py": "proposed_new",
+        "tests/test_brief_contracts.py": "proposed_new",
+        "tests/test_brief_grants.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A02",
+      "title": "简报状态和作业持久化",
+      "phase": "A",
+      "depends_on": [
+        "A01"
+      ],
+      "files": [
+        "ostag/briefs/store.py",
+        "tests/test_brief_store.py",
+        "tests/test_brief_recovery.py"
+      ],
+      "acceptance": [
+        "只前向迁移briefs库；声明可读schema区间；不兼容只停brief域，Monitor user_version不变",
+        "接收/入队与草稿/outbox分别原子；claim/fence防陈旧提交；心跳独立于阻塞模型且续租失败停止后续IO",
+        "崩溃/数据库忙/重复投递/非法状态迁移有负例"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_store.py tests/test_brief_recovery.py",
+      "checkpoint": "状态",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/store.py": "proposed_new",
+        "tests/test_brief_store.py": "proposed_new",
+        "tests/test_brief_recovery.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A03",
+      "title": "有来源草稿生成",
+      "phase": "A",
+      "depends_on": [
+        "A01"
+      ],
+      "files": [
+        "ostag/briefs/generation.py",
+        "ostag/briefs/validation.py",
+        "tests/test_brief_generation.py",
+        "tests/test_brief_validation.py"
+      ],
+      "acceptance": [
+        "冻结实际模型ID、prompt、预算集和验证规则版本及config hash；schema坏响应拒绝",
+        "不存在source_id/自造URL拒绝，partial不出完整性断言",
+        "注入仅作为数据；无任意工具/写凭据；每任务成本上限入评测参数，每日上限仅入config审计，均执行限额且可取消"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_generation.py tests/test_brief_validation.py",
+      "checkpoint": "生成",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/generation.py": "proposed_new",
+        "ostag/briefs/validation.py": "proposed_new",
+        "tests/test_brief_generation.py": "proposed_new",
+        "tests/test_brief_validation.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A04",
+      "title": "手工材料任务纵向切片",
+      "phase": "A",
+      "depends_on": [
+        "A02",
+        "A03"
+      ],
+      "files": [
+        "ostag/briefs/service.py",
+        "ostag/briefs/worker.py",
+        "ostag/core/runner.py",
+        "tests/test_brief_service.py",
+        "tests/test_brief_worker.py"
+      ],
+      "acceptance": [
+        "A1从受理到draft_ready/outbox可在真实backend契约跑通",
+        "单worker不阻塞monitor循环，超限请求明确失败",
+        "发前/保存前复查grant，失败可恢复但不盲重放"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_service.py tests/test_brief_worker.py",
+      "checkpoint": "A1",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/service.py": "proposed_new",
+        "ostag/briefs/worker.py": "proposed_new",
+        "ostag/core/runner.py": "existing",
+        "tests/test_brief_service.py": "proposed_new",
+        "tests/test_brief_worker.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A05",
+      "title": "飞书任务卡与安全回调",
+      "phase": "A",
+      "depends_on": [
+        "A04",
+        "U01"
+      ],
+      "files": [
+        "ostag/briefs/rendering.py",
+        "ostag/briefs/callbacks.py",
+        "ostag/adapters/feishu.py",
+        "ostag/work_monitor/feishu_routes.py",
+        "tests/test_brief_cards.py"
+      ],
+      "acceptance": [
+        "原授权私聊预览，移动端/桌面均有任务/来源/下一步",
+        "callback绑定actor/destination/revision/expiry，重复只生效一次",
+        "投递不明不报已收到；群状态不泄漏私人正文"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_cards.py",
+      "checkpoint": "交互",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/rendering.py": "proposed_new",
+        "ostag/briefs/callbacks.py": "proposed_new",
+        "ostag/adapters/feishu.py": "existing",
+        "ostag/work_monitor/feishu_routes.py": "existing",
+        "tests/test_brief_cards.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A06",
+      "title": "纠错和内容验收",
+      "phase": "A",
+      "depends_on": [
+        "A05"
+      ],
+      "files": [
+        "ostag/briefs/service.py",
+        "ostag/briefs/store.py",
+        "ostag/briefs/rendering.py",
+        "tests/test_brief_revisions.py"
+      ],
+      "acceptance": [
+        "纠错创建新revision，保留前版关系和修改人",
+        "旧卡确认不得确认新版；采用简报不创建业务批准",
+        "纠错可见但不覆盖源系统事实；用户能撤回采用"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_revisions.py",
+      "checkpoint": "交互",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/service.py": "proposed_new",
+        "ostag/briefs/store.py": "proposed_new",
+        "ostag/briefs/rendering.py": "proposed_new",
+        "tests/test_brief_revisions.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/service.py": "A04",
+        "ostag/briefs/store.py": "A02",
+        "ostag/briefs/rendering.py": "A05"
+      }
+    },
+    {
+      "id": "A07",
+      "title": "授权历史与线程读取",
+      "phase": "A",
+      "depends_on": [
+        "A01"
+      ],
+      "files": [
+        "ostag/connectors/brief_sources.py",
+        "tests/test_brief_history.py",
+        "tests/fixtures/briefs/history-pages.json"
+      ],
+      "acceptance": [
+        "固定chat/请求者身份/时间窗；分页去重和thread有总预算；服务端user凭据供给/受保护存储/刷新/轮换/撤销可验，不复制Mac钥匙串",
+        "403/缺页/循环cursor/媒体占位/撤回显式gap，不能用5页auto_base当完整历史",
+        "CLI超时取消后清理进程并限制输出；在目标1.0.69容器验证help/契约；真实身份与平台证据另在D04验收"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_history.py",
+      "checkpoint": "A2",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/connectors/brief_sources.py": "proposed_new",
+        "tests/test_brief_history.py": "proposed_new",
+        "tests/fixtures/briefs/history-pages.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A08",
+      "title": "需求表快照核对",
+      "phase": "A",
+      "depends_on": [
+        "A01"
+      ],
+      "files": [
+        "ostag/briefs/table_quality.py",
+        "tests/test_brief_table_quality.py",
+        "tests/fixtures/briefs/table-quality.json"
+      ],
+      "acceptance": [
+        "脱敏样本精确13具名+4空白、10无负责人；不把历史数写死",
+        "跨表8差异按明确记录映射验证，歧义保留",
+        "只读表连接器保留空白行和人工编辑；日期语义不明不判逾期；给B02提供同资源独立读回契约"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_table_quality.py",
+      "checkpoint": "A2",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/table_quality.py": "proposed_new",
+        "tests/test_brief_table_quality.py": "proposed_new",
+        "tests/fixtures/briefs/table-quality.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A09",
+      "title": "历史简报组合与完整性",
+      "phase": "A",
+      "depends_on": [
+        "A04",
+        "A07",
+        "A08",
+        "A10",
+        "A11"
+      ],
+      "files": [
+        "ostag/briefs/service.py",
+        "ostag/briefs/validation.py",
+        "tests/test_brief_history_journey.py",
+        "ostag/config.py",
+        "tests/test_brief_flags.py"
+      ],
+      "acceptance": [
+        "A2端到端取数→确定性核对→模型组织→带gap简报",
+        "来源集合/时间截止显示；缺关键资料降为待补充",
+        "刷新创建新revision，不沿用旧hash/验收；整条历史链路中单源撤权使整版失效"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_history_journey.py tests/test_brief_flags.py",
+      "checkpoint": "A2",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/service.py": "proposed_new",
+        "ostag/briefs/validation.py": "proposed_new",
+        "tests/test_brief_history_journey.py": "proposed_new",
+        "ostag/config.py": "existing",
+        "tests/test_brief_flags.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/service.py": "A04",
+        "ostag/briefs/validation.py": "A03",
+        "tests/test_brief_flags.py": "A11"
+      }
+    },
+    {
+      "id": "A10",
+      "title": "撤权删除与保留",
+      "phase": "A",
+      "depends_on": [
+        "A02",
+        "A04"
+      ],
+      "files": [
+        "ostag/briefs/grants.py",
+        "ostag/briefs/retention.py",
+        "tests/test_brief_revocation.py",
+        "tests/test_brief_retention.py"
+      ],
+      "acceptance": [
+        "生成中撤权取消后续出网和投递，旧fence结果不可发布",
+        "原文/摘录到期清理，tombstone阻止缓存和索引复活",
+        "发送过的卡不能保证回收；hash-only不显示可重验"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_revocation.py tests/test_brief_retention.py",
+      "checkpoint": "隐私",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/grants.py": "proposed_new",
+        "ostag/briefs/retention.py": "proposed_new",
+        "tests/test_brief_revocation.py": "proposed_new",
+        "tests/test_brief_retention.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/grants.py": "A01"
+      }
+    },
+    {
+      "id": "A11",
+      "title": "单服务接线与回归隔离",
+      "phase": "A",
+      "depends_on": [
+        "A05",
+        "A06",
+        "A10"
+      ],
+      "files": [
+        "ostag/config.py",
+        "ostag/work_monitor/server.py",
+        "tests/test_brief_lifespan.py",
+        "tests/test_brief_flags.py",
+        "deploy/work-monitor/docker-compose.yml"
+      ],
+      "acceptance": [
+        "全off不创建brief worker/业务DB，但含brief能力镜像仍写状态/排空ack；统一注册全部flag，未实现模块拒绝开启；MEETINGS一并注册且仅M05就绪后可启用",
+        "on只有一owner；运行期控制文件停接单/认领/新IO，boot默认off；独立在途计数与排空ack可核验",
+        "延迟/失败/brief schema不兼容不破坏Monitor/relay/日报；brief降级单列；同digest只读维护模式禁止业务IO；状态目录不可写仅brief-status降级，Monitor正常、preflight拒绝"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_lifespan.py tests/test_brief_flags.py",
+      "checkpoint": "运行",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/config.py": "existing",
+        "ostag/work_monitor/server.py": "existing",
+        "tests/test_brief_lifespan.py": "proposed_new",
+        "tests/test_brief_flags.py": "proposed_new",
+        "deploy/work-monitor/docker-compose.yml": "existing"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "A12",
+      "title": "真实模型语义评测",
+      "phase": "A",
+      "depends_on": [
+        "A06",
+        "A11"
+      ],
+      "files": [
+        "scripts/engineering/brief_eval.py",
+        "examples/brief-eval/dev-cases.json",
+        "examples/brief-eval/README.md",
+        "tests/test_brief_eval_contract.py"
+      ],
+      "acceptance": [
+        "24情景定义18开发+6独立保留变体；当前只验A1的16情景子集，含至少4保留变体，不宣称A2通过",
+        "A1关键语义case实际模型重复3次，统计所有失败/弃权与成本；参数版本不同单列",
+        "关键断言逐项有依据/待确认，采用率和修订时间独立记录"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_eval_contract.py",
+      "checkpoint": "评测",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "scripts/engineering/brief_eval.py": "proposed_new",
+        "examples/brief-eval/dev-cases.json": "proposed_new",
+        "examples/brief-eval/README.md": "proposed_new",
+        "tests/test_brief_eval_contract.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "D01",
+      "title": "隔离staging与真实链路",
+      "phase": "release",
+      "depends_on": [
+        "A11",
+        "A12"
+      ],
+      "files": [
+        "deploy/work-monitor/docker-compose.brief-staging.yml",
+        "scripts/brief_staging_smoke.sh",
+        "tests/test_brief_staging_config.py",
+        "release/brief-live-template.md"
+      ],
+      "acceptance": [
+        "独立test app/凭据/群/数据卷/端口，不消费生产bot",
+        "A1 profile目标linux/amd64镜像+真实模型+两身份/转发卡/手机桌面验证，不声称历史或跨源ACL通过",
+        "staging独立boot/restart/cancel/revoke流程，留真实平台证据"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_staging_config.py",
+      "checkpoint": "stage",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "deploy/work-monitor/docker-compose.brief-staging.yml": "proposed_new",
+        "scripts/brief_staging_smoke.sh": "proposed_new",
+        "tests/test_brief_staging_config.py": "proposed_new",
+        "release/brief-live-template.md": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "D02",
+      "title": "发布锁和多库恢复",
+      "phase": "release",
+      "depends_on": [
+        "P00",
+        "A02",
+        "A11"
+      ],
+      "files": [
+        "scripts/deploy_work_monitor_release.sh",
+        "deploy/work-monitor/ostag-github-actions-ssh",
+        "scripts/backup_work_monitor.sh",
+        "tests/test_deploy_brief_safety.py",
+        "docs/ostag/deployment.md"
+      ],
+      "acceptance": [
+        "核验server并补全所有deploy/rollback/控制写共用锁；受信brief-control show/set原子控制；preflight强制fresh drain ack/零lease/零在途，not_ready不切镜像不rollback；CI密钥身份调用on及伪造operator拒绝，仅独立操作者入口可激活",
+        "briefs/附件备份恢复及schema兼容；全off镜像preflight通过、含brief却缺状态拒绝、legacy例外精确限定；不覆盖Monitor新数据",
+        "可信脚本安装/hash同步后才merge本批；失败回滚强制所有明确brief功能flag及admission off，含Compose覆盖和同digest只读维护演练"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_deploy_brief_safety.py",
+      "checkpoint": "运维",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "scripts/deploy_work_monitor_release.sh": "existing",
+        "deploy/work-monitor/ostag-github-actions-ssh": "existing",
+        "scripts/backup_work_monitor.sh": "existing",
+        "tests/test_deploy_brief_safety.py": "proposed_new",
+        "docs/ostag/deployment.md": "existing"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "D03",
+      "title": "A1发布与首位用户验收",
+      "phase": "release",
+      "depends_on": [
+        "D01",
+        "D02"
+      ],
+      "files": [
+        "release/brief-a1-evidence.md",
+        "release/brief-a1-manifest.json"
+      ],
+      "acceptance": [
+        "候选及合并tree CI/容器/模型/A1 stage证据齐全；全off上线后激活前在合并tree重跑16情景、关键语义case各3次；排空覆盖merge至deploy且仅重跑当前main",
+        "先全部off上线，再仅owner A1，核对image/receipt/health/真实草稿",
+        "关闭A1并恢复前镜像演练可维护旧业务，新数据保留"
+      ],
+      "verify": "scripts/release_check.sh && scripts/ci_release_gates.sh",
+      "checkpoint": "A1发布",
+      "status": "planned",
+      "size": "S",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "release/brief-a1-evidence.md": "proposed_new",
+        "release/brief-a1-manifest.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "D04",
+      "title": "A2历史试点与批次A退出",
+      "phase": "release",
+      "depends_on": [
+        "A09",
+        "D03"
+      ],
+      "files": [
+        "release/brief-a2-evidence.md",
+        "release/brief-a2-manifest.json"
+      ],
+      "acceptance": [
+        "含A09候选在A2 profile重跑D01三项stage门槛；目标1.0.69+服务器user身份全生命周期/历史ACL；全24情景重验且关键语义case各3次",
+        "至少7天且10个不同真实委托，统计接受/拒绝/人修/缺口",
+        "扩到具名成员前双人可见性实测；未达标保持试点"
+      ],
+      "verify": "scripts/release_check.sh && scripts/ci_release_gates.sh",
+      "checkpoint": "A2发布",
+      "status": "planned",
+      "size": "S",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "release/brief-a2-evidence.md": "proposed_new",
+        "release/brief-a2-manifest.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "B01",
+      "title": "确认行动到冻结变更",
+      "phase": "B",
+      "depends_on": [
+        "A06"
+      ],
+      "files": [
+        "ostag/briefs/actions.py",
+        "ostag/core/receipts.py",
+        "tests/test_brief_action_proposals.py"
+      ],
+      "acceptance": [
+        "单资源/字段/原值/新值/身份/版本冻结，严守旧wire兼容",
+        "内容验收不构成动作授权，重复提议关联唯一receipt",
+        "修改目标或payload使旧批准失效"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_action_proposals.py",
+      "checkpoint": "B合约",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/actions.py": "proposed_new",
+        "ostag/core/receipts.py": "existing",
+        "tests/test_brief_action_proposals.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "B02",
+      "title": "单目标执行与独立读回",
+      "phase": "B",
+      "depends_on": [
+        "B01",
+        "A08",
+        "A11",
+        "U02"
+      ],
+      "files": [
+        "ostag/briefs/actions.py",
+        "ostag/connectors/apply.py",
+        "tests/test_brief_action_execution.py",
+        "ostag/config.py",
+        "tests/test_brief_flags.py"
+      ],
+      "acceptance": [
+        "apply重查身份/当前对象和授权，未批准零写",
+        "若无条件写，不承诺single-writer覆盖多人编辑；选可证明安全路径",
+        "provider成功仍需独立readback，不同资源/版本拒绝完成"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_action_execution.py tests/test_brief_flags.py",
+      "checkpoint": "B执行",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/actions.py": "proposed_new",
+        "ostag/connectors/apply.py": "existing",
+        "tests/test_brief_action_execution.py": "proposed_new",
+        "ostag/config.py": "existing",
+        "tests/test_brief_flags.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/actions.py": "B01",
+        "tests/test_brief_flags.py": "A11"
+      }
+    },
+    {
+      "id": "B03",
+      "title": "跨库与外部不确定对账",
+      "phase": "B",
+      "depends_on": [
+        "B02"
+      ],
+      "files": [
+        "ostag/briefs/reconciliation.py",
+        "ostag/briefs/store.py",
+        "tests/test_brief_action_reconciliation.py"
+      ],
+      "acceptance": [
+        "receipt创建/外部写/本地回写各崩溃窗口可定位",
+        "响应丢失、重复worker、人工并发不盲重放、不伪造成功",
+        "无法唯一证明结果保留待核验，人工对账有身份与理由"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_action_reconciliation.py",
+      "checkpoint": "B恢复",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/reconciliation.py": "proposed_new",
+        "ostag/briefs/store.py": "proposed_new",
+        "tests/test_brief_action_reconciliation.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/store.py": "A02"
+      }
+    },
+    {
+      "id": "B04",
+      "title": "一条例行简报",
+      "phase": "B",
+      "depends_on": [
+        "A11",
+        "A09",
+        "M05"
+      ],
+      "files": [
+        "ostag/briefs/routines.py",
+        "ostag/briefs/store.py",
+        "tests/test_brief_routines.py",
+        "ostag/config.py",
+        "tests/test_brief_flags.py"
+      ],
+      "acceptance": [
+        "模板/资料/受众/时区/频率/预算可见，例行执行不能再建例行；支持会议模板，未就绪模板拒绝启用，时间窗随每次实例冻结",
+        "每次执行复核grant，重启补偿有窗口且不追发全部旧实例",
+        "只在变化/失败/需决定通知，暂停后未投递作废"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_routines.py tests/test_brief_flags.py",
+      "checkpoint": "B例行",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/routines.py": "proposed_new",
+        "ostag/briefs/store.py": "proposed_new",
+        "tests/test_brief_routines.py": "proposed_new",
+        "ostag/config.py": "existing",
+        "tests/test_brief_flags.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/store.py": "A02",
+        "tests/test_brief_flags.py": "A11"
+      }
+    },
+    {
+      "id": "D05",
+      "title": "B真实写回验收与发布",
+      "phase": "release",
+      "depends_on": [
+        "B03",
+        "B04",
+        "D04",
+        "D07"
+      ],
+      "files": [
+        "release/brief-b-evidence.md",
+        "release/brief-b-manifest.json"
+      ],
+      "acceptance": [
+        "B profile含B03/B04候选重跑D01三项stage门槛及B专项；采用A格式输入，先测试表/任务再获具体原表动作授权",
+        "真实重复请求/响应丢失/并发编辑/撤权验收零错写及重复",
+        "独立B开关、部署/读回/降级回只读，外部效果不随镜像撤销"
+      ],
+      "verify": "scripts/release_check.sh && scripts/ci_release_gates.sh",
+      "checkpoint": "B发布",
+      "status": "planned",
+      "size": "S",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "release/brief-b-evidence.md": "proposed_new",
+        "release/brief-b-manifest.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "C01",
+      "title": "销售文字与客户匹配",
+      "phase": "C",
+      "depends_on": [
+        "A01"
+      ],
+      "files": [
+        "ostag/briefs/sales.py",
+        "tests/test_sales_brief.py",
+        "tests/fixtures/briefs/sales-cases.json"
+      ],
+      "acceptance": [
+        "客户歧义必须确认，金额/日期/阶段不猜",
+        "销售私聊不默认进管理报告或另一销售上下文",
+        "只用指定原表，不创建伴随表或改权限"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_sales_brief.py",
+      "checkpoint": "C",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/sales.py": "proposed_new",
+        "tests/test_sales_brief.py": "proposed_new",
+        "tests/fixtures/briefs/sales-cases.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "C02",
+      "title": "复用业务闭环",
+      "phase": "C",
+      "depends_on": [
+        "C01",
+        "B03",
+        "A11"
+      ],
+      "files": [
+        "ostag/briefs/sales.py",
+        "tests/test_sales_brief_journey.py",
+        "examples/brief-eval/sales-cases.json",
+        "ostag/config.py",
+        "tests/test_brief_flags.py"
+      ],
+      "acceptance": [
+        "复用grant/task/revision/receipt/readback，不另建一套核心",
+        "文字到草稿到确认执行完整链路，错误客户负例阻断",
+        "记忆更正与业务更正区分，后续提醒需独立授权"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_sales_brief_journey.py tests/test_brief_flags.py",
+      "checkpoint": "C",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/sales.py": "proposed_new",
+        "tests/test_sales_brief_journey.py": "proposed_new",
+        "examples/brief-eval/sales-cases.json": "proposed_new",
+        "ostag/config.py": "existing",
+        "tests/test_brief_flags.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/sales.py": "C01",
+        "tests/test_brief_flags.py": "A11"
+      }
+    },
+    {
+      "id": "D06",
+      "title": "销售试点与发布交接",
+      "phase": "release",
+      "depends_on": [
+        "C02",
+        "D05"
+      ],
+      "files": [
+        "release/brief-c-evidence.md",
+        "release/brief-c-manifest.json"
+      ],
+      "acceptance": [
+        "C profile含C02候选重跑D01三项stage门槛及C专项；指定sales用户/表/字段/模型出网，测试表和真实表分开",
+        "至少7天且10真实跟进，人工纠错负担与有效记录数达到商定目标",
+        "留操作/撤权/恢复手册，其他能力开关状态明确"
+      ],
+      "verify": "scripts/release_check.sh && scripts/ci_release_gates.sh",
+      "checkpoint": "C发布",
+      "status": "planned",
+      "size": "S",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "release/brief-c-evidence.md": "proposed_new",
+        "release/brief-c-manifest.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "I01",
+      "title": "PR证据独立保全和评测",
+      "phase": "optional",
+      "depends_on": [
+        "P00"
+      ],
+      "files": [
+        "docs/research/pr-evidence-integration.md"
+      ],
+      "acceptance": [
+        "保留f62b68a5及差异，集成单独评审不整体合M0",
+        "先真实GitHub只读控制证据，再补受控diff/模型样本，分开验收",
+        "不自动APPROVE/MERGE/DEPLOY，不作为A交付前置"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_github_review_evidence.py tests/test_pr_review_evaluation.py",
+      "checkpoint": "独立线",
+      "status": "planned",
+      "size": "S",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "docs/research/pr-evidence-integration.md": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "M01",
+      "title": "会议范围与项目映射",
+      "phase": "meeting",
+      "depends_on": [
+        "A01"
+      ],
+      "files": [
+        "ostag/briefs/meeting_models.py",
+        "ostag/briefs/project_mapping.py",
+        "tests/test_meeting_contracts.py"
+      ],
+      "acceptance": [
+        "冻结目的/时区/半开窗口/群repo ID与分支/受众，采集后封存实际观察截止；受理前做最少调用/时间预检并固定状态表",
+        "租户与请求者权限交集；群/仓库/人员映射具名版本，转名/转移/新增仓库不自动继承",
+        "严格拒绝歧义相对日期与跨租户引用，提供可修改范围确认卡契约；冻结会议评测规格/评分规则/独立holdout保管协议"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_contracts.py",
+      "checkpoint": "会议契约",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/meeting_models.py": "proposed_new",
+        "ostag/briefs/project_mapping.py": "proposed_new",
+        "tests/test_meeting_contracts.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "M02",
+      "title": "GitHub组织时间窗取数",
+      "phase": "meeting",
+      "depends_on": [
+        "M01",
+        "A07"
+      ],
+      "files": [
+        "ostag/connectors/github_history.py",
+        "tests/test_github_history.py",
+        "tests/fixtures/meetings/github-history.json"
+      ],
+      "acceptance": [
+        "按冻结清单逐repo有界采集PR/Issue/评论/timeline/default-branch commits，保留event_at/observed_at，updated_at只筛候选",
+        "分页完整性/循环cursor/1000搜索上限/窗口后更新/旧作者日期/权限撤销/半开边界有反例，不以Events页当全量；每repo每类/每群子预算，required分区partial不可ready",
+        "read-only transport限字节/页数/重试/总deadline并kill-reap；身份缓存隔离/ETag校验/限流对Monitor无饥饿；cursor/消耗/deadline持久，恢复不重置；120秒取数软截止保留60秒生成，硬deadline仍180秒"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_github_history.py",
+      "checkpoint": "GH取数",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/connectors/github_history.py": "proposed_new",
+        "tests/test_github_history.py": "proposed_new",
+        "tests/fixtures/meetings/github-history.json": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "M03",
+      "title": "合并检查发布证据分类",
+      "phase": "meeting",
+      "depends_on": [
+        "M02"
+      ],
+      "files": [
+        "ostag/briefs/github_change_facts.py",
+        "ostag/connectors/github_history.py",
+        "tests/test_meeting_release_facts.py"
+      ],
+      "acceptance": [
+        "PR合并、default-branch commit、release published、Actions成功与production部署各自事实，不互相冒充；首次无旧head非PR合入时间unknown；旧head须来自同repo/分支/principal有效TTL快照",
+        "复用ProviderChangeEvidence完整current-head验证；过去事件与当前观察分开，缺环境/receipt则部署unknown",
+        "rerun/checks过期/不同SHA或repo/回滚/删除记录/同一PR多事件去重有明确断言"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_release_facts.py",
+      "checkpoint": "GH事实",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/github_change_facts.py": "proposed_new",
+        "ostag/connectors/github_history.py": "proposed_new",
+        "tests/test_meeting_release_facts.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/connectors/github_history.py": "M02"
+      }
+    },
+    {
+      "id": "M04",
+      "title": "跨来源冲突与议题提取",
+      "phase": "meeting",
+      "depends_on": [
+        "M03",
+        "A09"
+      ],
+      "files": [
+        "ostag/briefs/meeting_facts.py",
+        "ostag/briefs/validation.py",
+        "tests/test_meeting_facts.py"
+      ],
+      "acceptance": [
+        "显式链接和已批准项目映射优先；语义相关仅候选，Feishu身份与GitHub登录不按同名自动合并",
+        "聊天承诺/PR事实/发布证据分列，矛盾按时间展示；无证据不推导无进展/人员绩效",
+        "关键资料缺失阻止meeting_ready，数字确定性核对、关键论断人工语义验证；源失败置顶，按待决/阻塞/冲突而非bot活跃量选题"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_facts.py",
+      "checkpoint": "事实整合",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/meeting_facts.py": "proposed_new",
+        "ostag/briefs/validation.py": "proposed_new",
+        "tests/test_meeting_facts.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/validation.py": "A03"
+      }
+    },
+    {
+      "id": "M05",
+      "title": "会议准备端到端功能",
+      "phase": "meeting",
+      "depends_on": [
+        "M04",
+        "A11",
+        "U01"
+      ],
+      "files": [
+        "ostag/briefs/meetings.py",
+        "ostag/briefs/rendering.py",
+        "ostag/config.py",
+        "tests/test_meeting_journey.py",
+        "tests/test_brief_flags.py"
+      ],
+      "acceptance": [
+        "复用BriefService/job/revision/grant/outbox，生成会前阅读/重要变化/冲突风险/至多3重点决策议题与时间预算/建议行动",
+        "OSTAG_BRIEF_MEETINGS_ENABLED默认off且未实现拒绝开启；私聊状态+可导出的本地MD，原A1/A2和其他业务回归通过",
+        "先确认目的和范围再取资料；没有日历邀请/群分享/表写，采取建议不构成批准；shareable_sources默认空，来源权限与受众交集逐项检查"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_journey.py tests/test_brief_flags.py",
+      "checkpoint": "首个会议包",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/meetings.py": "proposed_new",
+        "ostag/briefs/rendering.py": "proposed_new",
+        "ostag/config.py": "existing",
+        "tests/test_meeting_journey.py": "proposed_new",
+        "tests/test_brief_flags.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/rendering.py": "A05",
+        "tests/test_brief_flags.py": "A11"
+      }
+    },
+    {
+      "id": "M06",
+      "title": "会前刷新与版本差异",
+      "phase": "meeting",
+      "depends_on": [
+        "M05",
+        "A10"
+      ],
+      "files": [
+        "ostag/briefs/meetings.py",
+        "ostag/briefs/store.py",
+        "tests/test_meeting_refresh.py"
+      ],
+      "acceptance": [
+        "冻结窗口不变时刷新增加observation revision；扩大窗口或范围是新request/grant，不偷偷采集",
+        "新旧议题/事实差异可追溯，保留人工更正与冲突；删源撤权使整版不可继续发布",
+        "关键资料无法刷新则needs_input/旧版明确stale；只合并未开始投递的旧状态，不覆盖已发送/不确定结果"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_refresh.py",
+      "checkpoint": "持续准备",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/meetings.py": "proposed_new",
+        "ostag/briefs/store.py": "proposed_new",
+        "tests/test_meeting_refresh.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/meetings.py": "M05",
+        "ostag/briefs/store.py": "A02"
+      }
+    },
+    {
+      "id": "M07",
+      "title": "会议专项评测与可用性",
+      "phase": "meeting",
+      "depends_on": [
+        "M06"
+      ],
+      "files": [
+        "scripts/engineering/meeting_eval.py",
+        "examples/meeting-eval/README.md",
+        "examples/meeting-eval/dev-cases.json",
+        "tests/test_meeting_eval_contract.py"
+      ],
+      "acceptance": [
+        "MC01—MC24会议专项18开发+6私有保留，与旧Q01—Q24分开，关键语义case各3次并保留所有失败",
+        "时间/关联/权限/合并发布区分全部精确通过，议题支持与决策价值由owner盲评",
+        "3个人工基线+7天10份不同真实会议委托指标定义齐全；尚未真人评测只报not_run"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_eval_contract.py",
+      "checkpoint": "会议评测",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "scripts/engineering/meeting_eval.py": "proposed_new",
+        "examples/meeting-eval/README.md": "proposed_new",
+        "examples/meeting-eval/dev-cases.json": "proposed_new",
+        "tests/test_meeting_eval_contract.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "D07",
+      "title": "会议功能真实试点与发布",
+      "phase": "release",
+      "depends_on": [
+        "M07",
+        "D04",
+        "D02"
+      ],
+      "files": [
+        "release/meeting-evidence.md",
+        "release/meeting-manifest.json",
+        "scripts/meeting_staging_smoke.sh",
+        "tests/test_meeting_staging_config.py"
+      ],
+      "acceptance": [
+        "会议profile重跑D01三项stage门槛，真实Feishu+GH user只读身份、两人权限、至少2repo，扩到组织清单需覆盖证明",
+        "同候选完整MC24及受影响Q套件/CI/容器通过，全off上线后准确合并tree重验，再由operator单人激活",
+        "7天10不同真实会议委托与人工基线对比；会议flag独立关闭、原域继续，撤权/drain/恢复均留证据"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_meeting_staging_config.py",
+      "checkpoint": "会议发布",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "release/meeting-evidence.md": "proposed_new",
+        "release/meeting-manifest.json": "proposed_new",
+        "scripts/meeting_staging_smoke.sh": "proposed_new",
+        "tests/test_meeting_staging_config.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "U01",
+      "title": "移植投递观测与结果不确定处理",
+      "phase": "upstream",
+      "depends_on": [
+        "A02"
+      ],
+      "files": [
+        "ostag/briefs/delivery.py",
+        "ostag/briefs/store.py",
+        "tests/test_brief_delivery_observation.py"
+      ],
+      "acceptance": [
+        "移植上游观测语义到Feishu专属outbox，稳定delivery ID与revision绑定；只合并证明尚未开始的投递",
+        "响应丢失仅在可唯一验证provider ID与内容时确认，不能搜索一句相同文本就认领；未知保持待核验不重发",
+        "持久输入后及时受理、重启不丢，接收/开始/生成/收到分开；观测保留有界，原始不确定证据不可覆盖"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_brief_delivery_observation.py",
+      "checkpoint": "上游投递",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/briefs/delivery.py": "proposed_new",
+        "ostag/briefs/store.py": "proposed_new",
+        "tests/test_brief_delivery_observation.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/store.py": "A02"
+      }
+    },
+    {
+      "id": "U02",
+      "title": "外部操作日志与执行授权适配",
+      "phase": "upstream",
+      "depends_on": [
+        "B01",
+        "A02"
+      ],
+      "files": [
+        "ostag/core/effects.py",
+        "ostag/core/effect_journal.py",
+        "ostag/core/approvals.py",
+        "tests/test_effect_journal.py",
+        "ostag/briefs/store.py"
+      ],
+      "acceptance": [
+        "复用ActionReceipt作为唯一批准权威，闭合操作kind+目标/payload/身份/attempt/fence/expiry摘要；会议读取不走外部写许可",
+        "B中央事务侧journal与动作意图同briefs.sqlite3原子，IO前持久begin；与JSONL批准分开对账，not-started不等于provider absent",
+        "记录证据而非模型指定成功状态，未知副作用不因新attempt/人工备注自动重试；新持久路径有备份和领域兼容约束；合并测试文件保留原authority/故障反例，D05先验证B路径"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_effect_journal.py",
+      "checkpoint": "上游操作",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/core/effects.py": "proposed_new",
+        "ostag/core/effect_journal.py": "proposed_new",
+        "ostag/core/approvals.py": "existing",
+        "tests/test_effect_journal.py": "proposed_new",
+        "ostag/briefs/store.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/store.py": "A02"
+      }
+    },
+    {
+      "id": "U03",
+      "title": "仓库批次证明与能力门槛",
+      "phase": "upstream",
+      "depends_on": [
+        "U02"
+      ],
+      "files": [
+        "ostag/backends/executor_runtime.py",
+        "ostag/core/workspace_attestation.py",
+        "tests/test_workspace_attestation.py",
+        "tests/test_repository_write_conflicts.py"
+      ],
+      "acceptance": [
+        "交付repo identity/base SHA/worktree realpath/attempt/fence/变更摘要证明契约，受控适配器验证审批前与执行前重核",
+        "缺证明、workspace切换、越界路径/符号链接、互相冲突ACP写操作拒绝；实际CLI不具备管控能力则不宣称支持",
+        "当前普通CLI没有受管cwd/ACP证据，真实路径缺conformance必须unsupported；不宣称完整ACP或自动push/PR/merge"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_workspace_attestation.py tests/test_repository_write_conflicts.py",
+      "checkpoint": "上游仓库",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/backends/executor_runtime.py": "existing",
+        "ostag/core/workspace_attestation.py": "proposed_new",
+        "tests/test_workspace_attestation.py": "proposed_new",
+        "tests/test_repository_write_conflicts.py": "proposed_new"
+      },
+      "file_reuse_from": {}
+    },
+    {
+      "id": "U04",
+      "title": "审批反馈和状态时间语义",
+      "phase": "upstream",
+      "depends_on": [
+        "A11"
+      ],
+      "files": [
+        "ostag/work_monitor/presence.py",
+        "ostag/briefs/rendering.py",
+        "tests/test_agent_presence.py",
+        "tests/test_brief_feedback.py"
+      ],
+      "acceptance": [
+        "已批准/待执行/执行中/结果不明独立呈现，批准反馈不等worker；旧卡控件不能复活已终结动作",
+        "保留既有六态Presence只读模型，仅新增反馈/时序投影与守卫；heartbeat不伪称租约/完成证明",
+        "接收/排队/执行/投递时间单列，clock skew有界、busy不被queued覆盖，相关日志脱敏/有界保留"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_agent_presence.py tests/test_brief_feedback.py",
+      "checkpoint": "上游反馈",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "no_live_by_default",
+      "file_status": {
+        "ostag/work_monitor/presence.py": "existing",
+        "ostag/briefs/rendering.py": "proposed_new",
+        "tests/test_agent_presence.py": "existing",
+        "tests/test_brief_feedback.py": "proposed_new"
+      },
+      "file_reuse_from": {
+        "ostag/briefs/rendering.py": "A05"
+      }
+    },
+    {
+      "id": "D08",
+      "title": "上游适配批次验收",
+      "phase": "release",
+      "depends_on": [
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "D05"
+      ],
+      "files": [
+        "release/upstream-adaptation-evidence.md",
+        "release/upstream-adaptation-manifest.json",
+        "tests/test_upstream_adaptation_journey.py",
+        "docs/upgrade/2026-09-13-opentag-sync.md"
+      ],
+      "acceptance": [
+        "固定上游59commit分类与本地映射，保留MIT/Apache来源说明，所有源码/测试/未实测差异逐项有回执",
+        "复用D01隔离stage检验受管仓库写与业务effects路径；证明旧CLI不越权升级、未知副作用不盲重放",
+        "独立release走排空/锁/备份/准确SHA/全off/操作者激活，新journal兼容和当前digest维护恢复演练通过"
+      ],
+      "verify": "uv run --locked pytest -q tests/test_upstream_adaptation_journey.py",
+      "checkpoint": "上游发布",
+      "status": "planned",
+      "size": "M",
+      "execution": "planning_only",
+      "live_gate": "separate_scope_and_release_evidence",
+      "file_status": {
+        "release/upstream-adaptation-evidence.md": "proposed_new",
+        "release/upstream-adaptation-manifest.json": "proposed_new",
+        "tests/test_upstream_adaptation_journey.py": "proposed_new",
+        "docs/upgrade/2026-09-13-opentag-sync.md": "proposed_new"
+      },
+      "file_reuse_from": {}
+    }
+  ],
+  "revision": 2,
+  "enhancement": "Feishu + GitHub meeting preparation and selective OpenTag delta",
+  "expected_task_count": 40
+}
