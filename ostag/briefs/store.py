@@ -10,9 +10,10 @@ Requester APIs require namespace + platform + actor. WorkerContext is an
 explicit trusted in-process boundary, not a credential: never expose worker
 methods or construct contexts directly from untrusted endpoint/model input.
 Recovery checks grant revision, snapshot TTL and source availability outside
-SQLite; no authorization/model/user callback runs under a database lock and no
-new source data replaces an admitted snapshot. A03/A04 own semantic validation
-and current authorization. Trusted nonblocking clocks are sampled under locks.
+SQLite; the opt-in A04 precommit callback is the only authorization callback
+inside the lock, must be bounded/non-reentrant, and cannot access this store.
+No model/user callback is executed and no new source data replaces a snapshot.
+A03/A04 own semantic validation and current authorization. Trusted nonblocking clocks are sampled under locks.
 
 One job is one queue item; one initial attempt plus two expired-attempt retries,
 one live lease globally. A completion only queues one requester-private outbox
@@ -57,6 +58,7 @@ import math
 from pathlib import Path
 import sqlite3
 from threading import Event, Lock, Thread
+from time import monotonic
 from types import MappingProxyType
 from typing import Literal, TypeAlias
 from uuid import uuid4
@@ -66,9 +68,12 @@ from ostag.briefs.models import (
 )
 from ostag.core.identity import Principal
 
+# Preserve the A02/A03 construction contract (including actual schema1 -> 2).
+# A04 explicitly calls enable_manual() for the additive schema3 migration.
 CURRENT_SCHEMA_VERSION = 2
 READABLE_SCHEMA_MIN = 1
-READABLE_SCHEMA_MAX = 2
+READABLE_SCHEMA_MAX = 3
+MANUAL_SCHEMA_VERSION = 3
 APPLICATION_ID = 0x42524653  # BRFS; deliberately different from unmarked Monitor SQLite.
 MAX_JSON_BYTES = 1024 * 1024
 MAX_QUEUED = 20
@@ -559,7 +564,32 @@ _COST_SCHEMA = (
     )""",
     "CREATE INDEX brief_cost_day ON brief_cost_calls(charged_day, job_id)",
 )
-_SCHEMAS = {1: _SCHEMA, 2: _SCHEMA + _COST_SCHEMA}
+_MANUAL_SCHEMA = (
+    """CREATE TABLE brief_intakes (
+        job_id TEXT PRIMARY KEY REFERENCES brief_jobs(job_id), request_hash TEXT NOT NULL
+    )""",
+    """CREATE TABLE brief_failures (
+        job_id TEXT PRIMARY KEY REFERENCES brief_jobs(job_id), cause TEXT NOT NULL,
+        created_us INTEGER NOT NULL
+    )""",
+)
+_SCHEMAS = {1: _SCHEMA, 2: _SCHEMA + _COST_SCHEMA,
+            3: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA}
+
+# Fixed public-domain causes only: never exception strings, excerpts or provider errors.
+FAILURE_CAUSES = frozenset({
+    "cancelled", "stopped", "timeout", "lease_lost", "authorization_denied",
+    "invalid_request", "config_changed", "recovery_required", "store_error",
+    "commit_failed", "needs_input", "input_too_large", "checkpoint_denied",
+    "call_denied", "budget_denied", "transport_error", "invalid_transport_response",
+    "cost_overrun", "missing_usage", "missing_identity", "model_mismatch",
+    "usage_bound_exceeded", "invalid_output",
+})
+
+
+def _failure_cause(cause: str) -> None:
+    if type(cause) is not str or cause not in FAILURE_CAUSES:
+        raise _invalid("unknown sanitized failure cause")
 
 
 def _normalized(sql: str) -> str:
@@ -603,8 +633,9 @@ class BriefStore:
     nonblocking, thread-safe UTC clock callable (default utc_now), sampled AFTER
     acquiring the write lock, never a timestamp captured before lock contention.
     Test clocks must advance consistently across all handles/guard threads.
-    Only this operational clock runs under the lock; grant/model/user callbacks
-    must never be supplied as clocks. Admission's now is an intake timestamp,
+    The operational clock and optional trusted bounded precommit policy gate
+    run under the lock; policy gates must never be supplied as clocks and must
+    not reenter this store/guard. No model/user callback may run here. Admission's now is an intake timestamp,
     independent of execution timing; exact replay does not change persisted time.
     No generic connection or SQL API is exposed. Methods accepting worker tokens
     are trusted maintenance;
@@ -689,6 +720,87 @@ class BriefStore:
             yield db
             db.commit()
 
+    def enable_manual(self) -> None:
+        """Opt in to additive schema3; legacy construction still upgrades 1 -> 2.
+
+        Actual schema1/2 rows are unchanged. Reopened schema3 is readable by
+        this implementation; old binaries must fail closed on its newer schema.
+        """
+        with self._transaction() as db:
+            if db.execute("PRAGMA user_version").fetchone()[0] == 2:
+                for statement in _MANUAL_SCHEMA:
+                    db.execute(statement)
+                db.execute(f"PRAGMA user_version={MANUAL_SCHEMA_VERSION}")
+
+    def get_by_event(self, scope: RequesterContext, idempotency_key: str) -> Job | None:
+        """Durable scoped lookup BEFORE constructing a new intake snapshot/clock."""
+        params = _scope(scope)
+        _identifier(idempotency_key, "idempotency_key")
+        with self._transaction(write=False) as db:
+            row = db.execute("SELECT * FROM brief_jobs WHERE namespace=? AND platform=? "
+                             "AND actor_id=? AND idempotency_key=?",
+                             (*params, idempotency_key)).fetchone()
+            return None if row is None else _job(row)
+
+    def matches_request(self, scope: RequesterContext, job_id: str, request_hash: str) -> bool:
+        _hash(request_hash, "request_hash")
+        with self._transaction(write=False) as db:
+            if self._find(db, scope, job_id) is None:
+                return False
+            row = db.execute("SELECT request_hash FROM brief_intakes WHERE job_id=?",
+                             (job_id,)).fetchone()
+            return row is not None and row[0] == request_hash
+
+    def failure_cause(self, scope: RequesterContext, job_id: str) -> str | None:
+        with self._transaction(write=False) as db:
+            if self._find(db, scope, job_id) is None:
+                return None
+            row = db.execute("SELECT cause FROM brief_failures WHERE job_id=?",
+                             (job_id,)).fetchone()
+            return None if row is None else row[0]
+
+    @staticmethod
+    def _failure(db, row, cause, stamp):
+        if cause is not None:
+            _failure_cause(cause)
+            db.execute("INSERT OR IGNORE INTO brief_failures VALUES (?,?,?)",
+                       (row["job_id"], cause, stamp))
+
+    def record_expired_failure(self, worker: WorkerContext, expected: Job, *, cause: str,
+                               clock: Callable[[], str] = utc_now,
+                               retire_current: bool = False) -> bool:
+        """Maintenance only: one exact detached-row CAS, never a stale owner write.
+
+        May terminalize an expired attempt or annotate a failure terminal state.
+        Concurrent renewal/recovery/cancellation abandons the CAS; never touches
+        a ready revision or outbox. No private content is accepted here.
+        retire_current additionally allows this trusted worker to retire its own
+        exact active attempt after a local guard failure, even before lease expiry.
+        A renewed/recovered row fails CAS; another owner's live row is forbidden.
+        """
+        owner = _worker(worker)
+        if type(retire_current) is not bool:
+            raise _invalid("retire_current is an internal explicit boolean")
+        _failure_cause(cause)
+        with self._transaction() as db:
+            row = self._find(db, expected.scope, expected.job_id)
+            stamp = _clock_micros(clock)
+            if row is None or _job(row) != expected:
+                return False
+            self._forward(row, stamp)
+            if row["state"] in _ACTIVE:
+                if stamp < min(row["lease_us"], row["deadline_us"]) and not (
+                    retire_current and row["owner_id"] == owner
+                ):
+                    return False
+                self._terminal(db, row, "needs_input", stamp)
+            elif row["state"] not in ("failed", "needs_input", "cancelled"):
+                return False
+            self._failure(db, row, cause, stamp)
+            if _clock_micros(clock) < stamp:
+                raise ClockError("maintenance clock moved backwards")
+            return True
+
     @staticmethod
     def _find(db: sqlite3.Connection, scope: RequesterContext, job_id: str) -> sqlite3.Row | None:
         params = _scope(scope)
@@ -720,6 +832,7 @@ class BriefStore:
         self, scope: RequesterContext, *, idempotency_key: str, payload: object,
         grant_id: str, grant_revision: int, destination: PrivateDestination,
         now: str, execution_seconds: int = MAX_EXECUTION_SECONDS,
+        request_hash: str | None = None, precommit: Callable[[], None] | None = None,
     ) -> Job:
         """Atomically admit a trusted frozen snapshot as one queued job.
 
@@ -727,6 +840,10 @@ class BriefStore:
         Equal canonical content replays even at capacity; admission time is not
         part of the content hash. Arbitrary payload flags convey no authority.
         """
+        if request_hash is not None:
+            _hash(request_hash, "request_hash")
+        if precommit is not None and not callable(precommit):
+            raise _invalid("precommit must be a trusted bounded callable")
         namespace, platform, actor = _scope(scope)
         _identifier(idempotency_key, "idempotency_key")
         _identifier(grant_id, "grant_id")
@@ -748,7 +865,13 @@ class BriefStore:
                                   "AND actor_id=? AND idempotency_key=?",
                                   (namespace, platform, actor, idempotency_key)).fetchone()
             if existing is not None:
-                if existing["content_hash"] != digest:
+                if request_hash is not None:
+                    binding = db.execute("SELECT request_hash FROM brief_intakes WHERE job_id=?",
+                                         (existing["job_id"],)).fetchone()
+                    matches = binding is not None and binding[0] == request_hash
+                else:
+                    matches = existing["content_hash"] == digest
+                if not matches:
                     raise Conflict("idempotency key already binds different admission content")
                 return _job(existing)
             if db.execute("SELECT count(*) FROM brief_jobs WHERE state='queued'").fetchone()[0] >= MAX_QUEUED:
@@ -759,7 +882,12 @@ class BriefStore:
                        "state,created_us,updated_us) VALUES (?,?,?,?,?,?,?,?,?,?,?,'queued',?,?)",
                        (job_id, namespace, platform, actor, idempotency_key, encoded, digest,
                         grant_id, grant_revision, destination.address, execution_seconds, stamp, stamp))
-            return _job(self._find(db, scope, job_id))
+            if request_hash is not None:
+                db.execute("INSERT INTO brief_intakes VALUES (?,?)", (job_id, request_hash))
+            result = _job(self._find(db, scope, job_id))
+            if precommit is not None and precommit() is not None:
+                raise _invalid("precommit must raise on denial, not return approval flags")
+            return result
 
     @staticmethod
     def _forward(row: sqlite3.Row, now: int) -> None:
@@ -798,11 +926,18 @@ class BriefStore:
         BriefStore._fresh_attempt(claimed, clock, now)
         return result
 
-    def claim_one(self, worker: WorkerContext, *, clock: Callable[[], str] = utc_now) -> Job | None:
+    def claim_one(self, worker: WorkerContext, *, clock: Callable[[], str] = utc_now,
+                  require_known_costs: bool = False) -> Job | None:
         """Trusted worker: claim at most one queued job, with one global live lease."""
         owner = _worker(worker)
+        if type(require_known_costs) is not bool:
+            raise _invalid("require_known_costs must be an internal explicit boolean")
         with self._transaction() as db:
             stamp = _clock_micros(clock)
+            if require_known_costs and db.execute(
+                "SELECT 1 FROM brief_cost_calls WHERE state IN ('started','unknown') LIMIT 1"
+            ).fetchone() is not None:
+                return None
             if self._live(db, stamp):
                 return None
             row = db.execute("SELECT * FROM brief_jobs WHERE state='queued' ORDER BY rowid LIMIT 1").fetchone()
@@ -876,13 +1011,14 @@ class BriefStore:
 
     def finish(
         self, lease: Lease, *, outcome: Literal["failed", "needs_input"],
-        clock: Callable[[], str] = utc_now,
+        cause: str | None = None, clock: Callable[[], str] = utc_now,
     ) -> Job:
         """Trusted worker explicitly terminates a current attempt without a draft."""
         if type(outcome) is not str or outcome not in ("failed", "needs_input"):
             raise _invalid("worker outcome must be failed or needs_input")
         with self._attempt(lease, clock) as (db, row, stamp):
             self._terminal(db, row, outcome, stamp)
+            self._failure(db, row, cause, stamp)
             return _job(self._find(db, lease.scope, lease.job_id))
 
     def cancel(
@@ -903,6 +1039,9 @@ class BriefStore:
                 raise Conflict("cannot change this terminal job")
             if row["state"] != "cancelled":
                 self._terminal(db, row, "cancelled", stamp)
+                if (row["state"] != "draft_ready"
+                        and db.execute("PRAGMA user_version").fetchone()[0] >= 3):
+                    self._failure(db, row, "cancelled", stamp)
                 db.execute("UPDATE brief_outbox SET state='cancelled' WHERE job_id=? "
                            "AND state='pending'", (job_id,))
             return _job(self._find(db, scope, job_id))
@@ -910,6 +1049,7 @@ class BriefStore:
     def complete(
         self, lease: Lease, *, draft: object, provenance: object,
         validation_version: str, clock: Callable[[], str] = utc_now,
+        precommit: Callable[[], None] | None = None,
     ) -> Revision:
         """Atomically store one frozen draft + pending outbox + draft_ready state.
 
@@ -919,6 +1059,8 @@ class BriefStore:
         deterministically raises LeaseLost (ready is terminal); read outbox in
         requester scope to reconcile a commit whose response was lost.
         """
+        if precommit is not None and not callable(precommit):
+            raise _invalid("precommit must be a trusted bounded callable")
         encoded, metadata = _canonical(draft), _canonical(provenance)
         if metadata == "{}":
             raise _invalid("nonempty provenance metadata required")
@@ -942,12 +1084,21 @@ class BriefStore:
             ).fetchone()
             if effect is None:
                 raise StoreError("completion did not persist draft, pending outbox and terminal job")
-            return _revision(db.execute("SELECT * FROM brief_revisions WHERE revision_id=?",
-                                        (revision_id,)).fetchone())
+            result = _revision(db.execute("SELECT * FROM brief_revisions WHERE revision_id=?",
+                                          (revision_id,)).fetchone())
+            # All relational writes/checks/materialization precede this logical
+            # authorization acceptance point. Callback is trusted, bounded and
+            # NON-REENTRANT: no store/guard access or arbitrary network IO here.
+            # Only _attempt's fresh clock/lease check and COMMIT follow. This is
+            # not cross-system atomicity with an external ACL/grant database.
+            if precommit is not None and precommit() is not None:
+                raise _invalid("precommit must raise on denial, not return approval flags")
+            return result
 
     def recover_one(
         self, worker: WorkerContext, *, validate: Callable[[Job], RecoveryValidity],
-        clock: Callable[[], str] = utc_now,
+        cause: str | None = None, clock: Callable[[], str] = utc_now,
+        require_known_costs: bool = False,
     ) -> Job | None:
         """Trusted maintenance: inspect at most one expired attempt per call.
 
@@ -960,9 +1111,15 @@ class BriefStore:
         No validation default, no payload approval flags, no implicit new data.
         """
         owner = _worker(worker)
+        if type(require_known_costs) is not bool:
+            raise _invalid("require_known_costs must be an internal explicit boolean")
         if not callable(validate) or not callable(clock):
             raise _invalid("trusted recovery validator and clock must be callable")
         with self._transaction(write=False) as db:
+            if require_known_costs and db.execute(
+                "SELECT 1 FROM brief_cost_calls WHERE state IN ('started','unknown') LIMIT 1"
+            ).fetchone() is not None:
+                return None
             observed = _clock_micros(clock)
             if self._live(db, observed):
                 return None
@@ -981,6 +1138,10 @@ class BriefStore:
                 raise _invalid("validator must return explicit RecoveryValidity")
             validity.__post_init__()
         with self._transaction() as db:
+            if require_known_costs and db.execute(
+                "SELECT 1 FROM brief_cost_calls WHERE state IN ('started','unknown') LIMIT 1"
+            ).fetchone() is not None:
+                return None
             stamp = _clock_micros(clock)
             if stamp < observed:
                 raise ClockError("recovery clock moved backwards during validation")
@@ -990,9 +1151,11 @@ class BriefStore:
             self._forward(current, stamp)
             if stamp >= current["deadline_us"] or current["attempt"] >= MAX_ATTEMPTS:
                 self._terminal(db, current, "failed", stamp)
+                self._failure(db, current, cause, stamp)
                 return None
             if validity is None or not validity.valid:
                 self._terminal(db, current, "needs_input", stamp)
+                self._failure(db, current, cause, stamp)
                 return None
             if self._live(db, stamp):
                 return None
@@ -1000,7 +1163,7 @@ class BriefStore:
 
     @staticmethod
     def _cost_schema(db: sqlite3.Connection) -> None:
-        if db.execute("PRAGMA user_version").fetchone()[0] != 2:
+        if db.execute("PRAGMA user_version").fetchone()[0] not in (2, 3):
             raise BriefSchemaError("cost operations require schema2; reopen for forward migration")
 
     @staticmethod
@@ -1138,6 +1301,15 @@ class BriefStore:
             self._cost_day_fence(clock, stamp, day)
             return result
 
+    def has_uncertain_cost(self, worker: WorkerContext) -> bool:
+        """Trusted custody gate, global across namespaces and worker restarts."""
+        _worker(worker)
+        with self._transaction(write=False) as db:
+            self._cost_schema(db)
+            return db.execute(
+                "SELECT 1 FROM brief_cost_calls WHERE state IN ('started','unknown') LIMIT 1"
+            ).fetchone() is not None
+
     def cost_record(self, scope: RequesterContext, job_id: str, call_id: str) -> CostReservation | None:
         _identifier(call_id, "call_id")
         with self._transaction(write=False) as db:
@@ -1224,8 +1396,18 @@ class LeaseGuard:
     Direct store.complete still enforces persisted lease/fence, but cannot know
     about a process-local heartbeat error that did not alter the database.
 
-    A04 must observe stop_requested, stop new IO and kill/reap a provider process
-    on loss. This layer cannot retract an already-running call. The clock must
+    Optional retry_busy=True is A04-only database contention tolerance. Only
+    StoreBusy can retry, and only until the last CONFIRMED lease/original deadline
+    in both trusted wall and elapsed monotonic time. Checkpoints/completion wait
+    for a successful fenced transaction; no unavailable check authorizes IO.
+    A retry samples the bounded clock again inside the transaction before renewal
+    and precommit, so lock waits cannot silently renew an expired lease.
+    A04 supplies confirmed_job directly from the committed claim, seeding bounds
+    BEFORE the first checkpoint. Without that snapshot the first busy checkpoint
+    fails closed. The seed limits waiting only; it never authorizes IO by itself.
+
+    A04 must observe stop_requested and stop new IO on loss. This layer cannot
+    retract an already-running call. The clock must
     be a nonblocking thread-safe trusted callable; no model/user callback is run
     here. Exit signals stop and joins with a bounded wait; a stuck heartbeat is
     reported as an error rather than silently declaring successful shutdown.
@@ -1233,13 +1415,27 @@ class LeaseGuard:
 
     def __init__(
         self, store: BriefStore, lease: Lease, *, clock: Callable[[], str] = utc_now,
-        interval: float = 10.0,
+        interval: float = 10.0, retry_busy: bool = False,
+        confirmed_job: Job | None = None, stop_signal: Event | None = None,
     ) -> None:
         self.interval = _seconds(interval, "heartbeat interval", 10)
+        if type(retry_busy) is not bool:
+            raise _invalid("retry_busy must be an explicit internal boolean")
+        self.retry_busy = retry_busy
+        self._confirmed_until: int | None = None
+        self._lease_monotonic_until: float | None = None
+        self._deadline_monotonic_until: float | None = None
+        self._observed: int | None = None
         if type(lease) is not Lease or not callable(clock):
             raise _invalid("guard requires a Lease and callable trusted clock")
         lease.__post_init__()
         self.store, self.lease, self.clock = store, lease, clock
+        self._stop_signal = stop_signal
+        if confirmed_job is not None:
+            if not retry_busy or type(confirmed_job) is not Job or confirmed_job.lease != lease:
+                raise _invalid("busy bounds require this attempt's committed job snapshot")
+            self._observed = _micros(confirmed_job.updated_at)
+            self._confirm(confirmed_job)
         self.stop_requested = Event()
         self._failure: Exception | None = None
         self._lock = Lock()
@@ -1261,7 +1457,9 @@ class LeaseGuard:
         self.stop_requested.set()
 
     def _check_open(self) -> None:
-        if self.lost or self._closed or self._completed or self._thread is None:
+        if (self.lost or self._closed or self._completed or self._thread is None
+                or self.stop_requested.is_set()
+                or (self._stop_signal is not None and self._stop_signal.is_set())):
             raise LeaseLost("lease guard stopped or lost; discard result and stop IO") from self._failure
 
     def __enter__(self) -> LeaseGuard:
@@ -1276,13 +1474,71 @@ class LeaseGuard:
             raise
         return self
 
+    def _bounded_clock(self) -> str:
+        """Clock-only bound, also used inside SQLite after waits and precommit.
+
+        A04 opt-in only. Busy never extends the last confirmed lease. Monotonic
+        time prevents a stalled wall clock from extending grace indefinitely;
+        invalid/backward clocks and actual expiry always latch loss.
+        """
+        value = self.clock()
+        now = _micros(value)
+        if self._observed is not None and now < self._observed:
+            raise ClockError("guard clock moved backwards")
+        self._observed = now
+        if self._confirmed_until is not None and (
+            now >= self._confirmed_until
+            or monotonic() >= self._lease_monotonic_until
+            or monotonic() >= self._deadline_monotonic_until
+        ):
+            raise LeaseLost("last confirmed lease or original deadline expired")
+        return value
+
+    def _confirm(self, job: Job) -> None:
+        if not self.retry_busy:
+            return
+        # Confirm only after a successful fenced DB transaction. Never refresh
+        # the monotonic bound merely because a read or failed renewal returned.
+        now = _micros(self._bounded_clock())
+        until = min(_micros(job.lease_until), _micros(job.deadline))
+        tick = monotonic()
+        if now >= until:
+            raise LeaseLost("confirmed lease expired")
+        if self._deadline_monotonic_until is None:
+            self._deadline_monotonic_until = tick + (_micros(job.deadline) - now) / 1_000_000
+        if self._confirmed_until is None or until > self._confirmed_until:
+            bound = tick + (until - now) / 1_000_000
+            if self._confirmed_until is not None:
+                # A partially stalled wall clock cannot rebase elapsed time;
+                # renewal buys only the extension actually persisted in SQLite.
+                bound = min(bound, self._lease_monotonic_until
+                            + (until - self._confirmed_until) / 1_000_000)
+            self._lease_monotonic_until = min(bound, self._deadline_monotonic_until)
+        self._confirmed_until = until
+
     def _heartbeat(self) -> None:
         while not self.stop_requested.wait(self.interval):
             with self._lock:
                 if self.stop_requested.is_set():
                     return
                 try:
-                    self.store.renew(self.lease, clock=self.clock)
+                    clock = self._bounded_clock if self.retry_busy else self.clock
+                    if self.retry_busy:
+                        clock()
+                    job = self.store.renew(self.lease, clock=clock)
+                    self._confirm(job)
+                except StoreBusy as exc:
+                    if self.retry_busy:
+                        try:
+                            self._bounded_clock()
+                        except Exception as expired:
+                            self._lose(expired)
+                            return
+                        # Retry only heartbeat, on its configured cadence. No
+                        # checkpoint succeeds and no new IO is authorized here.
+                        continue
+                    self._lose(exc)
+                    return
                 except Exception as exc:
                     self._lose(exc)
                     return
@@ -1292,7 +1548,9 @@ class LeaseGuard:
         with self._lock:
             self._check_open()
             try:
-                return self.store.assert_current(self.lease, clock=self.clock)
+                job = self._database(self.store.assert_current, self.lease)
+                self._confirm(job)
+                return job
             except Exception as exc:
                 self._lose(exc)
                 raise LeaseLost("lease guard checkpoint failed; stop IO") from exc
@@ -1300,16 +1558,59 @@ class LeaseGuard:
     def before_io(self) -> Job:
         return self.assert_current()
 
+    def _database(self, operation, *args, evidence=False, clocked=True, **kwargs):
+        """Caller owns _lock. Retry rolled-back StoreBusy only, never provider IO.
+
+        Evidence gets one ordinary reconciliation attempt even after lease loss;
+        it cannot authorize a draft. Further attempts require live confirmed
+        bounds. Fenced work uses the bounded clock inside every transaction,
+        including after lock acquisition and immediately before COMMIT.
+        """
+        clock = self.clock if evidence or not self.retry_busy else self._bounded_clock
+        while True:
+            if not evidence:
+                self._check_open()
+                if self.retry_busy:
+                    self._bounded_clock()
+            try:
+                if clocked:
+                    return operation(*args, clock=clock, **kwargs)
+                return operation(*args, **kwargs)
+            except StoreBusy:
+                if not self.retry_busy or self._confirmed_until is None:
+                    raise
+                self._check_open()
+                self._bounded_clock()
+                self.stop_requested.wait(min(self.interval, 0.05))
+                self._check_open()
+                self._bounded_clock()
+
+    def database(self, operation, *args, evidence=False, clocked=True, **kwargs):
+        """Internal A04 generation persistence only; never policy or transport.
+
+        A03 still owns reservation, response validation and usage/provenance.
+        This does not retry generation. No result is accepted on a failed read.
+        Evidence may settle money after loss, but never renews the lease.
+        """
+        with self._lock:
+            try:
+                return self._database(operation, *args, evidence=evidence, clocked=clocked, **kwargs)
+            except (LeaseLost, ClockError) as exc:
+                self._lose(exc)
+                raise
+
     def complete(
         self, *, draft: object, provenance: object, validation_version: str,
+        precommit: Callable[[], None] | None = None,
     ) -> Revision:
         """Commit only while guard and DB lease are current; then stop heartbeat."""
         with self._lock:
             self._check_open()
             try:
-                revision = self.store.complete(self.lease, draft=draft, provenance=provenance,
+                revision = self._database(self.store.complete, self.lease,
+                                               draft=draft, provenance=provenance,
                                                validation_version=validation_version,
-                                               clock=self.clock)
+                                               precommit=precommit)
             except Exception as exc:
                 self._lose(exc)
                 raise

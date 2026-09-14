@@ -4,6 +4,7 @@ from typing import Any
 
 from ostag.backends.base import Backend, BackendError
 from ostag.backends.factory import create_backend
+from ostag.briefs.service import BriefService, is_brief_command
 from ostag.config import Settings
 from ostag.core.ambient import is_ambient_status_request
 from ostag.core.channel_brain import (
@@ -43,8 +44,10 @@ class OSTagRunner:
         work_monitor: WorkMonitorService | None = None,
         copilot_relay: Any | None = None,
         github_vercel_release_workflow: GitHubVercelReleaseWorkflow | None = None,
+        brief_service: BriefService | None = None,
     ):
         self.config = config
+        self.brief_service = brief_service
         self.backend = backend or create_backend(config)
         self.mfs = mfs_client or MFSClient(config)
         self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
@@ -158,6 +161,14 @@ class OSTagRunner:
         return packet
 
     async def handle_event(self, event: NormalizedEvent) -> str:
+        # Recognized manual content never enters generic audit/MFS/ledger/backend,
+        # even if disabled, malformed or not addressed to the bot.
+        if is_brief_command(event.text):
+            if not event.mention_bot:
+                return ""
+            if self.brief_service is None:
+                return "brief: unavailable"
+            return await self.brief_service.handle_event(event)
         if not event.mention_bot:
             reply = ""
             write_audit_log(
