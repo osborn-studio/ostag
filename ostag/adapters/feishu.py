@@ -19,9 +19,11 @@ AT_TAG_RE = re.compile(r"<at[^>]*>.*?</at>")
 class FeishuAdapter:
     platform = "feishu"
 
-    def __init__(self, config: Settings, *, runner: Any | None = None):
+    def __init__(self, config: Settings, *, runner: Any | None = None,
+                 brief_controller: Any | None = None):
         self.config = config
         self.runner = runner
+        self._brief_controller = brief_controller
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client: Any | None = None
         self._inflight: set[Any] = set()
@@ -29,6 +31,18 @@ class FeishuAdapter:
         self._sdk_loop: asyncio.AbstractEventLoop | None = None
         self._bridge_ready = threading.Event()
         self._stop_requested = threading.Event()
+
+    def prepare_brief_preview(self, scope, job_id: str, revision_id: str, *, page: int = 0):
+        """Opt-in local preparation only; never send/reply via legacy transports.
+
+        Initial card delivery is unimplemented pending its own versioned outbox.
+        This separately authorized preview does not replace U01's frozen TEXT.
+        """
+        from ostag.briefs.callbacks import BriefCallbackController, CallbackError
+
+        if type(self._brief_controller) is not BriefCallbackController:
+            raise CallbackError('brief preview unavailable')
+        return self._brief_controller.prepare_preview(scope, job_id, revision_id, page=page)
 
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
