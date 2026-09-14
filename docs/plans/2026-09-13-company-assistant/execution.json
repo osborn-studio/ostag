@@ -26,7 +26,8 @@
     "A01": "verified_local",
     "remaining_product_tasks": "planned",
     "M01": "verified_local",
-    "A02": "verified_local"
+    "A02": "verified_local",
+    "A03": "candidate_awaiting_independent_review"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -76,7 +77,8 @@
       "loop_27a33854-35a9-43b6-a595-b3c700da9c76",
       "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c",
       "loop_aac8db28-6466-4ef6-87a7-6ab8a10c8b66",
-      "loop_b704a9ea-5282-43d2-abe1-36a294bc19b0"
+      "loop_b704a9ea-5282-43d2-abe1-36a294bc19b0",
+      "loop_ed9ab136-6f08-4c3a-b55b-a00120103f35"
     ],
     "outcomes": [
       "success",
@@ -85,7 +87,8 @@
       "escalated; full review feedback truncated, controlled interruption",
       "success",
       "native_success_parent_gate_failed",
-      "success"
+      "success",
+      "escalated_after_parent_gate_false_positive"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -96,7 +99,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03"
     ]
   },
   "not_run": [
@@ -236,5 +240,13 @@
     }
   },
   "latest_slice_content_sha256": "7a9b75cc5eb151252bfd8831064ee5d295d2be875ed47e52da488f4cd825369f",
-  "pending_findings": []
+  "pending_findings": [],
+  "pending_candidate": {
+    "task": "A03",
+    "sha256": "2b908d96f7b911b7af98d94767f8d84c21db9fc9a5b79ed813ea396ff7540521",
+    "target_passed": 130,
+    "full_passed": 1751,
+    "review": "not_run",
+    "gate_correction_audit": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03/parent-gate-correction-audit.json"
+  }
 }

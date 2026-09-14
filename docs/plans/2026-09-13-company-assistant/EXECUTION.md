@@ -128,3 +128,14 @@ builder沙箱全量曾因本地.venv路径/缓存权限失败；外部固定验�
 [最终Fable回执](reviews/a02-fable-round-1.json) · [读写锁门槛](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair/parent-deadline-regressions-1789353931739637000.stdout) · [完整A02修复记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair)
 
 A02两个任务已归档，旧13任务未变。接续A03；当前尚无生成模型、来源采集、worker服务接线或实际消息投递。
+
+
+## A03 编码与独立门槛（候选待审）
+
+两轮Codex builder已完成5文件候选，新增generation/validation及2测试文件，并扩展store成本账本。首轮114项目标/1735全量通过；父级发现普通文本链接过滤误报、授权检查之后仍存在阻塞DB读取。首轮已修复文本误报，但后一个问题由独立gate确认失败，进入第二轮修复。
+
+第二轮130项目标/1751全量通过；reader/writer deadline、真实schema1样本迁移、普通文本与显式恶意链接门槛通过。父级授权gate仍报一个错误；复查发现测试把transport进入后的撤销也算成调用前撤销。已修正gate的时间标记并新增after-IO控制，对两个冻结候选反向验证：首轮旧缺陷代码仍失败，第二轮修复代码5项全过。修正的是验证器，未修改第二轮产品代码。
+
+原生loop在第二轮gate误报后记escalated并清理临时worktree，完整5文件快照/真实Codex回执保留。新受控osstack任务将逐摘要恢复第二轮候选 `2b908d96f7b911b7af98d94767f8d84c21db9fc9a5b79ed813ea396ff7540521`，重跑所有门槛后才调用真实Fable静态评审。首次恢复execute只是确定性文件复制，不伪称一次模型编码。
+
+[验证器纠正的旧RED/新GREEN审计](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03/parent-gate-correction-audit.json) · [原始A03执行记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03)
