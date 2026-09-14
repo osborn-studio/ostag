@@ -1,0 +1,12 @@
+{
+  "status": "environment_interrupted",
+  "native_exit_code": 1,
+  "loop_id_observed_from_worktree": "loop_b08ba404-a897-42c8-8d30-88af6d5f9c78",
+  "durable_loop_state_present": false,
+  "error": "Codex failed printing stdout: No space left on device (os error28)",
+  "code_merged": false,
+  "fable_review": "not_run",
+  "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider",
+  "source_recovery": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-recovery/recovery-evidence.json",
+  "complete_candidate_recovered": false
+}
