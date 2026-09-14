@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field as dataclass_field, replace
 from datetime import timedelta
 import hashlib
 from typing import Protocol
@@ -206,6 +206,10 @@ class TransportRequest:
     cancellation: asyncio.Event
     charged_day: str
     deadline: str
+    # Trusted process-local capability, never part of the canonical model input.
+    # Optional for existing fake transports; production adapters must require it.
+    reauthorize: Callable[[], float | None] | None = dataclass_field(
+        default=None, repr=False, compare=False)
 
     def __post_init__(self):
         if type(self.parameters) is not Parameters:
@@ -227,6 +231,8 @@ class TransportRequest:
             raise _invalid("explicit cancellation signal required")
         _utc(self.deadline, "deadline")
         _utc(self.charged_day + "T00:00:00Z", "charged day")
+        if self.reauthorize is not None and not callable(self.reauthorize):
+            raise _invalid("transport reauthorization must be a trusted callable")
 
 
 @dataclass(frozen=True)
@@ -352,11 +358,26 @@ class _Stopped(Exception):
 
 async def _bounded_call(transport: ReadOnlyTransport, request: TransportRequest,
                         prepare: Callable[[], TransportRequest]):
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + request.remaining_seconds
+
+    def check():
+        if request.cancellation.is_set():
+            raise _Stopped("cancelled")
+        if loop.time() >= deadline:
+            raise _Stopped("timeout")
+
     async def invoke():
         # This check runs INSIDE the scheduled task, after any scheduling delay.
         # No await separates this final gate from entering the trusted adapter.
+        check()
         current_request = prepare()
-        return await transport.generate(current_request)
+        check()
+        current_request = replace(current_request, remaining_seconds=min(
+            current_request.remaining_seconds, deadline - loop.time()))
+        result = await transport.generate(current_request)
+        check()  # A stalled or cancellation-suppressing transport cannot return late.
+        return result
     call = asyncio.create_task(invoke())
     cancelled = asyncio.create_task(request.cancellation.wait())
     def consume_late(task):
@@ -364,11 +385,11 @@ async def _bounded_call(transport: ReadOnlyTransport, request: TransportRequest,
         if not task.cancelled():
             task.exception()
     try:
-        done, _ = await asyncio.wait((call, cancelled), timeout=request.remaining_seconds,
+        done, _ = await asyncio.wait((call, cancelled), timeout=max(0, deadline - loop.time()),
                                      return_when=asyncio.FIRST_COMPLETED)
         if request.cancellation.is_set():
             return None, "cancelled"
-        if call not in done:
+        if call not in done or loop.time() >= deadline:
             request.cancellation.set()
             return None, "timeout"
         return call.result(), None
@@ -393,7 +414,9 @@ async def generate(*, store: BriefStore, lease: Lease, call_id: str,
     and current: its own potentially blocking guard/lease checks must precede its
     final authorization check. The generator finishes its database work before
     that final checkpoint, then refreshes only the nonblocking clock/cancellation.
-    This cannot make authorization atomic with arbitrary later adapter scheduling.
+    The private TransportRequest.reauthorize closure repeats prepare for every
+    actual adapter egress, including private token-count preflight. Adapters must
+    call it inside the scheduled IO task, immediately before each HTTP request.
     """
     if not callable(checkpoint) or not callable(clock) or type(cancellation) is not asyncio.Event:
         raise _invalid("mandatory trusted checkpoint, clock and cancellation required")
@@ -489,20 +512,33 @@ async def generate(*, store: BriefStore, lease: Lease, call_id: str,
             return rejected("timeout")
         request = TransportRequest(serialized, p, budget.max_output_bytes, seconds,
                                    cancellation, reservation.charged_day, deadline)
-        def prepare():
+        def prepare(*, per_egress=False):
             if cancellation.is_set():
                 raise _Stopped("cancelled")
             current_job = store.assert_current(lease, clock=clock)
+            checkpoint_failure = None
             try:
                 checked("before_io")
-            except (SchemaError, StoreError) as exc:
-                raise _Stopped("checkpoint_denied") from exc
+            except LeaseLost:
+                checkpoint_failure = "lease_lost" if per_egress else "checkpoint_denied"
+            except (SchemaError, StoreError):
+                checkpoint_failure = "checkpoint_denied"
+            # The new per-egress seam preserves typed guard loss; outer prepare
+            # keeps A03's existing checkpoint-denied contract. Neither carries
+            # private checkpoint text or its original exception chain.
+            if checkpoint_failure == "lease_lost":
+                raise LeaseLost("authorization lease lost")
+            if checkpoint_failure is not None:
+                raise _Stopped(checkpoint_failure)
             seconds, deadline, day = local_remaining(current_job)
             if cancellation.is_set():
                 raise _Stopped("cancelled")
             if seconds <= 0 or day != reservation.charged_day:
                 raise _Stopped("timeout")
             return replace(request, remaining_seconds=seconds, deadline=deadline)
+        def reauthorize():
+            return prepare(per_egress=True).remaining_seconds
+        request = replace(request, reauthorize=reauthorize)
         response, stop = await _bounded_call(transport, request, prepare)
         if stop:
             return rejected(stop)
