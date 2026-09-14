@@ -5,7 +5,7 @@
 3. A04：ExecutionTiming 必须使用 A02 持久化的首次 claim 时间及相同冻结时长。M01 can_commit 对 failed/cancelled 只允许无私有内容的状态记录；真实存储提交仍检查当前 fence。硬截止处 lease 也已到期时，由可信恢复/维护路径记录终态，不让旧尝试写草稿。
 4. M04/M05：A01 SourceSet 当前最多500条；M01 的两个 provider 配额分别最多500，合计上限可能1000。必须显式调整版本化契约或保留可见部分状态；1MiB模型输入还要计算整个请求，不能静默截断后称完整。
 5. A03/A04：现有 Backend.run 仅返回字符串，不能证明实际模型ID、用量或只读工具边界；需要窄的可信生成接口。模型只给 source_id，链接由可信映射生成。引用存在不等于自然语言语义被证实，真实模型/人工核验仍是独立门槛。
-6. A03：费用账本应在独立brief库前向迁移，预留与结算原子、跨重启保留，未知费用不按0退款。该实施需要在原A03候选4文件之外复用store.py（第5文件），并重跑A02回归；实施时须明确记录，当前尚未完成。
+6. A03：费用账本应在独立brief库前向迁移，预留与结算原子、跨重启保留，未知费用不按0退款。该实施需要在原A03候选4文件之外复用store.py（第5文件），并重跑A02回归；A03已实现并完成schema1→2迁移验证，A04进一步显式升级schema3；不据此声称生产升级完成。
 7. A11/发布：store抛出的领域兼容性异常尚需lifespan按brief域降级接线；主机timezone/pytest通过不能替代目标镜像tzdata、真实Feishu、排空、发布和7天试点评估。
 
 8. A04：纯ExecutionTiming可以描述needs_input范围；服务必须先检查受理结果为accepted再入队，不把dataclass构造成功当受理许可。A02为通用brief存储，不信任payload中的accepted/authorized布尔值。
@@ -31,3 +31,12 @@ A03已通过真实Fable最终复审。当前生成入口是async generate，返�
 start_cost拒绝后可能留有reserved记录；A04可用cost_record(scope, job_id, call_id)寻找并在明确未开始时调用内部release_cost。不得退款started/unknown；不能因返回结果未带reservation_id便当作没有额度占用。维护方法的WorkerContext仅为可信内部能力，不能接收端点输入；关联实际provider调用/usage是服务的职责。晚到settlement可能改写diagnostic，故作业失败原因另行持久保存；捕获StoreBusy/ClockError/Conflict，未确认的外部结果保守记为unknown。timeout会置协作Event，用户取消应另有持久意图，不能仅凭Event判定。
 
 _LINK有意只做常见转义形式过滤，仍有如<name>、socket.io等误报和未列TLD的漏报；A05必须把所有模型文字保持纯文本、转义并关闭Markdown/HTML/autolink，只有可信SourceLink可生成可点击出处。该要求和真实模型语义评测属于后续放行门槛，不能用本轮单测代替。
+
+
+## A04 本地接线完成后的约束
+
+A04 service/worker/runner已组合A03生成器，逐条来源和当前grant/ACL/收集身份/目的地复核、事件先查后受理、原时间/config固定、单worker/单通知槽、独立heartbeat和原子private outbox均有本地测试。默认BriefStore schema2、enable_manual schema3，可读1..3；不支持旧二进制读取schema3，实际多库隔离/降级仍归A11/D02。
+
+Future回调不得在worker控制锁或stop调用路径内执行。当前独立通知线程保留一个工作/结果槽直到回调结束；回调阻塞不会扩充线程/任务队列，stop不等待任意回调。默认A02 LeaseGuard sticky loss不改，A04显式retry_busy只重试SQLite StoreBusy；原确认lease/原deadline及单调时钟共同限界，不能续接过期owner/fence。首次等待仅可用已提交claim快照设界且服从stop，没有快照时首次busy拒绝；维护收尾的有界重试不执行provider IO或授予草稿权限。A03只收到窄GenerationStore数据库包装，不重发generate；费用证据的一次普通结算可以在lease失效后发生，进一步等待不得无界。未知费用仍需可信核对，不能盲重放。
+
+A04-AC1的生产只读模型adapter仍未实现/认证。后续必须证明实际模型ID、usage与完整provider framing计费输入上界；真实D01与18/6语义评测另取证。当前注入的可信SourceSnapshot lookup是实际ACL mirror契约，不是已实现Feishu授权服务；precommit回调只能有界地读可信本地mirror，不能重入DB/guard。M01 FrozenScope/ExecutionTiming接线仍属于未来会议job；manual worker明确拒绝meeting payload。U01尚未投递，draft_ready/outbox不代表用户已收到。

@@ -1,0 +1,57 @@
+{
+  "candidate_sha256": "31a961af55044e1d7a9b05df5e24cf6c8f7f4a9a00668e670790ad23fedba06f",
+  "base": "c74b772dfa53b4e0685283576584f4e7fd1e7ef5",
+  "files": [
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "ostag/core/runner.py",
+    "tests/test_brief_service.py",
+    "tests/test_brief_worker.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 78400,
+      "outputTokens": 24,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.07851999999999999,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 61289,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 106118,
+      "webSearchRequests": 0,
+      "costUSD": 5.18698775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 59602,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Parent Future blocker is fixed structurally, not by RLock: _dispatch and stop only hand (future,status) to a single mailbox under _lock; the dedicated brief-completion thread calls Future.set_result with no worker lock held. Traced: callback->run_once returns a done 'busy' Future (since _notifying is set); callback->stop acquires the free lock, publishes nothing (already _published), joins the worker thread (not itself); stop from inside _execute skips self-join; user cancel() before set_result is absorbed via InvalidStateError; concurrent stop(timeout=.05) never waits on a callback. Custody invariants hold: cancelled Future keeps _busy, one DB lease, quarantine on started/unknown spend.",
+      "Fable blocker 1 fixed: watch() polls only in-memory latches (guard.lost/_stop/operator_cancel); no SQLite in the watcher. LeaseGuard.retry_busy is explicit opt-in; A02 default sticky-loss preserved (retry_busy=False raises/latches on first StoreBusy). Busy grace is bounded by _confirmed_until (last committed lease/deadline snapshot) AND monotonic bounds seeded from the committed claim; backward/invalid clock, expiry, stop_signal, and stop_requested all latch loss; heartbeat retries never renew without a real fenced transaction; _database returns only real DB results, so an unavailable check never authorizes IO. Gate trace (busy .05, lock .2s, provider .35/.05): settle_cost/assert_current/complete retry every ~0.05s until lock release with the received response retained; no transport retry.",
+      "Fable blocker 2 fixed: has_uncertain_cost runs before recover_one/claim_one; _dispatch maps StoreBusy/ClockError/Conflict at idle/preclaim to 'store_unavailable' without quarantine; _recovery_valid re-raises retryable read failures so recover_one neither retires nor claims. Idle contention that begins BEFORE claim is intentionally not retried (returns store_unavailable); only post-claim guarded work retries.",
+      "Residual (non-blocking) design limits: a user Future callback that blocks forever keeps _notifying set, so every later run_once/poll returns 'busy' for the process lifetime (documented as slot retention; stop still bounded). Evidence ops (settle/mark_unknown/release) get exactly one attempt once the guard is lost; a StoreBusy on that single attempt after loss discards received usage and _reconcile_result later marks the reservation unknown (conservative, outside the gate where the lease stays live).",
+      "Label/edge notes: a denial raised inside admit's precommit surfaces as 'invalid_request' (pre-lock denial says 'denied'); load_job payload-shape errors and generate() input SchemaErrors map to 'authorization_denied'; if operator cancel arrives after _fail already terminalized needs_input in a prior _reconcile iteration, store.cancel raises Conflict -> 'store_unavailable' (cost still caught by has_uncertain_cost next run). The 'stopped' failure cause after a late sync transport return depends on the reconciliation task step running before the call_later(min(timeout/2,0.1)) loop.stop timer; margin is small but the ordering (bridge, wakeup, step) is deterministic in practice.",
+      "Store compatibility: CURRENT_SCHEMA_VERSION stays 2, schema1->2 legacy migration unchanged, schema3 only via enable_manual; complete/finish/claim_one/recover_one/admit/LeaseGuard keep old signatures with optional kwargs; cancel adds a failure row only when user_version>=3 and never for draft_ready; READABLE_SCHEMA_MAX raised to 3 (exact-DDL comparison still refuses partial/foreign schema-3 files).",
+      "Precommit/authorization ordering verified: admit/complete run the trusted callback after INSERTs, relational effect assertion and result materialization, followed only by _fresh_attempt (clock-only) and COMMIT; authorize_current makes no store/guard calls, keeps every snapshot/grant time bound and rechecks all against one final clock with no later DB read; precommit inside guard.complete is executed while guard._lock is held but reads only lost/latches (non-reentrant respected).",
+      "Limits: static review only; no tests, Ruff or probes executed. FakeTransport exercises the A03 generate contract, cost ledger, provenance and SQLite completion path but proves nothing about provider read-only isolation, billing or semantic quality. Some test assertions (RunLedger laziness, Settings Path acceptance) depend on unchanged legacy modules not shown."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a04-review-5bc69cb9"
+}

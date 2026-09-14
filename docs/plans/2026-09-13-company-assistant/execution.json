@@ -1,11 +1,11 @@
 {
-  "scope": "Locally verified A01, M01, A02 and A03 foundations; full meeting feature and production not complete",
+  "scope": "Locally verified A01, M01, A02, A03 and A04 service/worker core; A04 real backend acceptance, full meeting product and production remain incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "e884cfc072aecb128114ab1ffb0ffddf0de10c57",
+  "code_commit": "95b686450415218d111c8bcc655136ec2dd2d068",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "e2f2fb003dd2c7bbf13c35f603815dbeaf97ba3cb5bc7b7c116ae1ba2fbba7b7",
+  "code_content_sha256": "49a5e1a0864805e65365544ffba408803e08a969e7c66ce5117ab747701b332b",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -16,13 +16,18 @@
     "ostag/briefs/project_mapping.py": "d94003781fe166fd1139919ad10cc280cc6c12cc62fdebc9d1af1549c0bf12e2",
     "tests/test_meeting_contracts.py": "0a40c3ab032847698bc8d2e8f8cc927eed8e8e9ac95e74865880b2c120be954c",
     "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919",
-    "ostag/briefs/store.py": "fdd292b676263804131a56d4a8476c2b0ab5db152add185fd86c2184a566cde7",
+    "ostag/briefs/store.py": "508ab3eadced9b87b570686bed9bb3be59927b4c9461c609eddcad474458d680",
     "tests/test_brief_recovery.py": "03ca5d25fb95bd14b810702e8ad4c580e03e82a8463e43d19c78243eec31b31c",
     "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62",
     "ostag/briefs/generation.py": "d89814de9069ce484c78a74419d4d8d1e159c0fddb7e995f9baed6d0cd2762f3",
     "ostag/briefs/validation.py": "ace890a6d8ec5ad01f62d3d42d3f1c2fae7c5da9fb43cb17a8d1ac583417a53e",
     "tests/test_brief_generation.py": "fe78132f0cb458df1c0a7706029dc3ba93076a8af2514b8966ba6b4fe44c6b7c",
-    "tests/test_brief_validation.py": "618b5b17ebb8a03afa891e556a723cc50592edef1f31cf554d23706eb7a08367"
+    "tests/test_brief_validation.py": "618b5b17ebb8a03afa891e556a723cc50592edef1f31cf554d23706eb7a08367",
+    "ostag/briefs/service.py": "a809dc95ae13e9dd7c6846bc7cf5ec082d5a911d9da3af31fbbe584a8b1b160b",
+    "ostag/briefs/worker.py": "0f23fc655622917f76d21312a4bfb385d8a38aa9b87afbf9ef89d54258cfed87",
+    "ostag/core/runner.py": "71b0897fe5cfcb6d1d827bc2bf30cc583eabeedaf1d582eaf60bfe0a25889f7d",
+    "tests/test_brief_service.py": "3ff61eb5f814fbf8483ae51684155e2653c3c4f86a82b02b99a284fad48caff3",
+    "tests/test_brief_worker.py": "16be62a0f674675d1c7751c11cedd7a065fd56f0f1f93af174298a1541e10537"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -32,7 +37,7 @@
     "M01": "verified_local",
     "A02": "verified_local",
     "A03": "verified_local",
-    "A04": "awaiting canonical review; 99 target/1868 full and 7 parent gates passed; candidate not merged"
+    "A04": "verified_local; production adapter/real provider acceptance open"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -40,22 +45,25 @@
     "A01-AC3": "frozen source IDs and typed fact/commitment/proposal claims; unknown provenance rejected",
     "M01-AC1": "scope/UTC/timezone/manifest/budget preflight, first-claim timing, bounded observed seal and fail-closed result table verified",
     "M01-AC2": "current mapping/grant/core permission/egress/requester ACL intersection and stable provider identity drift tested",
-    "M01-AC3": "strict DST and namespace rejection, confirmation snapshot, public evaluation scoring/holdout custody frozen; private holdout not created/not_run"
+    "M01-AC3": "strict DST and namespace rejection, confirmation snapshot, public evaluation scoring/holdout custody frozen; private holdout not created/not_run",
+    "A04-AC1": "Local runner -> service -> worker -> actual A03 generation contract -> private revision/outbox verified with synthetic transport. Production readonly provider adapter is not implemented; real provider/semantic/platform acceptance is NOT completed.",
+    "A04-AC2": "Local single worker/private loop, bounded intake/result publication/shutdown and legacy Monitor regression verified; transient SQLite contention is bounded by confirmed wall+monotonic lease/deadline.",
+    "A04-AC3": "Per-source current grant/resource/collection identity/ACL/destination checks at IO and atomic precommit; durable event dedupe, original timing, conservative unknown spend, immutable causes and scoped reconciliation verified locally."
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 148,
-    "full_passed": 1769,
+    "target_passed": 119,
+    "full_passed": 1888,
     "warnings": 11,
-    "full_seconds": 24.62,
+    "full_seconds": 43.1,
     "ruff": "passed",
-    "latest_slice": "A03"
+    "latest_slice": "A04"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 5,
+    "successful_reviews": 6,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -67,13 +75,18 @@
       "ostag/briefs/project_mapping.py": "m01-fable-round-1.json",
       "tests/test_meeting_contracts.py": "m01-fable-round-1.json",
       "tests/test_meeting_preflight.py": "m01-fable-round-1.json",
-      "ostag/briefs/store.py": "a03-fable-round-2.json",
+      "ostag/briefs/store.py": "a04-fable-round-2.json",
       "tests/test_brief_recovery.py": "a02-fable-round-1.json",
       "tests/test_brief_store.py": "a02-fable-round-1.json",
       "ostag/briefs/generation.py": "a03-fable-round-2.json",
       "ostag/briefs/validation.py": "a03-fable-round-2.json",
       "tests/test_brief_generation.py": "a03-fable-round-2.json",
-      "tests/test_brief_validation.py": "a03-fable-round-2.json"
+      "tests/test_brief_validation.py": "a03-fable-round-2.json",
+      "ostag/briefs/service.py": "a04-fable-round-2.json",
+      "ostag/briefs/worker.py": "a04-fable-round-2.json",
+      "ostag/core/runner.py": "a04-fable-round-2.json",
+      "tests/test_brief_service.py": "a04-fable-round-2.json",
+      "tests/test_brief_worker.py": "a04-fable-round-2.json"
     },
     "unresolved_blockers": 0
   },
@@ -88,7 +101,10 @@
       "loop_aac8db28-6466-4ef6-87a7-6ab8a10c8b66",
       "loop_b704a9ea-5282-43d2-abe1-36a294bc19b0",
       "loop_ed9ab136-6f08-4c3a-b55b-a00120103f35",
-      "loop_9df54417-e3d2-41a8-bc13-dd567fa8b5e2"
+      "loop_9df54417-e3d2-41a8-bc13-dd567fa8b5e2",
+      "loop_655429cb-4c71-4423-8f34-04fde0113790",
+      "loop_c7dbe0c3-90e8-4b94-8555-e49df7039792",
+      "loop_2499802b-8187-4884-9714-065b3ee67f5a"
     ],
     "outcomes": [
       "success",
@@ -99,6 +115,9 @@
       "native_success_parent_gate_failed",
       "success",
       "escalated_after_parent_gate_false_positive",
+      "success",
+      "escalated",
+      "escalated",
       "success"
     ],
     "replayed_candidate_unchanged": true,
@@ -112,7 +131,10 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03-review"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03-review",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-repair",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-review"
     ]
   },
   "not_run": [
@@ -123,10 +145,15 @@
     "production preflight",
     "push",
     "main merge",
-    "deployment"
+    "deployment",
+    "production readonly generation adapter implementation/certification",
+    "real provider generation/semantic evaluation",
+    "A04 real-backend acceptance",
+    "D01 dual-identity/mobile platform acceptance"
   ],
   "next_tasks": [
-    "A04"
+    "A04",
+    "U01"
   ],
   "slices": {
     "A01": {
@@ -521,9 +548,73 @@
         "A12/M07 real generation and human semantic evaluation",
         "D02 container/backup/restore/deployment gates"
       ]
+    },
+    "A04": {
+      "status": "verified_local; production adapter/real provider acceptance open",
+      "code_commit": "95b686450415218d111c8bcc655136ec2dd2d068",
+      "code_content_sha256": "31a961af55044e1d7a9b05df5e24cf6c8f7f4a9a00668e670790ad23fedba06f",
+      "files": [
+        "ostag/briefs/service.py",
+        "ostag/briefs/store.py",
+        "ostag/briefs/worker.py",
+        "ostag/core/runner.py",
+        "tests/test_brief_service.py",
+        "tests/test_brief_worker.py"
+      ],
+      "target_tests": {
+        "passed": 119,
+        "warnings": 0,
+        "seconds": 12.59
+      },
+      "full_tests": {
+        "passed": 1888,
+        "warnings": 11,
+        "seconds": 43.1
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "a04-fable-round-1.json",
+        "a04-fable-round-2.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_2499802b-8187-4884-9714-065b3ee67f5a",
+      "iterations": 2,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-review",
+      "first_attempt_artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04",
+      "prior_review_receipts": [
+        "a04-fable-initial-blocked.json",
+        "a04-fable-output-limit.json"
+      ],
+      "review_effort": "medium; exact full candidate and contract/helper context; output-limited high-effort attempt is not a verdict",
+      "repair_artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-repair",
+      "actual_codex_iterations": 5,
+      "source_restore": "exact previous candidate restored before actual Codex repair; not counted as a model iteration",
+      "parent_gates": [
+        "deadline reader/writer locks",
+        "real schema1 preservation",
+        "real schema2 to opt-in schema3 preservation/future refusal",
+        "final source/grant time boundaries",
+        "precommit lock-wait revocation rollback",
+        "reentrant Future callback and bounded stop",
+        "idle and active contention incl response during lock"
+      ],
+      "additional_review_regressions": "First checkpoint contention seeded only from committed claim; unseeded busy fails closed; stop-aware retry; guarded preflight and bounded tail reconciliation. See final exact candidate tests and review.",
+      "manual_schema_version": 3,
+      "default_schema_version": 2,
+      "readable_schema_range": [
+        1,
+        3
+      ]
     }
   },
-  "latest_slice_content_sha256": "bdb2f398aa911634b5843aed0b087fd3c4e8d55caa79c9a14e8c9a7a9ee7e1ef",
+  "latest_slice_content_sha256": "31a961af55044e1d7a9b05df5e24cf6c8f7f4a9a00668e670790ad23fedba06f",
   "pending_findings": [],
-  "checkpoint": "A04 tests pass; Fable output/session limit produced no verdict; exact snapshot review retry pending"
+  "checkpoint": "A04 local vertical slice verified; production adapter remains A04 work; U01 independently eligible",
+  "next_task_details": {
+    "A04": "Implement and certify a narrow production read-only model adapter; prove actual model/usage and whole provider input billing bounds; D01 live evidence remains separate.",
+    "U01": "Private outbox delivery observation and uncertain-result handling; prerequisite A02 satisfied."
+  },
+  "updated_at_utc": "2026-09-14T05:51:50.786073+00:00"
 }
