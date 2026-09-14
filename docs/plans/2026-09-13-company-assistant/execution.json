@@ -38,7 +38,7 @@
     "A02": "verified_local",
     "A03": "verified_local",
     "A04": "verified_local; production adapter/real provider acceptance open",
-    "A04-provider": "environment interrupted before fixed verification; recovered tests and initial adapter; actual reconstruction in progress"
+    "A04-provider": "2072 full tests passed; independent gate blocks raw trusted-callback exception leakage; exact snapshot repair in progress"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -611,8 +611,14 @@
     }
   },
   "latest_slice_content_sha256": "31a961af55044e1d7a9b05df5e24cf6c8f7f4a9a00668e670790ad23fedba06f",
-  "pending_findings": [],
-  "checkpoint": "A04 provider native attempt interrupted by ENOSPC; external temp directory and partial-source recovery prepared",
+  "pending_findings": [
+    {
+      "slice": "A04-provider",
+      "source": "parent_provider_probe.py",
+      "issue": "Arbitrary trusted callback exceptions leak private text; preserve domain outcomes with sanitized mapping."
+    }
+  ],
+  "checkpoint": "A04 provider privacy repair after real Fable diagnostic challenge",
   "next_task_details": {
     "A04": "Implement and certify a narrow production read-only model adapter; prove actual model/usage and whole provider input billing bounds; D01 live evidence remains separate.",
     "U01": "Private outbox delivery observation and uncertain-result handling; prerequisite A02 satisfied."

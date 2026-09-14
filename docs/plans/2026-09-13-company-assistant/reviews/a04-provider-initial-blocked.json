@@ -1,0 +1,64 @@
+{
+  "candidate_sha256": "7cb9f5b64c84682892bd552d3cab000316ab688e36fd5deccd388079e6e8b843",
+  "base": "f9c713a76ad84cd0455f1f1d31b541a1c9305107",
+  "files": [
+    "ostag/briefs/generation.py",
+    "ostag/briefs/openai_transport.py",
+    "pyproject.toml",
+    "tests/test_brief_openai_transport.py",
+    "uv.lock"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 45345,
+      "outputTokens": 24,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.045465000000000005,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 27288,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 61935,
+      "webSearchRequests": 0,
+      "costUSD": 2.6031199999999997,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 25300,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/openai_transport.py",
+        "issue": "The sanitizing boundary in generate() (`except Exception: pass` → `OpenAITransportError(\"provider transport failed\")`) also swallows exceptions raised by the TRUSTED `request.reauthorize()` closure. generation.prepare() deliberately raises `_Stopped(\"checkpoint_denied\"|\"cancelled\"|\"timeout\")` and `LeaseLost` so `_bounded_call`/generate() can record the true reason; the adapter converts every one of them into a generic RuntimeError, so generate() falls into `except Exception: return rejected(\"transport_error\")`. Result: grant/ACL revocation, lease loss, UTC-day rollover and expiry detected at the pre-count or pre-create gate are durably recorded (mark_cost_unknown diagnostic, worker `_fail(job, cause)`) as a network failure instead of checkpoint_denied/lease_lost/timeout. The seam's whole point is that the adapter re-runs prepare(); erasing its outcome breaks the A03 status contract and mislabels security-relevant denials as retryable-looking transport faults. The journey test only accepts `in (\"needs_input\",\"cancelled\")` and `state == \"unknown\"`, so it never checks the recorded reason. Fix: capture exceptions raised by the trusted callback separately (no secret context is involved) and re-raise them unchanged after the sanitizing block (or map `_Stopped`/`LeaseLost`/`SchemaError` explicitly), then assert `cost.diagnostic`/job failure cause in test_count_boundary_authorization_changes_block_create_and_draft.",
+        "reproduction": "Run test_count_boundary_authorization_changes_block_create_and_draft[grant] and additionally assert `cost.diagnostic == \"checkpoint_denied\"` (or inspect the failed job's recorded cause): it is \"transport_error\". Standalone: `await adapter(Wire()).generate(request(reauthorize=lambda: (_ for _ in ()).throw(LeaseLost(\"x\"))))` raises OpenAITransportError('provider transport failed'), not LeaseLost, and generation.generate() would return status transport_error."
+      }
+    ],
+    "notes": [
+      "Cost math verified: ((i-cached)*4 + cached + o*16 + 1)//2 == ceil((i-cached)*2 + cached/2 + o*8); 100/3/50 → 596, uncached → 600; overrun not clamped; cached>input, reasoning!=0, extra usage keys, bool/float ints all return None (evidence dropped to unknown, conservative).",
+      "All internal fixed diagnostic strings (\"invalid provider input count\", \"unsupported provider profile...\", \"invalid authorization time\", etc.) are dead: the trailing except collapses every Exception, including adapter bugs such as AttributeError/TypeError, into \"provider transport failed\". Negative tests using bare pytest.raises(RuntimeError) therefore cannot distinguish an intended rejection from an adapter crash; consider preserving the fixed message for OpenAITransportError instances (they carry no secret) so tests can match exact reasons.",
+      "Because actual_model_id is only returned when it equals MODEL_ID, generate()'s model_mismatch path is unreachable via this adapter; a wrong-model/wrong-tier response becomes missing_usage → unknown spend + quarantine. Conservative, but document that operator reconciliation must settle such cases manually.",
+      "Pre-IO configuration errors (profile/rate mismatch, missing reauthorize) also surface as transport_error after A03 has already started the reservation, causing unknown spend and worker quarantine despite provably zero egress; this is within the documented preflight/ledger limitation but is an operational trap worth a note in IMPLEMENTATION-NOTES.",
+      "test_time_budget_is_shared_by_count_and_create relies on a 15 ms margin (2×40 ms sleeps vs 65 ms budget) and may flake on a loaded host; consider widening to e.g. 0.1/0.1 vs 0.15.",
+      "test_import_safe_without_optional_httpx spawns sys.executable with an env lacking PYTHONPATH and depends on the pytest cwd being the repo root for `import ostag` to resolve; acceptable for the fixed verifier but fragile.",
+      "Injected AsyncBaseTransport is closed by the per-call AsyncClient __aexit__, so a hook transport is effectively single-use per adapter instance (fine for Wire fakes; a real AsyncHTTPTransport injected for tests would fail on the second generate()).",
+      "Timeout/cancel cleanup awaits `asyncio.gather(call, cancelled)` without its own bound; a transport whose aclose() hangs could delay the adapter's raise past the deadline (outer _bounded_call still refuses late results). Note-level for production httpcore.",
+      "Dependency change is minimal and correct: httpx==0.28.1 added under the openai extra only; uv.lock diff touches only requires-dist/extra metadata, no resolution drift; compatible with openai 2.44.0's httpx<1 requirement.",
+      "Ordering of the seam is correct: prepare() does store.assert_current + checkpoint (guard/DB) before local_remaining (clock only); adapter calls reauthorize() inside the scheduled IO task immediately before each client.send with only build_request/cookie clear in between; fresh seconds only shrink the monotonic deadline via min() and timer.reschedule."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a04-provider-f77669a9"
+}
