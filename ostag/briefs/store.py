@@ -17,8 +17,8 @@ A03/A04 own semantic validation and current authorization. Trusted nonblocking c
 
 One job is one queue item; one initial attempt plus two expired-attempt retries,
 one live lease globally. A completion only queues one requester-private outbox
-intent. It does not send, acknowledge, or promise exactly-once delivery. U01
-must add the send fence/receipt/uncertain-result protocol; M06 owns collection
+intent. It does not send, acknowledge, or promise exactly-once delivery. Opt-in U01 schema4
+adds the separate send fence/receipt/uncertain-result protocol; M06 owns collection
 progress. No Monitor schema, server lifecycle or provider integration lives here.
 
 Timing contract: DELETE journaling with BEGIN EXCLUSIVE puts both reader and
@@ -72,8 +72,9 @@ from ostag.core.identity import Principal
 # A04 explicitly calls enable_manual() for the additive schema3 migration.
 CURRENT_SCHEMA_VERSION = 2
 READABLE_SCHEMA_MIN = 1
-READABLE_SCHEMA_MAX = 3
+READABLE_SCHEMA_MAX = 4
 MANUAL_SCHEMA_VERSION = 3
+DELIVERY_SCHEMA_VERSION = 4
 APPLICATION_ID = 0x42524653  # BRFS; deliberately different from unmarked Monitor SQLite.
 MAX_JSON_BYTES = 1024 * 1024
 MAX_QUEUED = 20
@@ -573,8 +574,39 @@ _MANUAL_SCHEMA = (
         created_us INTEGER NOT NULL
     )""",
 )
+_DELIVERY_SCHEMA = (
+    """CREATE TABLE brief_deliveries (
+        delivery_id TEXT PRIMARY KEY REFERENCES brief_outbox(delivery_id),
+        job_id TEXT NOT NULL UNIQUE REFERENCES brief_jobs(job_id),
+        revision_id TEXT NOT NULL UNIQUE REFERENCES brief_revisions(revision_id),
+        namespace TEXT NOT NULL, platform TEXT NOT NULL, actor_id TEXT NOT NULL,
+        intent_json TEXT NOT NULL CHECK(length(CAST(intent_json AS BLOB)) <= 65536),
+        intent_digest TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','started','unknown','provider_accepted')),
+        token TEXT UNIQUE, owner_id TEXT, candidate_id TEXT,
+        created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL, started_us INTEGER,
+        uncertainty_json TEXT CHECK(length(CAST(uncertainty_json AS BLOB)) <= 1024),
+        first_failure_json TEXT CHECK(length(CAST(first_failure_json AS BLOB)) <= 1024),
+        receipt_json TEXT CHECK(length(CAST(receipt_json AS BLOB)) <= 65536),
+        read_attempts INTEGER NOT NULL DEFAULT 0 CHECK(read_attempts BETWEEN 0 AND 32)
+    )""",
+    """CREATE TABLE brief_delivery_reads (
+        delivery_id TEXT NOT NULL REFERENCES brief_deliveries(delivery_id),
+        ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 32),
+        owner_id TEXT NOT NULL, token TEXT NOT NULL UNIQUE, candidate_id TEXT NOT NULL,
+        settled INTEGER NOT NULL DEFAULT 0 CHECK(settled IN (0,1)),
+        PRIMARY KEY(delivery_id, ordinal)
+    )""",
+    """CREATE TABLE brief_delivery_observations (
+        delivery_id TEXT NOT NULL REFERENCES brief_deliveries(delivery_id),
+        ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 32),
+        evidence_json TEXT NOT NULL CHECK(length(CAST(evidence_json AS BLOB)) <= 65536),
+        PRIMARY KEY(delivery_id, ordinal)
+    )""",
+)
 _SCHEMAS = {1: _SCHEMA, 2: _SCHEMA + _COST_SCHEMA,
-            3: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA}
+            3: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA,
+            4: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA + _DELIVERY_SCHEMA}
 
 # Fixed public-domain causes only: never exception strings, excerpts or provider errors.
 FAILURE_CAUSES = frozenset({
@@ -731,6 +763,352 @@ class BriefStore:
                 for statement in _MANUAL_SCHEMA:
                     db.execute(statement)
                 db.execute(f"PRAGMA user_version={MANUAL_SCHEMA_VERSION}")
+
+    def enable_delivery(self) -> None:
+        """Explicit additive schema4 opt-in through schema3; never constructor-driven.
+
+        Exact old rows/DDL are retained. Schema1 construction still performs the
+        existing 1->2 migration; enable_manual still stops at 3. Old binaries
+        reject 4. Delivery methods use nonwaiting transactions so their async
+        caller owns contention/cancellation bounds without SQLite worker threads.
+        """
+        with self._transaction() as db:
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version == 2:
+                for statement in _MANUAL_SCHEMA:
+                    db.execute(statement)
+            if version < DELIVERY_SCHEMA_VERSION:
+                for statement in _DELIVERY_SCHEMA:
+                    db.execute(statement)
+                db.execute(f"PRAGMA user_version={DELIVERY_SCHEMA_VERSION}")
+
+    @contextmanager
+    def _delivery_transaction(self, *, write=True):
+        """Nonwaiting U01 transactions; legacy timing/error paths stay unchanged.
+
+        Match the same exact-schema/DELETE/FULL/exclusive protocol. Contention
+        is retried only by the delivery operation's bounded async caller. New
+        private paths discard SQLite exception contexts as well as their text.
+        """
+        db = None
+        failure = None
+        try:
+            db = sqlite3.connect(self.path, timeout=0, isolation_level=None)
+            db.row_factory = sqlite3.Row
+            db.execute("BEGIN")
+            self._inspect(db)
+            db.rollback()
+            db.execute("PRAGMA foreign_keys=ON")
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN EXCLUSIVE" if write else "BEGIN")
+            self._inspect(db)
+            yield db
+            db.commit()
+        except sqlite3.Error as exc:
+            failure = _database_error(exc)
+        finally:
+            if db is not None:
+                try:
+                    if db.in_transaction:
+                        db.rollback()
+                finally:
+                    db.close()
+        if failure is not None:
+            raise failure
+
+    @staticmethod
+    def _delivery_row(db, worker, scope, delivery_id):
+        _worker(worker)
+        params = _scope(scope)
+        _identifier(delivery_id, "delivery_id")
+        if db.execute("PRAGMA user_version").fetchone()[0] != DELIVERY_SCHEMA_VERSION:
+            raise BriefSchemaError("delivery requires explicit schema4 enablement")
+        return db.execute("SELECT * FROM brief_deliveries WHERE namespace=? AND platform=? "
+                          "AND actor_id=? AND delivery_id=?", (*params, delivery_id)).fetchone()
+
+    def _delivery_view(self, db, worker, scope, delivery_id):
+        from ostag.briefs.delivery import _snapshot
+        row = self._delivery_row(db, worker, scope, delivery_id)
+        if row is None:
+            return None
+        job = self._find(db, scope, row["job_id"])
+        box = db.execute("SELECT * FROM brief_outbox WHERE delivery_id=?",
+                         (delivery_id,)).fetchone()
+        observations = tuple(r[0] for r in db.execute(
+            "SELECT evidence_json FROM brief_delivery_observations WHERE delivery_id=? "
+            "ORDER BY ordinal", (delivery_id,)))
+        return _snapshot(row, scope, job["state"], box["state"], observations)
+
+    def delivery_snapshot(self, worker: WorkerContext, scope: RequesterContext, delivery_id: str):
+        """Detached private history, internal + authenticated scope; never an approval."""
+        with self._delivery_transaction(write=False) as db:
+            return self._delivery_view(db, worker, scope, delivery_id)
+
+    @staticmethod
+    def _delivery_clock(clock):
+        import asyncio
+        from ostag.briefs.delivery import DeliveryError, _reason
+        reason = None
+        try:
+            stamp = _clock_micros(clock)
+        except DeliveryError as exc:
+            reason = _reason(exc, "clock_error")
+        except (Exception, asyncio.CancelledError):
+            reason = "clock_error"
+        if reason:
+            raise DeliveryError(reason)
+        return stamp
+
+    def _delivery_final(self, clock, stamp, precommit):
+        # All SQL/result construction precedes this bounded trusted local policy.
+        # The enclosing transaction performs only COMMIT after this clock check.
+        import asyncio
+        from ostag.briefs.delivery import DeliveryError, _reason
+        reason = None
+        try:
+            if precommit() is not None:
+                reason = "authorization_denied"
+        except DeliveryError as exc:
+            reason = _reason(exc, "authorization_denied")
+        except (Exception, asyncio.CancelledError):
+            reason = "authorization_denied"
+        if reason:
+            raise DeliveryError(reason)
+        if self._delivery_clock(clock) < stamp:
+            raise ClockError("delivery clock moved backwards")
+
+    def prepare_delivery(self, worker, intent, *, clock, precommit):
+        """Admit exact persisted revision only; no replacement or cross-job coalescing."""
+        from ostag.briefs.delivery import DeliveryIntent, wire_text
+        if type(intent) is not DeliveryIntent or not callable(precommit):
+            raise Conflict("trusted delivery intent and policy required")
+        encoded, digest = intent.encoded, intent.digest
+        with self._delivery_transaction() as db:
+            old = self._delivery_row(db, worker, intent.scope, intent.delivery_id)
+            job = self._find(db, intent.scope, intent.job_id)
+            box = db.execute("SELECT * FROM brief_outbox WHERE delivery_id=?",
+                             (intent.delivery_id,)).fetchone()
+            revision = db.execute("SELECT * FROM brief_revisions WHERE revision_id=?",
+                                  (intent.revision_id,)).fetchone()
+            stamp = self._delivery_clock(clock)
+            if (job is None or box is None or revision is None
+                    or box["job_id"] != intent.job_id or revision["job_id"] != intent.job_id
+                    or box["revision_id"] != intent.revision_id
+                    or box["destination"] != intent.destination.address
+                    or job["destination"] != intent.destination.address
+                    or intent.wire_body != wire_text(revision["payload_json"])):
+                raise Conflict("delivery does not match persisted private revision")
+            self._forward(job, stamp)
+            if old is not None:
+                self._forward(old, stamp)
+                if old["intent_json"] != encoded or old["intent_digest"] != digest:
+                    raise Conflict("delivery replay changed frozen intent")
+            else:
+                if box["state"] != "pending" or job["state"] != "draft_ready":
+                    raise Conflict("local delivery intent cancelled")
+                db.execute("INSERT INTO brief_deliveries (delivery_id,job_id,revision_id,"
+                           "namespace,platform,actor_id,intent_json,intent_digest,state,"
+                           "created_us,updated_us) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                           (intent.delivery_id, intent.job_id, intent.revision_id,
+                            *_scope(intent.scope), encoded, digest, "pending", stamp, stamp))
+            result = self._delivery_view(db, worker, intent.scope, intent.delivery_id)
+            self._delivery_final(clock, stamp, precommit)
+            return result
+
+    def _delivery_current(self, db, worker, intent, clock):
+        from ostag.briefs.delivery import DeliveryIntent
+        if type(intent) is not DeliveryIntent:
+            raise Conflict("trusted delivery intent required")
+        row = self._delivery_row(db, worker, intent.scope, intent.delivery_id)
+        if row is None or row["intent_json"] != intent.encoded or row["intent_digest"] != intent.digest:
+            raise Conflict("delivery identity mismatch")
+        stamp = self._delivery_clock(clock)
+        self._forward(row, stamp)
+        job = self._find(db, intent.scope, intent.job_id)
+        self._forward(job, stamp)
+        box = db.execute("SELECT state FROM brief_outbox WHERE delivery_id=?",
+                         (intent.delivery_id,)).fetchone()
+        if box[0] != "pending" or job["state"] != "draft_ready":
+            raise Conflict("local delivery intent cancelled")
+        return row, stamp
+
+    def begin_delivery(self, worker, intent, *, clock, precommit):
+        """Atomic one-send claim. No lease, expiry, reset or resend operation exists."""
+        from ostag.briefs.delivery import SendAttempt, _uncertainty
+        with self._delivery_transaction() as db:
+            row, stamp = self._delivery_current(db, worker, intent, clock)
+            result = None
+            if row["state"] == "pending":
+                token = uuid4().hex + uuid4().hex
+                db.execute("UPDATE brief_deliveries SET state='started',token=?,owner_id=?,"
+                           "started_us=?,updated_us=?,uncertainty_json=? WHERE delivery_id=? AND state='pending'",
+                           (token, _worker(worker), stamp, stamp,
+                            _uncertainty("send_unverified", _stamp(stamp), row["intent_digest"]),
+                            intent.delivery_id))
+                result = SendAttempt(intent, token)
+            self._delivery_final(clock, stamp, precommit)
+            return result
+
+    @staticmethod
+    def _delivery_send_owner(row, worker, token):
+        if (type(token) is not str or not token or row["token"] != token
+                or row["owner_id"] != _worker(worker)):
+            raise Conflict("send claim owner mismatch")
+
+    @staticmethod
+    def _delivery_observation_owner(db, row, worker, observation):
+        from ostag.briefs.delivery import ObservationAttempt
+        if (type(observation) is not ObservationAttempt
+                or type(observation.ordinal) is not int
+                or not 1 <= observation.ordinal <= row["read_attempts"]
+                or type(observation.token) is not str
+                or observation.intent.encoded != row["intent_json"]
+                or observation.intent.digest != row["intent_digest"]
+                or observation.message_id != row["candidate_id"]):
+            raise Conflict("observation claim mismatch")
+        claim = db.execute("SELECT * FROM brief_delivery_reads WHERE delivery_id=? AND ordinal=?",
+                           (row["delivery_id"], observation.ordinal)).fetchone()
+        if (claim is None or claim["settled"] or claim["owner_id"] != _worker(worker)
+                or claim["token"] != observation.token
+                or claim["candidate_id"] != observation.message_id):
+            raise Conflict("observation claim is no longer current")
+
+    @staticmethod
+    def _settle_delivery_observation(db, observation):
+        db.execute("UPDATE brief_delivery_reads SET settled=1 WHERE delivery_id=? AND ordinal=?",
+                   (observation.intent.delivery_id, observation.ordinal))
+
+    def check_delivery_egress(self, worker, intent, *, token, clock, precommit,
+                              observation=None):
+        """Recheck durable cancellation before local policy at scheduled/actual IO."""
+        with self._delivery_transaction() as db:
+            row, stamp = self._delivery_current(db, worker, intent, clock)
+            if token is not None:
+                self._delivery_send_owner(row, worker, token)
+                if row["state"] != "started" or observation is not None:
+                    raise Conflict("send claim is no longer current")
+            else:
+                self._delivery_observation_owner(db, row, worker, observation)
+                if row["state"] not in ("started", "unknown"):
+                    raise Conflict("exact observation identity unavailable")
+            self._delivery_final(clock, stamp, precommit)
+
+    @staticmethod
+    def _delivery_note(db, row, stamp, reason):
+        from ostag.briefs.delivery import REASONS, _json, _uncertainty
+        if type(reason) is not str or reason not in REASONS:
+            raise Conflict("invalid sanitized delivery reason")
+        evidence = _json(dict(reason=reason, at=_stamp(stamp),
+                              intent_digest=row["intent_digest"]))
+        uncertainty = _uncertainty(reason, _stamp(stamp), row["intent_digest"])
+        db.execute("UPDATE brief_deliveries SET state='unknown',updated_us=?,"
+                   "first_failure_json=COALESCE(first_failure_json,?) WHERE delivery_id=? "
+                   "AND state IN ('started','unknown')", (stamp, uncertainty, row["delivery_id"]))
+        ordinal = db.execute("SELECT count(*) FROM brief_delivery_observations "
+                             "WHERE delivery_id=?", (row["delivery_id"],)).fetchone()[0] + 1
+        if ordinal <= 32:
+            db.execute("INSERT INTO brief_delivery_observations VALUES (?,?,?)",
+                       (row["delivery_id"], ordinal, evidence))
+
+    def delivery_unknown(self, worker, scope, delivery_id, reason, *, clock,
+                         token=None, observation=None):
+        """Fixed diagnostic by actual custody only; never grants or reopens send.
+
+        Send requires matching owner + opaque token. Observation requires its
+        separate unconsumed read budget capability, consumed atomically here.
+        Lost begin responses retain initial uncertainty without this mutation.
+        """
+        with self._delivery_transaction() as db:
+            row = self._delivery_row(db, worker, scope, delivery_id)
+            if row is None:
+                raise Conflict("delivery identity mismatch")
+            if observation is None:
+                self._delivery_send_owner(row, worker, token)
+            else:
+                if token is not None:
+                    raise Conflict("ambiguous delivery custody")
+                self._delivery_observation_owner(db, row, worker, observation)
+            if row["state"] not in ("started", "unknown"):
+                return
+            stamp = self._delivery_clock(clock)
+            self._forward(row, stamp)
+            self._delivery_note(db, row, stamp, reason)
+            if observation is not None:
+                self._settle_delivery_observation(db, observation)
+            if self._delivery_clock(clock) < stamp:
+                raise ClockError("delivery clock moved backwards")
+
+    def begin_delivery_observation(self, worker, intent, *, clock, precommit):
+        """One owned read budget unit, spent even if its COMMIT response is lost."""
+        from ostag.briefs.delivery import ObservationAttempt
+        with self._delivery_transaction() as db:
+            row, stamp = self._delivery_current(db, worker, intent, clock)
+            allowed = (row["state"] in ("started", "unknown")
+                       and row["candidate_id"] is not None and row["read_attempts"] < 32)
+            result = None
+            if allowed:
+                result = ObservationAttempt(intent, uuid4().hex + uuid4().hex,
+                                            row["candidate_id"], row["read_attempts"] + 1)
+                db.execute("INSERT INTO brief_delivery_reads "
+                           "(delivery_id,ordinal,owner_id,token,candidate_id) VALUES (?,?,?,?,?)",
+                           (intent.delivery_id, result.ordinal, _worker(worker), result.token,
+                            result.message_id))
+                db.execute("UPDATE brief_deliveries SET read_attempts=read_attempts+1,"
+                           "updated_us=? WHERE delivery_id=?", (stamp, intent.delivery_id))
+            self._delivery_final(clock, stamp, precommit)
+            return result
+
+    def _accept_delivery(self, worker, intent, candidate, messages, *, token, clock, precommit,
+                         observation=None):
+        from ostag.briefs.delivery import DeliveryIntent, _message_id, receipt
+        if type(intent) is not DeliveryIntent:
+            raise Conflict("trusted delivery intent required")
+        # This private path receives only trusted correlated transport results.
+        if candidate is not None:
+            _message_id(candidate)
+        evidence = receipt(intent, candidate, messages)
+        with self._delivery_transaction() as db:
+            row, stamp = self._delivery_current(db, worker, intent, clock)
+            if row["state"] not in ("started", "unknown"):
+                raise Conflict("delivery evidence state changed")
+            if token is not None:
+                self._delivery_send_owner(row, worker, token)
+                if row["candidate_id"] is not None and row["candidate_id"] != candidate:
+                    raise Conflict("candidate identity changed")
+                if candidate is not None:
+                    db.execute("UPDATE brief_deliveries SET candidate_id=? WHERE delivery_id=?",
+                               (candidate, intent.delivery_id))
+            else:
+                self._delivery_observation_owner(db, row, worker, observation)
+                if candidate is None or row["candidate_id"] != candidate:
+                    raise Conflict("observation identity mismatch")
+                self._settle_delivery_observation(db, observation)
+            if evidence is None:
+                reason = "missing_proof" if type(messages) is tuple and not messages else "invalid_proof"
+                self._delivery_note(db, row, stamp, reason)
+            else:
+                db.execute("UPDATE brief_deliveries SET state='provider_accepted',receipt_json=?,"
+                           "updated_us=? WHERE delivery_id=?", (evidence, stamp, intent.delivery_id))
+            result = self._delivery_view(db, worker, intent.scope, intent.delivery_id)
+            self._delivery_final(clock, stamp, precommit)
+            return result
+
+    def accept_delivery_response(self, worker, attempt, candidate, messages, *, clock, precommit):
+        """Internal exact-attempt response only; candidate IDs are never requester arguments."""
+        from ostag.briefs.delivery import SendAttempt
+        if type(attempt) is not SendAttempt or type(attempt.token) is not str or not attempt.token:
+            raise Conflict("trusted send claim required")
+        return self._accept_delivery(worker, attempt.intent, candidate, messages,
+                                     token=attempt.token, clock=clock, precommit=precommit)
+
+    def accept_delivery_observation(self, worker, observation, messages, *, clock, precommit):
+        """Owned read result only; exact identity AND full content required."""
+        from ostag.briefs.delivery import ObservationAttempt
+        if type(observation) is not ObservationAttempt:
+            raise Conflict("trusted observation claim required")
+        return self._accept_delivery(worker, observation.intent, observation.message_id, messages,
+                                     token=None, observation=observation,
+                                     clock=clock, precommit=precommit)
 
     def get_by_event(self, scope: RequesterContext, idempotency_key: str) -> Job | None:
         """Durable scoped lookup BEFORE constructing a new intake snapshot/clock."""
@@ -1163,7 +1541,7 @@ class BriefStore:
 
     @staticmethod
     def _cost_schema(db: sqlite3.Connection) -> None:
-        if db.execute("PRAGMA user_version").fetchone()[0] not in (2, 3):
+        if db.execute("PRAGMA user_version").fetchone()[0] not in (2, 3, 4):
             raise BriefSchemaError("cost operations require schema2; reopen for forward migration")
 
     @staticmethod
