@@ -1,0 +1,70 @@
+{
+  "candidate_sha256": "41662d3a1d5c021c549c8d28a9224beee9417309131e1f82e7e3f6a7a1c138db",
+  "base": "f50398036a7dfa12de16a0bd3086b9809bc81103",
+  "files": [
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "ostag/core/runner.py",
+    "tests/test_brief_service.py",
+    "tests/test_brief_worker.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 61669,
+      "outputTokens": 19,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.061764,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 56718,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 83205,
+      "webSearchRequests": 0,
+      "costUSD": 4.500177750000001,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 54115,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/worker.py",
+        "issue": "The in-loop `watch()` coroutine calls `guard.assert_current()` every 20 ms (hard-coded, independent of heartbeat_interval). Each call is a full `BEGIN EXCLUSIVE` store transaction, and LeaseGuard latches loss on the FIRST error of any kind, including transient `StoreBusy` from ordinary lock contention (busy_timeout is 0..5 s, default 1 s). So any other connection holding the SQLite lock for >= busy_timeout during a model call (e.g. a concurrent `admit` whose trusted precommit callbacks run under the EXCLUSIVE lock, a requester `cancel`, or an fsync stall) deterministically converts a healthy, still-leased, paid provider call into: cancellation.set() -> generate returns 'cancelled' -> reservation marked 'unknown' (max charge retained) -> job needs_input with cause 'lease_lost' although the persisted lease never expired -> worker permanently quarantined (has_uncertain_cost blocks every later job until manual settle_cost). This is not conservatism about ambiguous outcomes; it manufactures unknown spend and a dead worker from contention that the store contract explicitly calls retryable.",
+        "reproduction": "Use the `local` fixture (busy_timeout=1, heartbeat 0.02). Set `service.transport.effect = lambda req: asyncio.sleep(1.5)` (cooperative, returns a valid response). submit(event()); future = worker.run_once(). ~100 ms later, from another thread: `h = sqlite3.connect(store.path); h.execute('BEGIN EXCLUSIVE'); time.sleep(1.3); h.rollback()`. Expected: 'draft_ready' (lease_until is 30 s away, nothing was revoked). Observed: the watcher's assert_current raises StoreBusy after 1 s -> guard lost, cancellation set; future.result() == 'needs_input', failure_cause == 'lease_lost', cost_record state == 'unknown', worker.quarantined is True, and every subsequent run_once() returns 'stopped'."
+      },
+      {
+        "file": "ostag/briefs/worker.py",
+        "issue": "`_execute` runs `recover_one`, `claim_one` and `has_uncertain_cost` outside its try block, and `_dispatch` turns ANY exception into `self._quarantined = True` with no reset path (`run_once` then returns 'stopped' forever, `start()` polling exits). A transient read-side `StoreBusy`/`ClockError` at idle, with no job claimed and no cost at risk, therefore permanently disables the single worker for the process lifetime. Requirement asked to catch StoreBusy/ClockError/Conflict within the brief domain; escalating a retryable read failure into an irreversible quarantine is a trivially triggerable availability bug (any admission whose trusted precommit callbacks hold the EXCLUSIVE lock > busy_timeout kills the worker).",
+        "reproduction": "store = BriefStore(path, busy_timeout=0.1); service = Authority().service(store); worker = BriefWorker(service). From another thread: `h = sqlite3.connect(path); h.execute('BEGIN EXCLUSIVE')`; then `worker.run_once().result(2)` -> recover_one's `_transaction(write=False)` hits SQLITE_BUSY -> StoreBusy propagates from _execute -> _dispatch sets _quarantined, returns 'store_unavailable'. `h.rollback()`; `service.store.has_uncertain_cost(worker.context)` is False, yet `worker.run_once().result()` == 'stopped' indefinitely and `worker.quarantined` is True."
+      }
+    ],
+    "notes": [
+      "Parent freshness probe is addressed: per-source `now` is sampled after each lookup, all returned SourceSnapshot fresh_until/observed_at and PilotGrant valid_from/expires_at/revoked_at are retained and rechecked against one final clock sample after the last lookup/settings/grant call, with no store read afterwards; the parametrized regression covers source/settings/grant delays and forward/backward clock movement.",
+      "Identity/authorization: RequesterContext is built only from NormalizedEvent.principal; event.raw is never consulted; every source is individually compared (exact SourceRef equality incl. collection identity, resource, excerpt hash) against the trusted lookup and passed through grants.authorize; destination equality and principal binding are enforced both pre-lock and inside admit/complete precommit.",
+      "Idempotency: get_by_event runs before any clock sample; replay returns the stored state/job_id; brief_intakes request_hash yields 'conflict' on changed content; concurrent duplicates converge on one row via the UNIQUE constraint inside the EXCLUSIVE admit transaction; denied admissions roll back (precommit raises inside the transaction).",
+      "Precommit ordering in store.complete/admit is correct: callback runs after INSERTs, the relational effect assertion and result materialization, then only `_fresh_attempt` (clock-only) and COMMIT follow; approval-flag return values are rejected. Backward compatibility of complete/finish/claim_one/recover_one/admit/LeaseGuard.complete is preserved via optional keywords; CURRENT_SCHEMA_VERSION stays 2 and schema3 is opt-in through enable_manual.",
+      "Ordering defect (minor, conservative): `has_uncertain_cost` is checked AFTER recover_one/claim_one. A job whose expired attempt never reserved cost and validates clean is reclaimed (attempt+1, fence+1) and then immediately retired needs_input with cause 'recovery_required' because an unrelated job has an unknown cost. Check uncertain cost before touching any row.",
+      "Failure-cause labelling: load_job pin mismatch is persisted as 'authorization_denied' instead of the available 'config_changed'; 'prior invocation requires reconciliation' likewise maps to 'authorization_denied' rather than 'recovery_required'. Also store.cancel on a draft_ready job inserts a 'cancelled' row into brief_failures for a successful draft.",
+      "Trusted policy callbacks execute under the global SQLite EXCLUSIVE lock twice per admission (pre-check and precommit); their latency directly blocks the worker heartbeat, checkpoints and, per blocker 1, can kill in-flight paid calls. Document a hard latency budget or bound them with a timeout.",
+      "Tiny race: run_once() may pass the _stop check and then call call_soon_threadsafe on a loop that stop() has already closed, raising RuntimeError to the caller and leaving _busy stuck; guard the call and release _busy.",
+      "service.close() cancels queued executor futures; a runner coroutine awaiting handle_event then raises CancelledError into the Monitor handler instead of returning a sanitized status.",
+      "Limits: I did not execute tests, Ruff, or the probe. FakeTransport proves only that the A03 generate contract, cost ledger, provenance envelope and SQLite completion path are exercised; it cannot prove provider read-only isolation, billing bounds, or semantic quality. Several test expectations depend on fixtures from test_brief_generation/test_brief_validation (at(), evidence observed_at, SCHEMA1_SQL) that were not provided for inspection."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a04-01ac935a"
+}

@@ -166,3 +166,10 @@ Fable首审补出的标题/比较式误报已由实际RED→GREEN修复：原来
 最终复审新增的非阻塞接线义务：start被拒绝时可能保留未开始的reserved额度，A04需按job/call_id读取并仅在证明确未开始时释放；started/unknown不得当零成本退款。timeout设置的取消Event是协作停止信号，不等于用户手动取消。SQLite同步调用会阻塞所在event loop，A04应使用独立worker线程/事件循环并以线程安全方式发出停止信号，避免拖住Monitor。账本/时钟异常必须由brief服务域处理并保留作业原因。
 
 本轮代码未推送或部署。当前分支为codex/ostag-company-integration；原OStag工作区保持5098f914且clean。本轮所有新原生任务已本地归档，旧13任务哈希保持不变。下一检查点A04把已验证基础组合为手工材料作业纵向链路；真实历史会议材料接入仍按M02—M07及发布门槛推进。
+
+
+## A04 首轮审查后的修复中状态
+
+osstack两轮编码得到6文件冻结候选41662d3a1d5c021c549c8d28a9224beee9417309131e1f82e7e3f6a7a1c138db；69目标/1838全量及五组独立检查通过。真实Fable静态评审提出两项SQLite短暂竞争导致永久停机/不必要未知花费的阻塞；父级另复现Future锁内回调死锁。原生loop以escalated结束，未合入产品代码；外部快照完整保留。接续受控osstack修复轮解决三项阻塞和相关竞态，再重新完整验证。
+
+[真实Fable首审](reviews/a04-fable-initial-blocked.json)。此处记录为进行中，不能作为A04或生产验收完成证据。
