@@ -1,0 +1,15 @@
+{
+  "checked_at_utc": "2026-09-14",
+  "openai_sdk_version": "2.44.0",
+  "httpx_version": "0.28.1",
+  "local_input_tokens_sdk_sha256": "f3066387317bbbaee478c954f703ef4e9e61508bd5ffafaf527420f91f7a7866",
+  "sources": [
+    "https://developers.openai.com/api/docs/guides/token-counting",
+    "https://developers.openai.com/api/reference/typescript/resources/responses/subresources/input_tokens",
+    "https://developers.openai.com/api/docs/models/gpt-4.1",
+    "https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count",
+    "https://www.python-httpx.org/async/"
+  ],
+  "price_scope": "standard gpt-4.1-2025-04-14 public tariff; not invoice; live account/provider certification not_run",
+  "count_endpoint_price": "not independently verified; no free-count claim"
+}

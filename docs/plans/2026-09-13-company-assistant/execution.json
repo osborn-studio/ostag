@@ -1,11 +1,11 @@
 {
-  "scope": "Locally verified A01, M01, A02, A03 and A04 service/worker core; A04 real backend acceptance, full meeting product and production remain incomplete",
+  "scope": "Locally verified A01/M01/A02/A03/A04 core and first HTTP adapter; full meeting product and production incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "95b686450415218d111c8bcc655136ec2dd2d068",
+  "code_commit": "95af6f1355b1526b392e9a68e9d31bca4945d48f",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "49a5e1a0864805e65365544ffba408803e08a969e7c66ce5117ab747701b332b",
+  "code_content_sha256": "aee4721c52bea36c6be54e266f2dd12b878739e1515d73c6fbe1222e1cfb9104",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -19,7 +19,7 @@
     "ostag/briefs/store.py": "508ab3eadced9b87b570686bed9bb3be59927b4c9461c609eddcad474458d680",
     "tests/test_brief_recovery.py": "03ca5d25fb95bd14b810702e8ad4c580e03e82a8463e43d19c78243eec31b31c",
     "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62",
-    "ostag/briefs/generation.py": "d89814de9069ce484c78a74419d4d8d1e159c0fddb7e995f9baed6d0cd2762f3",
+    "ostag/briefs/generation.py": "5717e57f623e002b1757df3a088644dd9261fda7347f68e9d48f2cad12c23d94",
     "ostag/briefs/validation.py": "ace890a6d8ec5ad01f62d3d42d3f1c2fae7c5da9fb43cb17a8d1ac583417a53e",
     "tests/test_brief_generation.py": "fe78132f0cb458df1c0a7706029dc3ba93076a8af2514b8966ba6b4fe44c6b7c",
     "tests/test_brief_validation.py": "618b5b17ebb8a03afa891e556a723cc50592edef1f31cf554d23706eb7a08367",
@@ -27,7 +27,11 @@
     "ostag/briefs/worker.py": "0f23fc655622917f76d21312a4bfb385d8a38aa9b87afbf9ef89d54258cfed87",
     "ostag/core/runner.py": "71b0897fe5cfcb6d1d827bc2bf30cc583eabeedaf1d582eaf60bfe0a25889f7d",
     "tests/test_brief_service.py": "3ff61eb5f814fbf8483ae51684155e2653c3c4f86a82b02b99a284fad48caff3",
-    "tests/test_brief_worker.py": "16be62a0f674675d1c7751c11cedd7a065fd56f0f1f93af174298a1541e10537"
+    "tests/test_brief_worker.py": "16be62a0f674675d1c7751c11cedd7a065fd56f0f1f93af174298a1541e10537",
+    "ostag/briefs/openai_transport.py": "df9066f5656a2676eef31cf7a4dc21b987ca300453d5d43eaf634f39dae0e4ad",
+    "pyproject.toml": "6862df64b0712c88209b2b286312edccf9e5229e04f34dc3c8a8fa7f79ab661e",
+    "tests/test_brief_openai_transport.py": "3c781a10837f6b710631e37be926355b1e48bdee47b232f19751cd3fdada06d1",
+    "uv.lock": "f90cb6bdad729193f0242818167cebfa8e03ee021b4672854cbf2aeb3bae9a38"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -37,8 +41,8 @@
     "M01": "verified_local",
     "A02": "verified_local",
     "A03": "verified_local",
-    "A04": "verified_local; production adapter/real provider acceptance open",
-    "A04-provider": "2072 full tests passed; independent gate blocks raw trusted-callback exception leakage; exact snapshot repair in progress"
+    "A04": "service/worker and HTTP adapter verified locally; real provider/platform acceptance open",
+    "A04-provider": "verified_local; live account/provider/semantic certification not_run"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -47,24 +51,24 @@
     "M01-AC1": "scope/UTC/timezone/manifest/budget preflight, first-claim timing, bounded observed seal and fail-closed result table verified",
     "M01-AC2": "current mapping/grant/core permission/egress/requester ACL intersection and stable provider identity drift tested",
     "M01-AC3": "strict DST and namespace rejection, confirmation snapshot, public evaluation scoring/holdout custody frozen; private holdout not created/not_run",
-    "A04-AC1": "Local runner -> service -> worker -> actual A03 generation contract -> private revision/outbox verified with synthetic transport. Production readonly provider adapter is not implemented; real provider/semantic/platform acceptance is NOT completed.",
+    "A04-AC1": "Implemented service -> worker -> A03 -> OpenAIReadOnlyTransport -> real HTTPX count/create handling -> SQLite draft/outbox; local synthetic network-boundary integration passed. Live account/provider billing and semantic acceptance NOT completed.",
     "A04-AC2": "Local single worker/private loop, bounded intake/result publication/shutdown and legacy Monitor regression verified; transient SQLite contention is bounded by confirmed wall+monotonic lease/deadline.",
     "A04-AC3": "Per-source current grant/resource/collection identity/ACL/destination checks at IO and atomic precommit; durable event dedupe, original timing, conservative unknown spend, immutable causes and scoped reconciliation verified locally."
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 119,
-    "full_passed": 1888,
+    "target_passed": 215,
+    "full_passed": 2103,
     "warnings": 11,
-    "full_seconds": 43.1,
+    "full_seconds": 44.11,
     "ruff": "passed",
-    "latest_slice": "A04"
+    "latest_slice": "A04-provider"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 6,
+    "successful_reviews": 7,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -79,7 +83,7 @@
       "ostag/briefs/store.py": "a04-fable-round-2.json",
       "tests/test_brief_recovery.py": "a02-fable-round-1.json",
       "tests/test_brief_store.py": "a02-fable-round-1.json",
-      "ostag/briefs/generation.py": "a03-fable-round-2.json",
+      "ostag/briefs/generation.py": "a04-provider-fable-round-1.json",
       "ostag/briefs/validation.py": "a03-fable-round-2.json",
       "tests/test_brief_generation.py": "a03-fable-round-2.json",
       "tests/test_brief_validation.py": "a03-fable-round-2.json",
@@ -87,7 +91,11 @@
       "ostag/briefs/worker.py": "a04-fable-round-2.json",
       "ostag/core/runner.py": "a04-fable-round-2.json",
       "tests/test_brief_service.py": "a04-fable-round-2.json",
-      "tests/test_brief_worker.py": "a04-fable-round-2.json"
+      "tests/test_brief_worker.py": "a04-fable-round-2.json",
+      "ostag/briefs/openai_transport.py": "a04-provider-fable-round-1.json",
+      "pyproject.toml": "a04-provider-fable-round-1.json",
+      "tests/test_brief_openai_transport.py": "a04-provider-fable-round-1.json",
+      "uv.lock": "a04-provider-fable-round-1.json"
     },
     "unresolved_blockers": 0
   },
@@ -105,7 +113,9 @@
       "loop_9df54417-e3d2-41a8-bc13-dd567fa8b5e2",
       "loop_655429cb-4c71-4423-8f34-04fde0113790",
       "loop_c7dbe0c3-90e8-4b94-8555-e49df7039792",
-      "loop_2499802b-8187-4884-9714-065b3ee67f5a"
+      "loop_2499802b-8187-4884-9714-065b3ee67f5a",
+      "loop_b012a364-8608-4e3d-acd5-051564466d0b",
+      "loop_37351b29-72aa-4f9c-bcdc-6298ef8e3484"
     ],
     "outcomes": [
       "success",
@@ -118,6 +128,8 @@
       "escalated_after_parent_gate_false_positive",
       "success",
       "escalated",
+      "escalated",
+      "success",
       "escalated",
       "success"
     ],
@@ -135,7 +147,9 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03-review",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-repair",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-review"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-review",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-recovery",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-final"
     ]
   },
   "not_run": [
@@ -147,13 +161,13 @@
     "push",
     "main merge",
     "deployment",
-    "production readonly generation adapter implementation/certification",
     "real provider generation/semantic evaluation",
     "A04 real-backend acceptance",
-    "D01 dual-identity/mobile platform acceptance"
+    "D01 dual-identity/mobile platform acceptance",
+    "production readonly generation adapter live certification",
+    "live API credential/account/tariff/count-endpoint billing acceptance"
   ],
   "next_tasks": [
-    "A04",
     "U01"
   ],
   "slices": {
@@ -551,7 +565,7 @@
       ]
     },
     "A04": {
-      "status": "verified_local; production adapter/real provider acceptance open",
+      "status": "verified_local core; provider implementation completed in A04-provider; live acceptance open",
       "code_commit": "95b686450415218d111c8bcc655136ec2dd2d068",
       "code_content_sha256": "31a961af55044e1d7a9b05df5e24cf6c8f7f4a9a00668e670790ad23fedba06f",
       "files": [
@@ -607,21 +621,73 @@
       "readable_schema_range": [
         1,
         3
+      ],
+      "provider_slice": "A04-provider"
+    },
+    "A04-provider": {
+      "status": "verified_local; live account/provider/semantic certification not_run",
+      "code_commit": "95af6f1355b1526b392e9a68e9d31bca4945d48f",
+      "code_content_sha256": "a11fdd60e4f2836e37f6e7254a006d1938fd43738994100d837513e46ddc7974",
+      "files": [
+        "ostag/briefs/generation.py",
+        "ostag/briefs/openai_transport.py",
+        "pyproject.toml",
+        "tests/test_brief_openai_transport.py",
+        "uv.lock"
+      ],
+      "target_tests": {
+        "passed": 215,
+        "warnings": 0,
+        "seconds": 2.73
+      },
+      "full_tests": {
+        "passed": 2103,
+        "warnings": 11,
+        "seconds": 44.11
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "a04-provider-fable-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_37351b29-72aa-4f9c-bcdc-6298ef8e3484",
+      "iterations": 2,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-final",
+      "provider_profile": "openai Responses standard tier / gpt-4.1-2025-04-14",
+      "scope": "Actual bounded HTTP count/create adapter and per-egress authorization; no server lifespan or live credential calls",
+      "test_transport": "real HTTPX request/stream handling with synthetic network boundary; not live OpenAI",
+      "residual_limits": [
+        "tiny deadline-edge diagnostic race may report transport_error instead of timeout; no late draft acceptance",
+        "second cancellation may leave resource closure finishing asynchronously; no proof of remote stop",
+        "injected AsyncBaseTransport hook is single-use; production creates fresh client/transport",
+        "timing tests can be affected by host load",
+        "preflight/malformed pricing evidence can conservatively quarantine until reconciliation"
+      ],
+      "pricing_basis": "versioned public standard tariff applied to provider-reported usage, rounded up to microUSD; not an invoice",
+      "source_evidence": "a04-provider-sources.json",
+      "review_coverage": "full candidate Python/project files; uv.lock diff plus fixed invariant preserving all existing dependency package records",
+      "test_gate_amendments": "a04-provider-test-gate-amendments.json",
+      "prior_environment_attempt": "a04-provider-environment-failure.json",
+      "recovery_evidence": "a04-provider-recovery.json",
+      "recovery_kind": "initial partial-source reconstruction, then exact full-candidate restore before final actual Codex repair; all final gates rerun",
+      "prior_code_review": "a04-provider-initial-blocked.json",
+      "completed_codex_iterations": 4,
+      "interrupted_codex_invocations": 1,
+      "parent_gates": [
+        "seven prior A04 gates unchanged",
+        "six independent actual HTTPX boundary cases",
+        "all existing locked packages unchanged and uv lock --check --offline"
       ]
     }
   },
-  "latest_slice_content_sha256": "31a961af55044e1d7a9b05df5e24cf6c8f7f4a9a00668e670790ad23fedba06f",
-  "pending_findings": [
-    {
-      "slice": "A04-provider",
-      "source": "parent_provider_probe.py",
-      "issue": "Arbitrary trusted callback exceptions leak private text; preserve domain outcomes with sanitized mapping."
-    }
-  ],
-  "checkpoint": "A04 provider privacy repair after real Fable diagnostic challenge",
+  "latest_slice_content_sha256": "a11fdd60e4f2836e37f6e7254a006d1938fd43738994100d837513e46ddc7974",
+  "pending_findings": [],
+  "checkpoint": "A04 HTTP adapter local verification complete; next U01 private delivery observation",
   "next_task_details": {
-    "A04": "Implement and certify a narrow production read-only model adapter; prove actual model/usage and whole provider input billing bounds; D01 live evidence remains separate.",
-    "U01": "Private outbox delivery observation and uncertain-result handling; prerequisite A02 satisfied."
+    "U01": "Implement private outbox delivery observation and uncertain-result handling; preserve current grants and stable correlation; no blind retransmission.",
+    "A04-live": "Use authorized synthetic materials and an explicitly configured live provider identity to certify model/usage/pricing/network behavior during D01; remains separate from local code verification."
   },
-  "updated_at_utc": "2026-09-14T05:51:50.786073+00:00"
+  "updated_at_utc": "2026-09-14T13:24:02.959910+00:00"
 }

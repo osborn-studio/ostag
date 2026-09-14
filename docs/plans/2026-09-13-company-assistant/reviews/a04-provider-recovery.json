@@ -1,0 +1,41 @@
+{
+  "kind": "partial_source_recovery_from_actual_codex_command_log",
+  "log_sha256": "8759ccc64250a602a70b3eb20779ba6ce4cac02623b945545da6441d0f40c1cf",
+  "commands": [
+    {
+      "event": "item_11",
+      "target": "tests/test_brief_openai_transport.py",
+      "mode": ">",
+      "body_sha256": "9e130f977257d70ddcdf52d74e2d2c801d1f8b51b9be7b490aef317cb672d5ab",
+      "command_exit_code": 1
+    },
+    {
+      "event": "item_13",
+      "target": "ostag/briefs/openai_transport.py",
+      "mode": ">",
+      "body_sha256": "69e10d5b62597bdc3dfd4f4e500215ba3993dbb6279ab4eb2976b98b12bc62a5",
+      "command_exit_code": 0
+    },
+    {
+      "event": "item_16",
+      "target": "tests/test_brief_openai_transport.py",
+      "mode": ">>",
+      "body_sha256": "590349955200e2c91b3ecf957d30309f75ba3baa8fcd26b0a76fd8b51abae9df",
+      "command_exit_code": 1
+    },
+    {
+      "event": "item_26",
+      "target": "tests/test_brief_openai_transport.py",
+      "mode": ">>",
+      "body_sha256": "8deab549369b17463ce7138526d8be149fc4125463be47e7d3f45db0c0035ac8",
+      "command_exit_code": 0
+    }
+  ],
+  "files": {
+    "tests/test_brief_openai_transport.py": "a22b97fa68e7ad918d5a67a8c73d9115174928b4f023935772fe9458e96ec9ac",
+    "ostag/briefs/openai_transport.py": "69e10d5b62597bdc3dfd4f4e500215ba3993dbb6279ab4eb2976b98b12bc62a5"
+  },
+  "complete_final_candidate": false,
+  "limits": "Original completed file_change patch bodies absent from event stream. New test file was written only through complete recorded cat operations; adapter here is INITIAL version. Actual Codex must reconstruct generation/dependency and later adapter fixes; ALL gates rerun. No original Fable review occurred.",
+  "environment_failure": "ENOSPC printing stdout; native exit1/no durable final LOOP-STATE. No code merged."
+}

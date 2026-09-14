@@ -40,3 +40,24 @@ A04 service/worker/runner已组合A03生成器，逐条来源和当前grant/ACL/
 Future回调不得在worker控制锁或stop调用路径内执行。当前独立通知线程保留一个工作/结果槽直到回调结束；回调阻塞不会扩充线程/任务队列，stop不等待任意回调。默认A02 LeaseGuard sticky loss不改，A04显式retry_busy只重试SQLite StoreBusy；原确认lease/原deadline及单调时钟共同限界，不能续接过期owner/fence。首次等待仅可用已提交claim快照设界且服从stop，没有快照时首次busy拒绝；维护收尾的有界重试不执行provider IO或授予草稿权限。A03只收到窄GenerationStore数据库包装，不重发generate；费用证据的一次普通结算可以在lease失效后发生，进一步等待不得无界。未知费用仍需可信核对，不能盲重放。
 
 A04-AC1的生产只读模型adapter仍未实现/认证。后续必须证明实际模型ID、usage与完整provider framing计费输入上界；真实D01与18/6语义评测另取证。当前注入的可信SourceSnapshot lookup是实际ACL mirror契约，不是已实现Feishu授权服务；precommit回调只能有界地读可信本地mirror，不能重入DB/guard。M01 FrozenScope/ExecutionTiming接线仍属于未来会议job；manual worker明确拒绝meeting payload。U01尚未投递，draft_ready/outbox不代表用户已收到。
+
+
+## A04 生产 HTTP 适配器本地实现
+
+代码提交 `95af6f1355b1526b392e9a68e9d31bca4945d48f`；五文件摘要 `a11fdd60e4f2836e37f6e7254a006d1938fd43738994100d837513e46ddc7974`。独立的 `OpenAIReadOnlyTransport` 已实现，复用 A03 generate 和 A04 service/worker；没有复用只返回字符串的 Backend.run。固定 OpenAI 官方 HTTPS endpoint、一个模型快照与 standard 费率档，实际 HTTP 请求禁止工具/会话/历史响应、自动重试、重定向和环境代理。仅显式传入 API key；真实启动配置与统一 lifespan 仍属后续接线。
+
+每次私有出网前调用同一可信授权入口：先数据库/lease检查，再当前来源/grant/ACL，最后非阻塞时钟与取消检查。先发送完整输入的计数请求，包括 provider 格式开销；再检查额度并重新授权，才发生成请求。两阶段共享原时限，输入计数通过不代表之后仍有权限。实际模型身份和 token 用量只取自供应商响应 envelope，模型正文不能提供或覆盖；无效正文不能抹掉可信用量。
+
+首个已核对接口档为 `gpt-4.1-2025-04-14`，标准公开单价输入2、缓存输入0.5、输出8 microUSD/token，microUSD按合计向上取整。费用是供应商报告的实际token乘版本化公开费率，不是供应商账单；真实账号、费率更新、计数端点计费和语义质量仍须 D01 验证。固定快照用于收敛首个适配器的可测契约，不代表已选定最终会议产品的最佳模型。
+
+首轮编码因系统盘ENOSPC中断，未合入代码且没有Fable结论；新增测试全文和适配器初版从实际命令日志恢复，后续修改由真实Codex重建。恢复loop的真实Fable首审发现授权/lease失败被误记为transport_error；第二轮改成透传回调异常后，父级HTTP探针抓到私有文字泄漏。最终修复依据保存完整摘要的候选继续，通过安全的领域异常映射保留原因，任意回调/网络异常仍脱敏。没有降低原HTTP隐私探针阈值。最终loop首次执行被“恢复测试函数AST必须完全相同”的机械校验拦住：父级核对后只登记两项Fable建议修订（扩大计时余量但仍要求总时限超限失败；增加持久化诊断断言），其余函数继续锁定。后续代码还保留旧A03检查点拒绝语义，仅对新per-egress检查区分lease_lost，并重跑既有回归。最终验证不继承中断前的测试结论；运行中源码快照与测试临时目录已置于外置盘。
+
+最终固定验证：**215项目标测试、2103项全量通过，11条既有警告，Ruff通过**。原七组锁竞争、撤权、迁移、回调和截止故障门槛再次通过；新增父级HTTPX独立门槛覆盖正常计数/生成、计数间撤权、重定向、预检超限、伪造模型和工具输出六个场景，均验证请求数量/授权边界/资源关闭。既有锁定包完全不变，uv lock离线一致性校验通过。真实 Fable5.1最终静态评审批准、blockers为空；测试由确定性验证器执行，Fable没有执行或冒充测试。所有HTTP边界测试为本地合成响应，不能计作真实模型/Feishu/GitHub或冻结18/6语义评测。
+
+边界：本轮未改变账本。编码阶段曾有一个旧超时用例在组合运行时未及时进入模拟调用，单独复查及最后固定全量运行通过；该失败记录保留在原builder日志，不据此声称计时测试绝不会受负载影响。A03在进入transport之前已标记成本预约started，因此计数/预检失败仍可能保守留下unknown费用，触发worker暂停并等待可信核账；不能当作免费或自动退款。网络超时/取消不证明远端停止计费；晚到结果不能产生草稿。真实生产权限、凭据与目标网络联通尚未验证，未push、main合并或部署。
+
+Fable保留的非阻塞限制：极窄截止竞争可能将timeout记为transport_error，仍拒绝晚到草稿；二次取消可能让资源关闭在后台完成，不能证明远端已停止；内部注入的HTTP transport按每次调用关闭、不可作为可复用生产实例；计时测试仍可能受主机负载影响。这些不冒充生产运行期认证，后续A11/D01需继续观察。
+
+下一开发切片为U01：私有outbox投递观测与结果不确定时的处理；之后再按DAG推进界面、生命周期及Feishu/GitHub会议材料采集。
+
+[最终Fable审查](reviews/a04-provider-fable-round-1.json) · [官方接口与费率来源](reviews/a04-provider-sources.json) · [机器执行记录](execution.json)
