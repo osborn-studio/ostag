@@ -1,0 +1,56 @@
+{
+  "candidate_sha256": "62bcf3a9f80369fc9fce48235b87a49a6884f9ea6dd45a1f4e0d7840940de8c3",
+  "base": "242feea80461a33f5df6b3bf66ac6021faa02164",
+  "files": [
+    "ostag/briefs/__init__.py",
+    "ostag/briefs/grants.py",
+    "ostag/briefs/models.py",
+    "tests/test_brief_contracts.py",
+    "tests/test_brief_grants.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 15351,
+      "outputTokens": 18,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.015441,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 22517,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 25043,
+      "webSearchRequests": 0,
+      "costUSD": 1.6267299999999998,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 19606,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Tool execution in this review session returned no output for every Bash/Read/Glob call, so this is a static review of the pasted diff; the builder's reported GREEN/ruff results and the content SHA256 could not be independently re-executed here. The fixed verifier should confirm tests/ruff.",
+      "Authorization path is sound: authorize() re-resolves the grant via the injected lookup on every call (test asserts 5 lookups across success/stale/revoked/missing), pins grant_id+revision with bool-as-int rejected before comparison, denies expiry equality and revocation at its instant, rejects unknown/malformed permission levels before level_allows, and uses only resolve_principal_permission (no bare-actor or local-admin fallback). replace(current) re-runs PilotGrant.__post_init__, so a mutated lookup result (model_egress_allowed=1) is rejected as tested.",
+      "Provenance is enforced: _identifier rejects '://' and wildcards, validate_claims binds every claim to the frozen SourceSet and rejects unknown IDs, SourceSet rejects duplicate source_id and namespace/purpose/window/audience drift, and nested TimeWindow/SourceRef/Principal instances are re-validated via replace()/re-construction.",
+      "Non-blocking edge: TimeWindow.__post_init__ only catches ValueError/ZoneInfoNotFoundError. If the tzdata pip package is importable, a directory-name key such as TimeWindow(START, END, 'America') makes zoneinfo._common.load_tzdata open a directory and leak IsADirectoryError instead of SchemaError. Consider catching OSError as well.",
+      "Non-blocking edge: on a case-insensitive filesystem (macOS) ZoneInfo('utc') or 'america/los_angeles' resolves and is stored as the non-canonical key, while the same value fails on Linux; the model does not canonicalize display_timezone.",
+      "Non-blocking gap: SourceSet does not require its sources to share grant_id/grant_revision, so a set can mix evidence collected under different grants; A01 acceptance did not list grant consistency, but a later task should bind SourceRef.grant_id/revision to the authorized grant.",
+      "Non-blocking: _permission_levels accepts 2-part legacy 'actor:level' pairs, which resolve_principal_permission then ignores with a UserWarning on every authorize call; fail-closed behavior is correct (tested) but the warning will be emitted per request in production if legacy grants remain configured.",
+      "Unverified assumption in tests: tests/test_brief_grants.py constructs Settings(default_permission_level='unknown') and Settings(actor_permissions=('feishu:same:unknown',)) at parametrize time; this only collects if Settings does not validate those fields itself. Builder reports GREEN, so presumably true, but I could not open ostag/config.py to confirm."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a01-contracts-d4c9c2e4"
+}

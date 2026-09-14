@@ -153,5 +153,12 @@
     "last_verdict": "approved_for_planning",
     "post_review_clarifications_by": "Codex, not rereviewed by Fable",
     "whitespace": "passed"
+  },
+  "coding_execution": {
+    "record": "execution.json",
+    "narrative": "EXECUTION.md",
+    "code_commit": "c740aa250567e45546df3c97af6b9ceeb253b05e",
+    "scope": "A01 verified locally; no production release",
+    "historical_sections_remain_planning_snapshots": true
   }
 }

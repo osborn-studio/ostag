@@ -1,7 +1,0 @@
-{
-  "task_id": "ostag-a01-timezone-review",
-  "capability": "ostag.a01.timezone.review",
-  "prompt": "Replay the exact saved osstack-built timezone candidate and run deterministic verification plus schema-constrained static Fable review. No new coding or old task execution.",
-  "priority": 70,
-  "source": "task_queue"
-}

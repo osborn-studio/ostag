@@ -1,0 +1,51 @@
+{
+  "candidate_sha256": "106a62032a6bf90e10ea238b68b1bcf8a885ba828cd4785cd4762a236acd6de4",
+  "base": "09c6e3cb2ec18185f7c2ef6ee48ae919f72fa735",
+  "files": [
+    "ostag/briefs/models.py",
+    "tests/test_brief_contracts.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 10878,
+      "outputTokens": 17,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.010963,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 5997,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 15445,
+      "webSearchRequests": 0,
+      "costUSD": 0.60877,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 5114,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "ostag/briefs/models.py:_timezone_keys — exact-key enforcement is correct: membership in frozenset(zoneinfo.available_timezones()) is case-sensitive regardless of filesystem, so 'utc'/'america/los_angeles' are rejected on macOS while real registry aliases (US/Pacific, Etc/UTC) remain accepted because available_timezones() enumerates backward-compat link files and the tzdata zones list.",
+      "Error translation is scoped correctly: only OSError is caught in the registry path and only (ValueError, ZoneInfoNotFoundError, OSError) in the loader path; TypeError/RuntimeError propagate. lru_cache does not memoize raised exceptions, so a failed scan is not cached (verified by test_timezone_registry_io_failure_does_not_cache_a_failed_scan, scans == 2).",
+      "Tests are meaningful, not rubber stamps: the permissive case-insensitive fake loader would make the old ZoneInfo-only validator accept 'utc'/'US/pacific', so test_timezone_rejects_non_registry_keys_with_permissive_loader fails against the previous implementation and passes only with registry membership. Monkeypatch targets are correct (zoneinfo.available_timezones is called via module attribute; models.ZoneInfo is the imported name). Fixture clears the lru_cache at setup and teardown so cached real-registry state cannot leak into faked tests or vice versa.",
+      "Ordering in TimeWindow.__post_init__ (UTC parsing, ordering check, _text, registry membership, loader, then normalization) leaves timestamp, grant, source, audience and immutability semantics unchanged; _window still revalidates via replace().",
+      "Non-blocking observation: CPython's available_timezones() internally swallows most per-file I/O errors and returns an empty set when no tzdata is present, so in that environment every display_timezone becomes a SchemaError (and the empty registry is cached). This is consistent with the contract (invalid zone) but operators may want a startup check that the registry is non-empty in a future server-wiring task.",
+      "Non-blocking: registry keys such as 'localtime' or 'posixrules' variants that some distros ship as TZif files would be admitted if present; ZoneInfo accepts them too, so this matches prior behavior and is not a regression."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a01-timezone-review-1257dfe9"
+}
