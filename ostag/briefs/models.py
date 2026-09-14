@@ -9,9 +9,11 @@ SHA256 records input integrity, not the truth of a source or a claim.
 from __future__ import annotations
 
 import re
+import zoneinfo
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
+from functools import lru_cache
 from typing import ClassVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -108,6 +110,15 @@ def _audience_from_dict(value: object) -> tuple[Principal, ...]:
     return tuple(_principal_from_dict(item) for item in _sequence(value, "allowed_audience", 100))
 
 
+@lru_cache(maxsize=1)
+def _timezone_keys() -> frozenset[str]:
+    """Exact IANA keys, including aliases; restart the process after tzdata updates."""
+    try:
+        return frozenset(zoneinfo.available_timezones())
+    except OSError as exc:
+        raise _invalid("display_timezone must be a valid IANA zone") from exc
+
+
 @dataclass(frozen=True)
 class TimeWindow:
     """Half-open [start, end) UTC interval, with an IANA zone for display only."""
@@ -123,9 +134,11 @@ class TimeWindow:
         if start >= end:
             raise _invalid("window start must precede end")
         _text(self.display_timezone, "display_timezone")
+        if self.display_timezone not in _timezone_keys():
+            raise _invalid("display_timezone must be a valid IANA zone")
         try:
             ZoneInfo(self.display_timezone)
-        except (ValueError, ZoneInfoNotFoundError) as exc:
+        except (ValueError, ZoneInfoNotFoundError, OSError) as exc:
             raise _invalid("display_timezone must be a valid IANA zone") from exc
         object.__setattr__(self, "start", _timestamp(self.start, "start"))
         object.__setattr__(self, "end", _timestamp(self.end, "end"))

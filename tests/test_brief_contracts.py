@@ -1,8 +1,10 @@
 from dataclasses import FrozenInstanceError, replace
 from datetime import datetime
+import zoneinfo
 
 import pytest
 
+from ostag.briefs import models
 from ostag.briefs.models import BriefClaim, SourceRef, SourceSet, TimeWindow, validate_claims
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
@@ -61,6 +63,127 @@ def test_utc_offset_normalizes_and_calendar_leap_day_is_valid():
     window = TimeWindow("2024-02-29T00:00:00+00:00", "2024-03-01T00:00:00Z", "UTC")
     assert window.start == "2024-02-29T00:00:00Z"
     assert TimeWindow.from_dict(window.to_dict()) == window
+
+
+@pytest.fixture
+def timezone_registry(monkeypatch):
+    # Clear the process cache around fakes, including when run against the old validator.
+    registry = getattr(models, "_timezone_keys", None)
+    if registry is not None:
+        registry.cache_clear()
+    keys = {"UTC", "America/Los_Angeles", "US/Pacific", "Etc/UTC"}
+    monkeypatch.setattr(zoneinfo, "available_timezones", lambda: keys.copy())
+
+    def case_insensitive_loader(key):
+        if key.lower() not in {name.lower() for name in keys}:
+            raise zoneinfo.ZoneInfoNotFoundError(key)
+        return object()
+
+    monkeypatch.setattr(models, "ZoneInfo", case_insensitive_loader)
+    yield keys
+    if registry is not None:
+        registry.cache_clear()
+
+
+@pytest.fixture(params=["direct", "wire"])
+def timezone_window(request):
+    def make(key):
+        payload = dict(start=START, end=END, display_timezone=key)
+        return TimeWindow(**payload) if request.param == "direct" else TimeWindow.from_dict(payload)
+
+    return make
+
+
+@pytest.mark.parametrize("key", [
+    "utc", "america/los_angeles", "America/los_Angeles", "uTC", "US/pacific",
+    "America", "America/", "", " ", "../UTC", "/UTC", "America//Los_Angeles",
+    "America/./Los_Angeles", "UTC\x00", " UTC", "UTC ", "Mars/Olympus",
+])
+def test_timezone_rejects_non_registry_keys_with_permissive_loader(
+    timezone_registry, timezone_window, key,
+):
+    with pytest.raises(SchemaError):
+        timezone_window(key)
+
+
+@pytest.mark.parametrize("key", ["UTC", "America/Los_Angeles", "US/Pacific", "Etc/UTC"])
+def test_timezone_preserves_exact_registry_keys_and_aliases(
+    timezone_registry, timezone_window, key,
+):
+    window = timezone_window(key)
+    assert window.display_timezone == key
+    assert window.to_dict()["display_timezone"] == key
+    assert TimeWindow.from_dict(window.to_dict()) == window
+
+
+@pytest.mark.parametrize("operation", ["loader", "registry"])
+@pytest.mark.parametrize("error_type", [IsADirectoryError, PermissionError, OSError])
+def test_timezone_data_io_failures_are_contract_errors(
+    monkeypatch, timezone_registry, timezone_window, operation, error_type,
+):
+    error = error_type("controlled tzdata I/O failure")
+
+    def fail(*args):
+        raise error
+
+    if operation == "loader":
+        monkeypatch.setattr(models, "ZoneInfo", fail)
+    else:
+        monkeypatch.setattr(zoneinfo, "available_timezones", fail)
+    with pytest.raises(SchemaError) as caught:
+        timezone_window("UTC")
+    assert caught.value.__cause__ is error
+
+
+@pytest.mark.parametrize("operation", ["loader", "registry"])
+@pytest.mark.parametrize("error_type", [TypeError, RuntimeError])
+def test_timezone_programming_errors_are_not_translated(
+    monkeypatch, timezone_registry, timezone_window, operation, error_type,
+):
+    error = error_type("controlled programming error")
+
+    def fail(*args):
+        raise error
+
+    if operation == "loader":
+        monkeypatch.setattr(models, "ZoneInfo", fail)
+    else:
+        monkeypatch.setattr(zoneinfo, "available_timezones", fail)
+    with pytest.raises(error_type) as caught:
+        timezone_window("UTC")
+    assert caught.value is error
+
+
+def test_timezone_registry_is_reused_for_nested_source_validation(monkeypatch, timezone_registry):
+    scans = 0
+
+    def registry():
+        nonlocal scans
+        scans += 1
+        return timezone_registry.copy()
+
+    monkeypatch.setattr(zoneinfo, "available_timezones", registry)
+    frozen = source_set([source(source_id=f"message-{i}") for i in range(3)])
+    assert SourceSet.from_dict(frozen.to_dict()) == frozen
+    assert validate_claims(frozen, []) == ()
+    assert scans == 1
+
+
+def test_timezone_registry_io_failure_does_not_cache_a_failed_scan(monkeypatch, timezone_registry):
+    scans = 0
+
+    def registry():
+        nonlocal scans
+        scans += 1
+        if scans == 1:
+            raise PermissionError("controlled tzdata I/O failure")
+        return timezone_registry.copy()
+
+    monkeypatch.setattr(zoneinfo, "available_timezones", registry)
+    with pytest.raises(SchemaError):
+        TimeWindow(START, END, "UTC")
+    assert TimeWindow(START, END, "UTC").display_timezone == "UTC"
+    assert scans == 2
 
 
 @pytest.mark.parametrize("changes", [
