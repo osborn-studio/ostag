@@ -173,3 +173,6 @@ Fable首审补出的标题/比较式误报已由实际RED→GREEN修复：原来
 osstack两轮编码得到6文件冻结候选41662d3a1d5c021c549c8d28a9224beee9417309131e1f82e7e3f6a7a1c138db；69目标/1838全量及五组独立检查通过。真实Fable静态评审提出两项SQLite短暂竞争导致永久停机/不必要未知花费的阻塞；父级另复现Future锁内回调死锁。原生loop以escalated结束，未合入产品代码；外部快照完整保留。接续受控osstack修复轮解决三项阻塞和相关竞态，再重新完整验证。
 
 [真实Fable首审](reviews/a04-fable-initial-blocked.json)。此处记录为进行中，不能作为A04或生产验收完成证据。
+
+
+A04修复候选5e12cb690983df2c91e84decc4952da54452b4e3500f76711dd1f8486ec6a580已通过99目标/1868全量和七组独立检查。Fable复审用满64000输出token（全部为thinking），返回会话额度限制，没有评审结论，不能算批准；原生loop以escalated结束且未合入代码。待显示的额度恢复时间后，对精确快照重跑固定验证并用medium effort、完整6文件及精确依赖/fixture上下文重审；不降低测试门槛、不更换Fable模型，也不把恢复快照算作新模型编码。

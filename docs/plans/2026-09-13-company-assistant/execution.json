@@ -32,7 +32,7 @@
     "M01": "verified_local",
     "A02": "verified_local",
     "A03": "verified_local",
-    "A04": "in_progress; candidate not merged; Fable and parent blockers pending"
+    "A04": "awaiting canonical review; 99 target/1868 full and 7 parent gates passed; candidate not merged"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -524,10 +524,6 @@
     }
   },
   "latest_slice_content_sha256": "bdb2f398aa911634b5843aed0b087fd3c4e8d55caa79c9a14e8c9a7a9ee7e1ef",
-  "pending_findings": [
-    "A04 Future callback deadlock",
-    "A04 transient SQLite contention incorrectly loses live calls",
-    "A04 idle transient error permanently quarantines worker"
-  ],
-  "checkpoint": "A04 repair in progress after first actual Fable review"
+  "pending_findings": [],
+  "checkpoint": "A04 tests pass; Fable output/session limit produced no verdict; exact snapshot review retry pending"
 }
