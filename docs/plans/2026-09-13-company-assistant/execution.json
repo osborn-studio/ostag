@@ -17,7 +17,8 @@
     "P00": "local_baseline_verified; production visibility unknown/not_run",
     "P01": "controlled_osstack_execution_verified; general autonomous runner admission not completed",
     "A01": "verified_local",
-    "remaining_product_tasks": "planned"
+    "remaining_product_tasks": "planned",
+    "M01": "repair_in_progress; initial candidate 1451 tests passed, 3 Fable blockers"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -45,26 +46,29 @@
       "tests/test_brief_contracts.py": "a01-fable-timezone.json",
       "tests/test_brief_grants.py": "a01-fable-initial.json"
     },
-    "unresolved_blockers": 0
+    "unresolved_blockers": 3
   },
   "osstack": {
     "version": "0.19.0",
     "loop_ids": [
       "loop_986a8681-eecf-43ad-abee-96c8668a731b",
       "loop_a4150ebb-7e4f-40e7-a8a4-aef7f3c12137",
-      "loop_748e7257-cd09-4b9a-b93c-748255390e37"
+      "loop_748e7257-cd09-4b9a-b93c-748255390e37",
+      "loop_27a33854-35a9-43b6-a595-b3c700da9c76"
     ],
     "outcomes": [
       "success",
       "escalated_due_to_review_format",
-      "success"
+      "success",
+      "escalated; full review feedback truncated, controlled interruption"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
     "run_artifacts": [
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone-review"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone-review",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01"
     ]
   },
   "not_run": [

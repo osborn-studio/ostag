@@ -1,0 +1,71 @@
+{
+  "candidate_sha256": "742d5b2009273ea429fa51098fa8e648ac89022fe4970f5e1982b69342cf5366",
+  "base": "6d13d2bc491323faa0994b0d53d31e82ad9c781e",
+  "files": [
+    "ostag/briefs/meeting_models.py",
+    "ostag/briefs/project_mapping.py",
+    "tests/test_meeting_contracts.py",
+    "tests/test_meeting_preflight.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 36079,
+      "outputTokens": 17,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.036164,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 20915,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 48600,
+      "webSearchRequests": 0,
+      "costUSD": 2.01792775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 17979,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/meeting_models.py (FrozenScope._deadline / hard_deadline / collection_deadline, module docstring; CollectionSeal.__post_init__)",
+        "issue": "The execution deadline is anchored at intake_at (`hard_deadline = intake_at + overall_seconds`), so confirmation-card latency and queue wait consume the 180 s budget, contradicting the approved VALIDATION.md anchor (first job claim, queue wait excluded). Because the scope confirmation is a human step that follows intake, any realistic confirm-then-run flow expires before collection begins. The seal is also not bound to either deadline (only intake_at <= start <= finish <= sealed_at), so scope/seal/decision disagree about what the deadline means. The module docstring additionally states 'Budgets are GLOBAL per attempt', which contradicts the per-job-across-attempts budget contract the plan requires and gives A02/M06 the wrong invariant. The contract needs an explicit anchor (e.g. pin durations in FrozenScope and take a trusted claimed_at/deadline_at from the lifecycle, or document that intake_at is the anchor and that confirmation must complete inside it) applied consistently to seal and decision.",
+        "reproduction": "scope = intake().scope  # intake_at 2026-09-13T12:00:00Z, hard_deadline 12:03:00Z\n# user confirms the card at 12:04, worker claims at 12:04:10 and starts collecting\ndecide_result(scope=scope, reports=(), now='2026-09-13T12:04:30Z', cancelled=False, grant_current=True, lease_current=True, fence_current=True, finished=False, model_valid=True, key_claims_valid=True, unsupported_required_question=False)\n# -> ResultState.FAILED, reasons ('deadline_exceeded',) after 20 s of real work.\n# Meanwhile the seal accepts a collection interval that violates both the 120 s ceiling and the hard deadline:\nseal_collection(scope=scope, collection_started_at='2026-09-13T12:04:10Z', collection_finished_at='2026-09-13T12:10:00Z', observations=(ProviderObservation('github:repo:42','2026-09-13T12:09:00Z'),), repo_heads=(RepoHead(repository(),'a'*40,'2026-09-13T12:09:00Z'), RepoHead(repository(43),'b'*40,'2026-09-13T12:09:30Z')), now='2026-09-13T12:10:00Z')  # succeeds"
+      },
+      {
+        "file": "ostag/briefs/meeting_models.py (decide_result; ResultDecision)",
+        "issue": "`finished` is a bare boolean with no trusted completion timestamp. The only deadline rule is `now >= hard_deadline and not finished -> FAILED`; with finished=True the table proceeds to DRAFT_READY with can_commit=True at any time after the hard deadline. MEETING-EVALUATION.md lists publishing after the hard deadline as a critical failure, and the parent focus asks that late/stale results not commit. The existing test only asserts readiness at exact equality and never exercises now > hard_deadline with finished=True, so this path is untested and permits a late commit based solely on a caller flag. Require a trusted `finished_at` (validated <= hard_deadline, and consistent with the seal's collection_finished_at) or fail closed when `now` is past the deadline, restricting can_commit to a sanitized status record.",
+        "reproduction": "scope = intake().scope  # hard_deadline 2026-09-13T12:03:00Z\nr = decide_result(scope=scope, reports=tuple(reports(scope)), now='2026-09-13T13:00:00Z', cancelled=False, grant_current=True, lease_current=True, fence_current=True, finished=True, model_valid=True, key_claims_valid=True, unsupported_required_question=False)\nassert r.state is ResultState.DRAFT_READY and r.meeting_ready and r.can_commit  # passes: commit allowed 57 minutes after the frozen hard deadline with no evidence of when work finished"
+      },
+      {
+        "file": "ostag/briefs/meeting_models.py (local_time_window)",
+        "issue": "`zone = ZoneInfo(display_timezone)` is called directly after the cached `_timezone_keys()` membership check with no exception handling. A01's TimeWindow.__post_init__ documents and converts ZoneInfoNotFoundError/OSError/ValueError from the constructor into SchemaError; this helper lets a KeyError subclass (ZoneInfoNotFoundError) or OSError escape the public boundary, violating the strict-parsing contract that malformed/unsupported input yields SchemaError. Trigger without mocks: `_timezone_keys` is lru_cached for the process lifetime, so a tzdata file removed or made unreadable after first enumeration makes the registry check pass and the constructor raise.",
+        "reproduction": "import ostag.briefs.meeting_models as mm\nfrom zoneinfo import ZoneInfoNotFoundError\ndef boom(key):\n    raise ZoneInfoNotFoundError(key)\nmonkeypatch.setattr(mm, 'ZoneInfo', boom)\nwith pytest.raises(SchemaError):\n    mm.local_time_window('2026-09-12T12:00:00+08:00', '2026-09-13T12:00:00+08:00', 'Asia/Shanghai')\n# fails: ZoneInfoNotFoundError (KeyError) propagates instead of SchemaError; the same failure inside TimeWindow.__post_init__ is a SchemaError"
+      }
+    ],
+    "notes": [
+      "Authorization intersection in freeze_meeting_scope is sound: mapping namespace/id/revision and allowed_requesters, A01 authorize (grant namespace/principal/purpose/audience/exact canonical resource IDs/egress/core propose level), strict `is True` per-resource requester ACL, and repository metadata equality (namespace/id/full_name/branch/default_branch) are all re-resolved per call and denials are wrapped with `from None` so no private names leak.",
+      "Canonical `github:repo:<id>` / `feishu:chat:<id>` IDs, explicit non-growing selected scope, duplicate/conflicting people-mapping rejection (open_id, github_user_id, case-insensitive login), and refusal of display_name fields are correctly implemented and tested.",
+      "FrozenScope.from_dict / CollectionSeal.from_dict / IntakeResult.from_dict recompute derived fields (partitions, estimate, deadlines, scope_hash, observation_cutoff, historical_state, state/reasons) and reject wire overrides; observation_cutoff is the true max observed_at across observations and heads; requested_as_of always yields needs_input/unproven rather than a fabricated history proof.",
+      "Budget arithmetic and boundaries verified by hand: 20 repos × (9 categories + 1 metadata) = 200 calls (accepted), +1 chat = 201 (needs_input), 0.6 s × 200 rounds to exactly 120.0 (accepted) while 0.600001 s is infeasible; bool/NaN/inf/non-positive latencies and per-field caps are rejected.",
+      "CollectionSeal only requires at least one observation overall plus one head per selected repo; a multi-chat scope can be sealed with no observation for some selected chats. Acceptable for this slice but should be stated in the docstring or tightened when collectors exist.",
+      "test_result_precedence uses a conditional `if changes == {...}` assertion inside a parametrized body; move expected reasons into the parametrization so every case asserts its reasons and no branch is silently skipped.",
+      "content_hash includes intake_at, so re-running intake for an identical request produces a different confirmation hash; document that the hash identifies one intake snapshot, not a request identity.",
+      "tests/test_meeting_contracts.py and tests/test_meeting_preflight.py import each other by bare module name (`from test_meeting_preflight import intake`); this depends on the tests directory being importable under the repo's pytest configuration. Several new lines exceed 100 columns (e.g. FrozenScope._KEYS, from_dict comparison chains, test_confirmation_hash_changes assertions); confirm against the project's Ruff line-length setting. I did not run tests, Ruff, or Fable."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-m01-contracts-4e1df143"
+}

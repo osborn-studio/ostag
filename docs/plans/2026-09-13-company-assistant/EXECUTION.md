@@ -76,3 +76,12 @@ release_check、容器测试、飞书真实读写、生产 health/SSH、容量�
 下一检查点按 M01、A02、A03 顺序推进：固定会议项目/群/仓库与时间范围；实现独立 briefs 状态库及恢复；接通有来源的草稿生成。随后 A04 才形成可演示的任务纵向链路。M01的范围预检、A04的来源授权绑定必须继续检查每个 SourceRef 的 grant_id/revision/resource_id 与作业及当前grant一致，不能因为 SourceSet 接受多份来源就略过逐来源授权；多源撤销使整版失效。
 
 规划 TASKS.md/backlog.json 保留为已评审的计划快照，不自动改作 osstack队列；实际进度以本文件与execution.json为准。A11/容器验收还须确认目标镜像的时区注册表非空、包含试点配置所选时区；本轮不把主机测试等同于容器验收。通用无人值守runner准入仍未完成；本轮证明的是用户授权下的受控本地开发闭环。真实连接、部署和发布继续执行原VALIDATION/DEPLOYMENT中的门槛。
+
+
+## M01 实施中：首次评审与修复
+
+已先冻结 MEETING-EVALUATION.md（f471737）：18开发用例与6保留用例的责任、评分和门槛明确；私人保留输入尚未创建或运行。M01首版139项目标测试、1451项全量测试、Ruff通过，Fable真实静态评审要求修改3项：执行时限从受理而非首次claim计算；finished布尔值可放行超时结果；时区构造异常未统一转SchemaError。首版未合入integration。
+
+原生osstack只将截断的评审摘要传给第二轮builder，故保留代码后主动终止该轮。又发现原生runner在execute失败后仍启动verify，已停止该次验证及其未完成review；没有接受结果。原loop记录escalated。修复后的固定harness直接读取完整Fable回执，并要求最新builder成功回执与候选摘要匹配才允许verify。新修复任务从首次被评审候选逐字节恢复，使用首次claim作为时限起点，并重新走Codex→测试→Fable；当前尚未宣称M01完成。
+
+[首次Fable阻塞回执](reviews/m01-fable-initial-blockers.json) · [首次loop与中断记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01)
