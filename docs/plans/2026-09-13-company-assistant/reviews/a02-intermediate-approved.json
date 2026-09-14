@@ -1,0 +1,57 @@
+{
+  "candidate_sha256": "1577570be7ca8c934c5202567686eaf1844190f9c87337dfcc1141ef0331de59",
+  "base": "f9fdc73ef34b54775eba9b0fd34c85d311c30ff3",
+  "files": [
+    "ostag/briefs/store.py",
+    "tests/test_brief_recovery.py",
+    "tests/test_brief_store.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 31280,
+      "outputTokens": 17,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.031365000000000004,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 53170,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 43143,
+      "webSearchRequests": 0,
+      "costUSD": 3.5215377500000002,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 51668,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Parent finding 1 (stale pre-lock clock) is resolved: every write path (claim_one, assert_current, renew, start_generating, finish, cancel, complete, recover_one write phase) calls _clock_micros(clock) only after BriefStore._transaction has executed BEGIN IMMEDIATE and re-inspected the schema; recover_one additionally rejects stamp < observed. The contend() helper in tests/test_brief_recovery.py is a sound reproduction: the trace callback fires on OP_Init before OP_Transaction takes the lock, and if the ordering were ever wrong the worker would deadlock into StoreBusy rather than falsely pass.",
+      "Parent finding 2 (RAISE(IGNORE) trigger) is resolved without an allowlist: BriefStore._inspect now requires the set of non-NULL sqlite_master.sql entries to equal _SCHEMA exactly, so any persistent trigger/view/extra table is BriefSchemaError before writes; complete() additionally verifies the joined jobs/revisions/outbox invariant (state, fence+1, owner/lease NULL, pending, destination equality) before returning. test_outbox_insert_failure_rolls_back_whole_completion injects a TEMP trigger after inspection on the completion connection and proves the trigger fired (reached_insert) and that the error is not BriefSchemaError; test_silently_ignored_outbox_write_cannot_report_success covers the IGNORE regression.",
+      "Low-probability timing hazard in tests/test_brief_recovery.py::test_cancellation_latches_guard_and_exception_exit_joins: the guard clock is at(2) with interval=0.005 while cancel uses at(1). If the heartbeat renew (updated_us=2) commits before cancel acquires BEGIN IMMEDIATE (main thread descheduled >5ms), cancel raises ClockError via _forward and the test fails. Using a cancel clock >= at(2) removes the hazard with no loss of coverage.",
+      "tests/test_brief_store.py::test_concurrent_completion_is_one_effect runs two contending complete() calls with the fixture's busy_timeout=0.1; the loser must acquire BEGIN IMMEDIATE within 100ms of the winner's commit (including fsync). Comfortable on SSD, but a larger per-test busy_timeout (as done in the 24-writer admission test) would be more robust under full-regression load.",
+      "Ruff: several lines in store.py and both test files exceed 100 characters (e.g. the queued-count check in admit, the INSERT column list, the recovery parametrize line) and imports mix plain/from ordering. This only matters if the project enables E501/I001 beyond Ruff defaults; not a correctness issue.",
+      "recover_one returns None both when there is nothing to do and when it terminalized a job (failed/needs_input). A04 may later want a richer result to log/notify; not required for A02 and not misrepresented.",
+      "_live raises ClockError in claim_one/recover_one whenever any active attempt has updated_us > now, and claim_one's _forward compares against the admission intake timestamp. This is the intended backwards-clock rejection, but it means a future-dated intake `now` blocks claims until that time; worth stating in A04 wiring notes.",
+      "LeaseGuard.complete latches loss on any exception including SchemaError from a malformed draft (documented in the docstring). Acceptable for the pilot, but A04 should canonicalize/validate drafts before calling guard.complete to avoid discarding a healthy attempt on input errors.",
+      "assert_current uses a BEGIN IMMEDIATE transaction for what is a read check, serializing checkpoints with writers. Correct and bounded; slightly heavier than necessary.",
+      "The child-process crash test likely leaves only an empty/rolled-back journal (small DB, no cache spill), so it mainly proves reopen-after-abort rather than hot-journal recovery; it still satisfies the required scenario without production data.",
+      "Scope confirmed: no server/A04 wiring, no Monitor changes, no provider sends; docstrings state A04/U01/M06 obligations as requirements rather than claiming they exist."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a02-store-0327dded"
+}

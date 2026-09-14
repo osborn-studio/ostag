@@ -102,3 +102,10 @@ release_check、容器测试、飞书真实读写、生产 health/SSH、容量�
 [最终Fable回执](reviews/m01-fable-round-1.json) · [合成探针](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair/parent-smoke.json) · [完整修复记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair)
 
 M01从原候选清单拆出test_meeting_preflight.py，便于权限/预算案例维护；没有修改A01产品文件或依赖。两个本轮M01任务文件均归档，旧13任务保持哈希不变。当前接续A02→A03，A04才接通手工材料作业纵向链路。跨切片约束另见[实施衔接记录](IMPLEMENTATION-NOTES.md)。
+
+
+## A02 中间候选与新增阻塞（待修复）
+
+原生loop将 `ecf38249cf88d994b986cbb75182979eac4812b3` 合入本地integration；110项目标、1589项全量、Ruff与Fable第二轮均通过。Fable初审要求修复锁前取时间；主审另发现persistent trigger可静默跳过outbox，两者已修复。
+
+但主审随后用真实SQLite读事务复现新的超时提交：DELETE journal下，BEGIN IMMEDIATE后时钟仍有效，COMMIT却被读锁拖到deadline之后才成功。原验证进程已加载旧harness，未运行后来新增的门槛；Fable第二轮冻结输入也没有这个新发现。因此原生success不算A02完成。证据保留在coding-a02/parent-commit-reader-probe.json与parent-deadline-regressions-manual.stdout；追加独立osstack修复，完整3文件重审及读/写锁双门槛通过后才记录完成。

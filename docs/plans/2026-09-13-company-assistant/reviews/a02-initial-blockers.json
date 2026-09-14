@@ -1,0 +1,60 @@
+{
+  "candidate_sha256": "91c7f7c6b617d644170578d19ed8bf4d0f71e655b0fdd100981cee8d111ea90c",
+  "base": "f9fdc73ef34b54775eba9b0fd34c85d311c30ff3",
+  "files": [
+    "ostag/briefs/store.py",
+    "tests/test_brief_recovery.py",
+    "tests/test_brief_store.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 27866,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.027946,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 13536,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 38284,
+      "webSearchRequests": 0,
+      "costUSD": 1.44265775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 11478,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/store.py",
+        "issue": "The parent finding is NOT addressed in the final content. Every guarded mutation still evaluates lease/deadline against a timestamp sampled BEFORE the write lock is acquired: `complete()`, `renew()`, `assert_current()`, `start_generating()`, `finish()`, `cancel()`, `claim_one()` all do `stamp = _micros(now)` and only then enter `_transaction()`, whose `BEGIN IMMEDIATE` may block up to `busy_timeout` (<=5s). `_current()` then compares `now >= row[\"lease_us\"] / row[\"deadline_us\"]` using that stale stamp, so a draft can be committed (revision + pending outbox + draft_ready) after the immutable hard deadline. `LeaseGuard.complete()` has the same defect: it calls `self.clock()` before `store.complete()` waits for the lock, so the guard's \"commit verifies current lease\" claim is not true at the expiry edge. `recover_one()` accepts a `clock` callable but likewise samples `stamp = _micros(clock())` before `with self._transaction()`, so the deadline->failed / attempt-burning decision and `_claim`'s lease computation also use pre-lock time (it can create an attempt whose lease_us is already in the past). A secondary symptom of the same design: `_live()` raises ClockError when any active row has `updated_us > now`; in one process a `LeaseGuard` heartbeat `renew` that commits while the worker loop's `claim_one(now=utc_now())` is waiting on BEGIN IMMEDIATE makes `claim_one` raise a spurious ClockError instead of returning None. No test exercises lock contention at the expiry boundary, and `_transaction` offers no hook to sample a trusted nonblocking clock after acquiring the lock. Fix: sample the trusted clock inside `_transaction` after BEGIN IMMEDIATE (and compare `min`/`max` of caller stamp and post-lock stamp as appropriate), or require a `clock` callable for all fenced operations and resample under the lock; add a deterministic contention test (second connection holds BEGIN IMMEDIATE across the deadline, release inside busy_timeout, assert LeaseLost and no revision/outbox row).",
+        "reproduction": "store = BriefStore(path, busy_timeout=1); job = store.admit(SCOPE, ..., execution_seconds=2, now=utc_now()); c = store.claim_one(WORKER, now=utc_now()); store.start_generating(c.lease, now=utc_now()); deadline = parse(c.deadline). Sleep until deadline-0.2s; on a separate sqlite3 connection run 'BEGIN IMMEDIATE'; start Thread(target=lambda: store.complete(c.lease, draft={}, provenance={'m':'x'}, validation_version='v1', now=utc_now())) -> _micros(now) is computed at deadline-0.2s, then BEGIN IMMEDIATE blocks. Release the holder at deadline+0.15s. complete() returns a Revision, store.get(SCOPE, job.job_id).state == 'draft_ready' and outbox state == 'pending', although wall clock > deadline. Same shape with LeaseGuard(store, c.lease).complete(...) and with recover_one(WORKER, validate=lambda j: VALID) whose post-validation clock() sample is taken before the write lock wait."
+      }
+    ],
+    "notes": [
+      "Ownership/schema isolation is sound: application_id + user_version + exact sqlite_master set are inspected before any PRAGMA write or migration, twice around BEGIN IMMEDIATE in __init__ to serialize competing initializers; foreign/Monitor/partial/corrupt/future files raise BriefSchemaError without byte changes, and the future-version test derives from CURRENT_SCHEMA_VERSION+1.",
+      "Integer-microsecond timestamps, BEGIN IMMEDIATE per operation, per-operation connections with foreign_keys=ON, StoreBusy mapping via sqlite_errorcode primary code, and rollback-on-any-error in _connection are correct; trigger-induced outbox failure and child-process crash tests are meaningful.",
+      "Global single-live-lease enforcement (_live) inside the same write transaction, fence increment on every terminal transition (cancel/finish/complete), UNIQUE(job_id) on revisions/outbox, and requester-scoped _find for all lease checks correctly block cross-scope access, same-owner stale commits and duplicate completion.",
+      "recover_one correctly runs the validator outside all SQLite locks, rechecks the full row tuple (CAS) under the write lock, has no validation default, and never reads payload flags; needs_input/failed/cancelled terminal handling and attempt budget (0..3 CHECK) match the requirement.",
+      "Minor (non-blocking): admit() exact replay calls _forward(existing, stamp) and raises ClockError when the replay `now` precedes the job's last renewal/update, so a legitimate idempotent replay of an already-claimed job can fail spuriously; admission replay does not extend time and should not need this check.",
+      "Minor: LeaseGuard.complete latches loss on any exception from store.complete, including SchemaError for a malformed draft; document or narrow so a draft validation error does not itself kill an otherwise current lease.",
+      "Minor: LeaseGuard.__exit__ raises StoreError on join timeout even when the body raised, replacing the original exception; consider chaining.",
+      "Docstrings correctly avoid claiming delivery/exactly-once/provider integration and state A04 must reauthorize IO and kill/reap a provider process on loss; the only missing documentation is the (currently false) implication that the persisted lease/deadline check reflects current time at commit."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a02-store-0327dded"
+}

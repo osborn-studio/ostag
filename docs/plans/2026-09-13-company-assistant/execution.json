@@ -22,7 +22,8 @@
     "P01": "controlled_osstack_execution_verified; general autonomous runner admission not completed",
     "A01": "verified_local",
     "remaining_product_tasks": "planned",
-    "M01": "verified_local"
+    "M01": "verified_local",
+    "A02": "repair_required_local_candidate"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -67,14 +68,16 @@
       "loop_a4150ebb-7e4f-40e7-a8a4-aef7f3c12137",
       "loop_748e7257-cd09-4b9a-b93c-748255390e37",
       "loop_27a33854-35a9-43b6-a595-b3c700da9c76",
-      "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c"
+      "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c",
+      "loop_aac8db28-6466-4ef6-87a7-6ab8a10c8b66"
     ],
     "outcomes": [
       "success",
       "escalated_due_to_review_format",
       "success",
       "escalated; full review feedback truncated, controlled interruption",
-      "success"
+      "success",
+      "native_success_parent_gate_failed"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -83,7 +86,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone-review",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02"
     ]
   },
   "not_run": [
@@ -163,5 +167,13 @@
       "parent_smoke": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair/parent-smoke.json"
     }
   },
-  "latest_slice_content_sha256": "2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a"
+  "latest_slice_content_sha256": "2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a",
+  "pending_findings": [
+    {
+      "task": "A02",
+      "issue": "DELETE-mode reader can block COMMIT past deadline despite fresh post-BEGIN clock",
+      "evidence": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02/parent-commit-reader-probe.json",
+      "candidate_commit": "ecf38249cf88d994b986cbb75182979eac4812b3"
+    }
+  ]
 }
