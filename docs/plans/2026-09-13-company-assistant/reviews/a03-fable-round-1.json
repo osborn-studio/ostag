@@ -1,0 +1,63 @@
+{
+  "candidate_sha256": "2b908d96f7b911b7af98d94767f8d84c21db9fc9a5b79ed813ea396ff7540521",
+  "base": "aa6c89b88b300b485b1ed09c35840ea908d4525b",
+  "files": [
+    "ostag/briefs/generation.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/validation.py",
+    "tests/test_brief_generation.py",
+    "tests/test_brief_validation.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 51300,
+      "outputTokens": 22,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.05141,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 26100,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 71140,
+      "webSearchRequests": 0,
+      "costUSD": 2.72797775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 24148,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/validation.py",
+        "issue": "_LINK still classifies ordinary headings/colons and comparison operators as link escapes, the same defect class the parent regression required fixed. The scheme alternative `(?:javascript|vbscript|data|file|mailto):` has no left boundary and no requirement that a URI body follows, so it matches inside common words: 'Profile:' contains 'file:', 'Metadata:' contains 'data:', and the plain heading 'Data: ...' matches directly. The HTML alternative `<[^>]*>` matches any '<' ... '>' span, so numeric comparisons in engineering prose ('p95 < 200ms and p99 > 400ms') are rejected as an HTML tag. In generate() this surfaces after settlement as status 'invalid_output' with the spend retained, so a normally grounded GitHub/meeting brief fails and costs money. The regression tests only cover the three parent probe strings, none of which exercise these alternatives.",
+        "reproduction": "from tests.test_brief_validation import evidence, output, validate\nfor text in ('Updated the user profile: avatar upload works.', 'Metadata: attached to the PR.', 'Data: 5 tests failed.', 'p95 < 200ms while p99 > 400ms.'):\n    validate(output(text), sources=evidence(text))  # each raises SchemaError('model text contains a link escape'), expected: accepted inert plain text (as for 'CI: 5 tests failed.')\n# Confirm cause: re.search(_LINK, 'Profile: x') matches 'file:'; re.search(_LINK, 'a < b and c > d') matches '< b and c >'.\n# Fix direction: anchor the scheme list with a non-word lookbehind and require a URI body (e.g. r'(?<![a-z0-9])(?:javascript|vbscript|data|file|mailto):(?!\\s|$)'), and require tag-like HTML (e.g. r'<\\s*/?[a-z!?][^>]*>'); keep all explicit URL/Markdown/HTML/javascript cases in test_explicit_link_escape_forms_still_fail and add these prose cases to test_normal_grounded_prose_is_preserved_as_plain_text."
+      }
+    ],
+    "notes": [
+      "Authorization ordering is now correct at both boundaries: prepare() runs store.assert_current before checked('before_io') and then only nonblocking local_remaining before transport.generate with no intervening await; the accept path runs store.assert_current before checked('before_accept') followed only by cancellation/local clock checks. test_no_blocking_lease_read_after_final_authorization meaningfully arms revocation after the final checkpoint for both phases.",
+      "Durable accounting looks sound: reserve/start run under A02's _attempt (BEGIN EXCLUSIVE, clock sampled after lock, final _fresh_attempt) with an additional same-day clock wrapper; job cap/call count are keyed by job_id across fences; day cap is keyed by the stored job namespace; profile pinned at first use and Conflict on drift; start denies prior-day reservations; settle/unknown/release rules match the stated idempotency/conflict/overrun contract; migration is additive in one exclusive transaction and refuses foreign/newer/partial schemas before writes. Schema1 fixture test embeds the operator DDL/rows and checks preserved rows, DDL text, FK integrity and derived timings.",
+      "Minor (non-blocking): in generate(), settle_cost can raise Conflict if a trusted reconciliation already settled the same reservation with different usage (or a clock rewind raises ClockError from remaining()); these propagate as exceptions rather than a GenerationResult. Acceptable for a service-owned boundary but A04 must handle them.",
+      "Minor: _cost_capacity treats any overrun row in the namespace/day as blocking every job in that namespace for the day (documented in settle_cost docstring); confirm this is the intended admission policy rather than per-job only.",
+      "Minor: settle_cost on an 'unknown' row overwrites the earlier rejection diagnostic (e.g. 'cancelled') with 'settled', losing the reason the call was marked unknown; consider appending rather than replacing.",
+      "Minor: _cost_evidence (settle/unknown/release) binds only to a well-formed WorkerContext, not to the reservation's owner_id; any trusted worker may release another worker's unstarted reservation. This is safe for double-start (start_cost then sees non-reserved and Conflicts) and is documented as an internal capability, but A04 should scope it.",
+      "Test quality: test_duplicate_logical_call_has_at_most_one_provider_call is cooperative (single loop) and relies on the second coroutine seeing the 'started' row; the true concurrent guarantee rests on BEGIN EXCLUSIVE in start_cost. A threaded start_cost race on one reservation would strengthen the evidence. test_simultaneous_reservations_cannot_oversubscribe_job_or_day is a genuine 5-thread barrier test.",
+      "_COMPLETENESS is an obvious-form filter only (e.g. 'all data' in partial coverage is rejected); documented as such. Numeric/key-fact checking is explicitly unsupported and honestly documented; semantic grounding still requires real-model/human evaluation.",
+      "Remaining scope limits are correctly stated: no production adapter, Python fakes do not prove provider isolation, cancellation is a client request not proven remote termination, limits are admission estimates not billing control."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a03-review-b6c787e5"
+}

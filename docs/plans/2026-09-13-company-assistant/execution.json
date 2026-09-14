@@ -1,11 +1,11 @@
 {
-  "scope": "Locally verified slices: A01, M01, A02; meeting feature and production not complete",
+  "scope": "Locally verified A01, M01, A02 and A03 foundations; full meeting feature and production not complete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "5b2abd5fd94f1cf1b051f330b1a543193b53a0ee",
+  "code_commit": "e884cfc072aecb128114ab1ffb0ffddf0de10c57",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "b48f8b9b06ca31907e1945cc75bbb9c8166ea76fee26c8e361f27cb40a4fe60e",
+  "code_content_sha256": "e2f2fb003dd2c7bbf13c35f603815dbeaf97ba3cb5bc7b7c116ae1ba2fbba7b7",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -16,9 +16,13 @@
     "ostag/briefs/project_mapping.py": "d94003781fe166fd1139919ad10cc280cc6c12cc62fdebc9d1af1549c0bf12e2",
     "tests/test_meeting_contracts.py": "0a40c3ab032847698bc8d2e8f8cc927eed8e8e9ac95e74865880b2c120be954c",
     "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919",
-    "ostag/briefs/store.py": "1d50f7ed0d3b575cded3d7865c866df4ba28155c6c87d3d01dd978591d59d2f6",
+    "ostag/briefs/store.py": "fdd292b676263804131a56d4a8476c2b0ab5db152add185fd86c2184a566cde7",
     "tests/test_brief_recovery.py": "03ca5d25fb95bd14b810702e8ad4c580e03e82a8463e43d19c78243eec31b31c",
-    "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62"
+    "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62",
+    "ostag/briefs/generation.py": "d89814de9069ce484c78a74419d4d8d1e159c0fddb7e995f9baed6d0cd2762f3",
+    "ostag/briefs/validation.py": "ace890a6d8ec5ad01f62d3d42d3f1c2fae7c5da9fb43cb17a8d1ac583417a53e",
+    "tests/test_brief_generation.py": "fe78132f0cb458df1c0a7706029dc3ba93076a8af2514b8966ba6b4fe44c6b7c",
+    "tests/test_brief_validation.py": "618b5b17ebb8a03afa891e556a723cc50592edef1f31cf554d23706eb7a08367"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -27,7 +31,7 @@
     "remaining_product_tasks": "planned",
     "M01": "verified_local",
     "A02": "verified_local",
-    "A03": "candidate_awaiting_independent_review"
+    "A03": "verified_local"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -40,17 +44,17 @@
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 142,
-    "full_passed": 1621,
+    "target_passed": 148,
+    "full_passed": 1769,
     "warnings": 11,
-    "full_seconds": 22.02,
+    "full_seconds": 24.62,
     "ruff": "passed",
-    "latest_slice": "A02"
+    "latest_slice": "A03"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 4,
+    "successful_reviews": 5,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -62,9 +66,13 @@
       "ostag/briefs/project_mapping.py": "m01-fable-round-1.json",
       "tests/test_meeting_contracts.py": "m01-fable-round-1.json",
       "tests/test_meeting_preflight.py": "m01-fable-round-1.json",
-      "ostag/briefs/store.py": "a02-fable-round-1.json",
+      "ostag/briefs/store.py": "a03-fable-round-2.json",
       "tests/test_brief_recovery.py": "a02-fable-round-1.json",
-      "tests/test_brief_store.py": "a02-fable-round-1.json"
+      "tests/test_brief_store.py": "a02-fable-round-1.json",
+      "ostag/briefs/generation.py": "a03-fable-round-2.json",
+      "ostag/briefs/validation.py": "a03-fable-round-2.json",
+      "tests/test_brief_generation.py": "a03-fable-round-2.json",
+      "tests/test_brief_validation.py": "a03-fable-round-2.json"
     },
     "unresolved_blockers": 0
   },
@@ -78,7 +86,8 @@
       "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c",
       "loop_aac8db28-6466-4ef6-87a7-6ab8a10c8b66",
       "loop_b704a9ea-5282-43d2-abe1-36a294bc19b0",
-      "loop_ed9ab136-6f08-4c3a-b55b-a00120103f35"
+      "loop_ed9ab136-6f08-4c3a-b55b-a00120103f35",
+      "loop_9df54417-e3d2-41a8-bc13-dd567fa8b5e2"
     ],
     "outcomes": [
       "success",
@@ -88,7 +97,8 @@
       "success",
       "native_success_parent_gate_failed",
       "success",
-      "escalated_after_parent_gate_false_positive"
+      "escalated_after_parent_gate_false_positive",
+      "success"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -100,7 +110,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03-review"
     ]
   },
   "not_run": [
@@ -114,7 +125,7 @@
     "deployment"
   ],
   "next_tasks": [
-    "A03"
+    "A04"
   ],
   "slices": {
     "A01": {
@@ -237,16 +248,281 @@
         "a02-intermediate-approved.json",
         "a02-fable-round-1.json"
       ]
+    },
+    "A03": {
+      "status": "verified_local",
+      "code_commit": "e884cfc072aecb128114ab1ffb0ffddf0de10c57",
+      "code_content_sha256": "bdb2f398aa911634b5843aed0b087fd3c4e8d55caa79c9a14e8c9a7a9ee7e1ef",
+      "files": [
+        "ostag/briefs/generation.py",
+        "ostag/briefs/store.py",
+        "ostag/briefs/validation.py",
+        "tests/test_brief_generation.py",
+        "tests/test_brief_validation.py"
+      ],
+      "target_tests": {
+        "passed": 148,
+        "warnings": 0,
+        "seconds": 0.64
+      },
+      "full_tests": {
+        "passed": 1769,
+        "warnings": 11,
+        "seconds": 24.62
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "a03-fable-round-1.json",
+        "a03-fable-round-2.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_9df54417-e3d2-41a8-bc13-dd567fa8b5e2",
+      "iterations": 2,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03-review",
+      "source_coding_loop": "loop_ed9ab136-6f08-4c3a-b55b-a00120103f35",
+      "source_coding_iterations": 2,
+      "review_loop_execution_kinds": [
+        "exact_snapshot_restoration",
+        "actual_codex_builder"
+      ],
+      "total_actual_codex_builder_iterations": 3,
+      "independent_gates": {
+        "parent-deadline-regressions": [
+          {
+            "kind": "writer",
+            "journal_mode": "delete",
+            "error": "LeaseLost",
+            "expected_error": true,
+            "returned_at": "2026-09-14T03:43:34.879020Z",
+            "deadline": "2026-09-14T03:43:34.704819Z",
+            "state": "generating",
+            "outbox_present": false,
+            "late_success": false
+          },
+          {
+            "kind": "reader_commit",
+            "journal_mode": "delete",
+            "error": "LeaseLost",
+            "expected_error": true,
+            "returned_at": "2026-09-14T03:43:37.052944Z",
+            "deadline": "2026-09-14T03:43:36.887372Z",
+            "state": "generating",
+            "outbox_present": false,
+            "late_success": false
+          }
+        ],
+        "parent-migration-regression": {
+          "status": "passed",
+          "from_schema": 1,
+          "to_schema": 2,
+          "legacy_rows_unchanged": true,
+          "active_lease_preserved": true,
+          "future_schema_unchanged": true,
+          "fixture_sha256": "6556c01369bbb8662da4c15e4ce0ff5ec7027353dabaaca7905527a817087fd7",
+          "synthetic_only": true
+        },
+        "parent-plain-text-regression": [
+          {
+            "text": "CI: 5 tests failed.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "Updated store.py for the new cost ledger.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "Discuss the proposal: review the release tomorrow.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "Updated the user profile: avatar upload works.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "Metadata: attached to the PR.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "Data: 5 tests failed.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "p95 < 200ms while p99 > 400ms.",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "a < b and c > d",
+            "expected_accepted": true,
+            "accepted": true,
+            "passed": true
+          },
+          {
+            "text": "<a href=\"x\">source</a>",
+            "expected_accepted": false,
+            "accepted": false,
+            "passed": true
+          },
+          {
+            "text": "See https://evil.test/x",
+            "expected_accepted": false,
+            "accepted": false,
+            "passed": true
+          },
+          {
+            "text": "[source](https://evil.test)",
+            "expected_accepted": false,
+            "accepted": false,
+            "passed": true
+          },
+          {
+            "text": "javascript:alert(1)",
+            "expected_accepted": false,
+            "accepted": false,
+            "passed": true
+          }
+        ],
+        "parent-revocation-regression": [
+          {
+            "mode": "control",
+            "revoked": false,
+            "provider_calls": 1,
+            "status": "draft_candidate",
+            "checkpoints": [
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_accept",
+                "revoked": false
+              }
+            ],
+            "passed": true
+          },
+          {
+            "mode": "admission",
+            "revoked": true,
+            "provider_calls": 0,
+            "status": "checkpoint_denied",
+            "checkpoints": [
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_io",
+                "revoked": true
+              }
+            ],
+            "passed": true
+          },
+          {
+            "mode": "post_auth_io",
+            "revoked": false,
+            "provider_calls": 1,
+            "status": "draft_candidate",
+            "checkpoints": [
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_accept",
+                "revoked": false
+              }
+            ],
+            "passed": true
+          },
+          {
+            "mode": "post_auth_accept",
+            "revoked": false,
+            "provider_calls": 1,
+            "status": "draft_candidate",
+            "checkpoints": [
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_accept",
+                "revoked": false
+              }
+            ],
+            "passed": true
+          },
+          {
+            "mode": "after_io",
+            "revoked": true,
+            "provider_calls": 1,
+            "status": "checkpoint_denied",
+            "checkpoints": [
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_io",
+                "revoked": false
+              },
+              {
+                "phase": "before_accept",
+                "revoked": true
+              }
+            ],
+            "passed": true
+          }
+        ]
+      },
+      "legacy_reader_probe": {
+        "status": "passed",
+        "old_code_schema_max": 1,
+        "new_schema": 2,
+        "legacy_refusal": "BriefSchemaError",
+        "db_bytes_unchanged": true,
+        "old_store_sha256": "1d50f7ed0d3b575cded3d7865c866df4ba28155c6c87d3d01dd978591d59d2f6",
+        "new_store_sha256": "fdd292b676263804131a56d4a8476c2b0ab5db152add185fd86c2184a566cde7",
+        "scope": "synthetic code/schema compatibility only; A11 domain degradation and production restore not tested"
+      },
+      "gate_correction_audit": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03/parent-gate-correction-audit.json",
+      "remaining_integration_obligations": [
+        "A04 current source authorization and trusted reconciliation",
+        "A04 worker event-loop isolation and timeout/cancel distinction",
+        "A05 plain-text/no-autolink rendering",
+        "A11 brief-domain degradation",
+        "A12/M07 real generation and human semantic evaluation",
+        "D02 container/backup/restore/deployment gates"
+      ]
     }
   },
-  "latest_slice_content_sha256": "7a9b75cc5eb151252bfd8831064ee5d295d2be875ed47e52da488f4cd825369f",
+  "latest_slice_content_sha256": "bdb2f398aa911634b5843aed0b087fd3c4e8d55caa79c9a14e8c9a7a9ee7e1ef",
   "pending_findings": [],
-  "pending_candidate": {
-    "task": "A03",
-    "sha256": "2b908d96f7b911b7af98d94767f8d84c21db9fc9a5b79ed813ea396ff7540521",
-    "target_passed": 130,
-    "full_passed": 1751,
-    "review": "not_run",
-    "gate_correction_audit": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03/parent-gate-correction-audit.json"
-  }
+  "checkpoint": "M01 -> A02 -> A03 complete locally; A04 next"
 }

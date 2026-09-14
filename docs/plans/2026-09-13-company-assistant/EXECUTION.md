@@ -1,6 +1,6 @@
 # OStag 开发执行记录
 
-本记录与 81195d9b 的已评审方案分开保存，规划文档中的 planned 是当时快照。当前 A01、M01、A02 已完成本地验证并合入 integration；接续 A03，会议功能整体尚未完成。
+本记录与 81195d9b 的已评审方案分开保存，规划文档中的 planned 是当时快照。当前 A01、M01、A02、A03 已完成本地验证并合入 integration；本轮 M01→A02→A03 检查点完成，接续 A04，会议功能整体尚未完成。
 
 ## 本轮执行范围
 
@@ -73,7 +73,7 @@ release_check、容器测试、飞书真实读写、生产 health/SSH、容量�
 
 ## 接续开发
 
-下一检查点按 M01、A02、A03 顺序推进：固定会议项目/群/仓库与时间范围；实现独立 briefs 状态库及恢复；接通有来源的草稿生成。随后 A04 才形成可演示的任务纵向链路。M01的范围预检、A04的来源授权绑定必须继续检查每个 SourceRef 的 grant_id/revision/resource_id 与作业及当前grant一致，不能因为 SourceSet 接受多份来源就略过逐来源授权；多源撤销使整版失效。
+本轮已按 M01、A02、A03 顺序完成：固定会议项目/群/仓库与时间范围；实现独立 briefs 状态库及恢复；完成有来源的草稿生成基础。下一检查点 A04 将形成可演示的任务纵向链路。M01的范围预检、A04的来源授权绑定必须继续检查每个 SourceRef 的 grant_id/revision/resource_id 与作业及当前grant一致，不能因为 SourceSet 接受多份来源就略过逐来源授权；多源撤销使整版失效。
 
 规划 TASKS.md/backlog.json 保留为已评审的计划快照，不自动改作 osstack队列；实际进度以本文件与execution.json为准。A11/容器验收还须确认目标镜像的时区注册表非空、包含试点配置所选时区；本轮不把主机测试等同于容器验收。通用无人值守runner准入仍未完成；本轮证明的是用户授权下的受控本地开发闭环。真实连接、部署和发布继续执行原VALIDATION/DEPLOYMENT中的门槛。
 
@@ -101,7 +101,7 @@ release_check、容器测试、飞书真实读写、生产 health/SSH、容量�
 
 [最终Fable回执](reviews/m01-fable-round-1.json) · [合成探针](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair/parent-smoke.json) · [完整修复记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair)
 
-M01从原候选清单拆出test_meeting_preflight.py，便于权限/预算案例维护；没有修改A01产品文件或依赖。两个本轮M01任务文件均归档，旧13任务保持哈希不变。当前接续A02→A03，A04才接通手工材料作业纵向链路。跨切片约束另见[实施衔接记录](IMPLEMENTATION-NOTES.md)。
+M01从原候选清单拆出test_meeting_preflight.py，便于权限/预算案例维护；没有修改A01产品文件或依赖。两个本轮M01任务文件均归档，旧13任务保持哈希不变。M01完成时接续A02→A03；两者的最终结果见后文，下一步A04接通手工材料作业纵向链路。跨切片约束另见[实施衔接记录](IMPLEMENTATION-NOTES.md)。
 
 
 ## A02 中间候选与新增阻塞（已关闭，过程保留）
@@ -127,10 +127,10 @@ builder沙箱全量曾因本地.venv路径/缓存权限失败；外部固定验�
 
 [最终Fable回执](reviews/a02-fable-round-1.json) · [读写锁门槛](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair/parent-deadline-regressions-1789353931739637000.stdout) · [完整A02修复记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair)
 
-A02两个任务已归档，旧13任务未变。接续A03；当前尚无生成模型、来源采集、worker服务接线或实际消息投递。
+A02两个任务已归档，旧13任务未变。A02完成时接续A03；当时尚无生成模型接口、来源采集、worker服务接线或实际消息投递。A03结果见后文。
 
 
-## A03 编码与独立门槛（候选待审）
+## A03 编码与独立门槛（过程已关闭）
 
 两轮Codex builder已完成5文件候选，新增generation/validation及2测试文件，并扩展store成本账本。首轮114项目标/1735全量通过；父级发现普通文本链接过滤误报、授权检查之后仍存在阻塞DB读取。首轮已修复文本误报，但后一个问题由独立gate确认失败，进入第二轮修复。
 
@@ -139,3 +139,30 @@ A02两个任务已归档，旧13任务未变。接续A03；当前尚无生成模
 原生loop在第二轮gate误报后记escalated并清理临时worktree，完整5文件快照/真实Codex回执保留。新受控osstack任务将逐摘要恢复第二轮候选 `2b908d96f7b911b7af98d94767f8d84c21db9fc9a5b79ed813ea396ff7540521`，重跑所有门槛后才调用真实Fable静态评审。首次恢复execute只是确定性文件复制，不伪称一次模型编码。
 
 [验证器纠正的旧RED/新GREEN审计](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03/parent-gate-correction-audit.json) · [原始A03执行记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a03)
+
+
+## A03 已完成本地验证
+
+代码 `e884cfc072aecb128114ab1ffb0ffddf0de10c57`，5文件摘要 `bdb2f398aa911634b5843aed0b087fd3c4e8d55caa79c9a14e8c9a7a9ee7e1ef`。148项A03目标、1769项全量通过，11条既有警告，Ruff通过；全量24.62秒。真实 `claude-fable-5-1` 静态评审批准，blockers为空。恢复阶段是确定性复制；原osstack两轮真实Codex builder完成候选后，Fable提出标题/比较式误报阻塞，又由新loop中的一轮真实Codex修复。最终审批绑定修复后的完整5文件内容。
+
+- A03-AC1：冻结实际模型身份、prompt内容/摘要/版本、任务预算/定价界限、验证版本、source/request/config/evaluation摘要与可信usage。每日额度只改变config审计，不改变评测比较键；缺身份/用量、模型漂移或坏JSON拒绝。
+- A03-AC2：严格section/claim结构和已存在来源ID；未知URL/工具/批准字段拒绝，事实、来源所述承诺、待决建议分开。trusted coverage与可见gap由采集端提供；所有草稿均保留semantic_review_required，不能把引用存在说成内容真实。普通冒号和store.py可作为纯文本，可信SourceLink才提供候选出处链接。
+- A03-AC3：窄async transport加必须注入的当前授权checkpoint；任务/日额度和最多3次累计调用由schema2账本跨重启、恢复、配置变更保持。调用前预约最大费用，唯一call ID只能开始一次；未知结果保留预约，可信费用幂等结算，冲突/超额可见。跨UTC日的预约不能在新一天启动，晚到结算仍属原桶。
+
+最终门槛覆盖实际schema1合成数据的前向迁移、原jobs/leases/revisions/outbox保留、不兼容未来schema拒绝；A02真实读写锁deadline门槛继续通过。旧A02代码打开schema2也按预期拒绝并保持测试DB字节不变；这只证明局部代码兼容规则，尚未完成A11运行时降级或D02生产备份恢复。
+
+授权顺序修复使所有已知阻塞DB工作位于最后授权检查之前，再做不访问DB的时间/取消检查。最终控制案例：健康调用1次并产出候选；入场期间撤销0次调用；授权后无额外DB读取，测试不会再触发该处等待期间撤销；调用后撤销1次但拒绝候选。固定gate在原缺陷快照上仍失败，纠正验证器误判没有改变产品代码或放宽真实撤销要求。
+
+仍须由A04提供已审计的真实只读adapter、逐SourceRef当前grant/resource/ACL/purpose/freshness绑定、heartbeat/process custody与最后原子完成。adapter必须证明整个请求及provider framing/system overhead符合所选输入token/价格上界，否则拒绝IO；合成transport不证明实际提供商隔离。取消不等于证明远端停止，未知费用是额度占用而非已确认账单。A05渲染须保持纯文本并禁用Markdown/HTML/autolink，只让可信出处映射成为链接；regex不会证明全部自然语言无误。使用真实会议材料的模型生成评测/人审、Feishu/GitHub连接、容器与发布门槛仍未运行。真实Fable调用用于代码静态审查，不是会议草稿质量评测；本轮合成单测不计为18/6会议评测通过。
+
+[Fable首审与阻塞](reviews/a03-fable-round-1.json) · [最终Fable回执](reviews/a03-fable-round-2.json) · [机器执行记录](execution.json)
+
+Fable首审补出的标题/比较式误报已由实际RED→GREEN修复：原来的URI正则能在profile/metadata单词内部匹配file:/data:，HTML正则也把数值比较看成标签。修复锚定scheme边界并要求URI正文、识别tag-like opener，新增18项覆盖验证器及生成器的回归；原有授权/账本设计在首审中获确认，最终仍完整复审。
+
+首审的非阻塞意见作为A04接线要求保存：试点对任何实际费用超出预约的情况，保守停止该任务及其namespace/UTC日的新调用；这是明确的v1策略。账本维护接口是可信内部能力，WorkerContext不是端点凭证，服务须校验调用和账单归属。晚到费用结算可能把unknown的旧diagnostic替换为settled，A04应另存不可变的作业失败原因；Conflict/ClockError等异常也须在brief服务域内处理。当前测试包含真实并发预约和SQLite排他事务，但不夸称所有生产并发/恢复场景已验收。
+
+最终Fable回执中的“1751-test”是旧候选输入计数，且评审明确未执行测试；最终148/1769来自固定验证器的实际日志。原A02两份测试文件的摘要未变，schema断言引用CURRENT_SCHEMA_VERSION，不需要改成硬编码2；当前配置的Ruff也实际通过。
+
+最终复审新增的非阻塞接线义务：start被拒绝时可能保留未开始的reserved额度，A04需按job/call_id读取并仅在证明确未开始时释放；started/unknown不得当零成本退款。timeout设置的取消Event是协作停止信号，不等于用户手动取消。SQLite同步调用会阻塞所在event loop，A04应使用独立worker线程/事件循环并以线程安全方式发出停止信号，避免拖住Monitor。账本/时钟异常必须由brief服务域处理并保留作业原因。
+
+本轮代码未推送或部署。当前分支为codex/ostag-company-integration；原OStag工作区保持5098f914且clean。本轮所有新原生任务已本地归档，旧13任务哈希保持不变。下一检查点A04把已验证基础组合为手工材料作业纵向链路；真实历史会议材料接入仍按M02—M07及发布门槛推进。
