@@ -360,6 +360,7 @@ def test_reused_handle_rejects_future_schema_without_mutation(store):
 
 
 def test_concurrent_completion_is_one_effect(store):
+    store = BriefStore(store.path, busy_timeout=3)
     job = admit(store)
     first = store.claim_one(WORKER, clock=lambda: at())
     store.start_generating(first.lease, clock=lambda: at(1))
@@ -430,3 +431,42 @@ def test_exact_admission_replay_does_not_rewind_active_job(store):
     renewed = store.renew(claim.lease, clock=lambda: at(10))
     replay = admit(store)  # Original admission timestamp, no new time-dependent effect.
     assert replay == renewed and replay.job_id == job.job_id
+
+
+@pytest.mark.parametrize("initialized", [False, True])
+def test_concurrent_setup_preserves_owned_delete_database(tmp_path, initialized):
+    path = tmp_path / "setup.db"
+    existing = None
+    if initialized:
+        existing = admit(BriefStore(path))
+        before = path.read_bytes(), database_image(path)
+    barrier = Barrier(8)
+
+    def reopen(_):
+        barrier.wait(timeout=5)
+        return BriefStore(path, busy_timeout=3)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        stores = list(pool.map(reopen, range(8)))
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    if initialized:
+        assert (path.read_bytes(), database_image(path)) == before
+        assert all(store.get(SCOPE, existing.job_id) == existing for store in stores)
+    else:
+        assert admit(stores[0]).state == "queued"
+
+
+def test_changed_journal_mode_is_refused_without_conversion(store):
+    job = admit(store)
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    before = store.path.read_bytes()
+    with pytest.raises(BriefSchemaError, match="journal"):
+        BriefStore(store.path)
+    with pytest.raises(BriefSchemaError, match="journal"):
+        store.cancel(SCOPE, job.job_id, clock=lambda: at(1))
+    assert store.path.read_bytes() == before
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert db.execute("SELECT state FROM brief_jobs").fetchone()[0] == "queued"

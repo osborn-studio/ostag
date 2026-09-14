@@ -269,25 +269,26 @@ def test_recovery_rechecks_snapshot_exactly_and_deadline_after_callback(store):
     assert store.get(SCOPE, first.job_id).state == "failed"
 
 
-def test_heartbeat_progresses_while_fake_model_blocks_and_stops_cleanly(store):
+def test_heartbeat_progresses_while_fake_model_blocks_and_stops_cleanly(store, monkeypatch):
     admit(store)
     first = store.claim_one(WORKER, clock=lambda: at())
     store.start_generating(first.lease, clock=lambda: at())
     started, release, heartbeat = Event(), Event(), Event()
-    counter = [0]
+    original = store.renew
 
-    def clock():
-        counter[0] += 1
-        if counter[0] >= 4:
-            heartbeat.set()
-        return at(counter[0])
+    def observe_renewal(*args, **kwargs):
+        result = original(*args, **kwargs)
+        heartbeat.set()  # Evidence of a committed heartbeat, not clock call count.
+        return result
+
+    monkeypatch.setattr(store, "renew", observe_renewal)
 
     def fake_model():
         started.set()
         assert release.wait(3)
 
     model = Thread(target=fake_model)
-    with LeaseGuard(store, first.lease, clock=clock, interval=0.005) as guard:
+    with LeaseGuard(store, first.lease, clock=lambda: at(1), interval=0.005) as guard:
         guard.before_io()
         model.start()
         try:
@@ -335,7 +336,7 @@ def test_cancellation_latches_guard_and_exception_exit_joins(store):
     guard = LeaseGuard(store, first.lease, clock=lambda: at(2), interval=0.005)
     with pytest.raises(RuntimeError, match="caller failure"):
         with guard:
-            store.cancel(SCOPE, job.job_id, clock=lambda: at(1))
+            store.cancel(SCOPE, job.job_id, clock=lambda: at(2))
             assert guard.stop_requested.wait(2)
             assert guard.lost
             with pytest.raises(LeaseLost):
@@ -400,22 +401,26 @@ def test_recovery_short_duration_preserves_remaining_time(store):
     assert store.get(SCOPE, first.job_id).state == "failed"
 
 
-def test_recovery_samples_time_after_contended_write_lock(store, monkeypatch):
+@pytest.mark.parametrize("reader", [False, True])
+def test_recovery_samples_time_after_contended_write_lock(store, monkeypatch, reader):
     admit(store)
     first = store.claim_one(WORKER, clock=lambda: at())
     # Existing clock API: reproduces the stale pre-lock observation directly.
     result = contend(store, monkeypatch, 30, 180,
                      lambda clock: store.recover_one(WORKER, validate=lambda job: VALID,
-                                                      clock=clock))
+                                                      clock=clock), reader=reader)
     assert result is None
     final = store.get(SCOPE, first.job_id)
     assert final.state == "failed" and final.attempt == 1
 
 
-def contend(store, monkeypatch, before, after, operation):
+def contend(store, monkeypatch, before, after, operation, *, reader=False):
     """Real second connection owns the lock; events advance a synthetic UTC clock.
 
-    Trace fires as BEGIN IMMEDIATE starts, before SQLite acquires the lock.
+    Writer case: trace fires before SQLite acquires the write lock. Reader
+    case: DELETE mode lets IMMEDIATE reach COMMIT while the reader still holds
+    its snapshot; EXCLUSIVE must wait at BEGIN instead. In either case release
+    the real blocking connection only after advancing past the deadline.
     No sleeps, wall-clock expiry races, or model/provider calls are involved.
     """
     from contextlib import contextmanager
@@ -427,11 +432,18 @@ def contend(store, monkeypatch, before, after, operation):
     @contextmanager
     def traced_connection(**kwargs):
         with original(**kwargs) as db:
-            db.set_trace_callback(lambda sql: entering.set() if sql == "BEGIN IMMEDIATE" else None)
+            boundaries = ("BEGIN EXCLUSIVE", "COMMIT") if reader else (
+                "BEGIN IMMEDIATE", "BEGIN EXCLUSIVE")
+            db.set_trace_callback(lambda sql: entering.set() if sql in boundaries else None)
             yield db
 
     with sqlite3.connect(store.path) as holder, monkeypatch.context() as patch:
-        holder.execute("BEGIN IMMEDIATE")
+        if reader:
+            assert holder.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+            holder.execute("BEGIN")
+            holder.execute("SELECT * FROM brief_jobs").fetchall()
+        else:
+            holder.execute("BEGIN IMMEDIATE")
         patch.setattr(store, "_connection", traced_connection)
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(operation, lambda: current[0])
@@ -444,8 +456,11 @@ def contend(store, monkeypatch, before, after, operation):
 
 
 @pytest.mark.parametrize("expiry", [30, 180])
+@pytest.mark.parametrize("reader", [False, True], ids=["writer-lock", "reader-commit-lock"])
 @pytest.mark.parametrize("operation", ["complete", "renew", "assert_current", "start_generating", "finish"])
-def test_fenced_operation_observes_expiry_after_lock_wait(store, monkeypatch, expiry, operation):
+def test_fenced_operation_observes_expiry_after_lock_wait(
+    store, monkeypatch, expiry, operation, reader,
+):
     job = admit(store)
     first = store.claim_one(WORKER, clock=lambda: at())
     if operation != "start_generating":
@@ -463,7 +478,7 @@ def test_fenced_operation_observes_expiry_after_lock_wait(store, monkeypatch, ex
         return getattr(store, operation)(first.lease, **args)
 
     with pytest.raises(LeaseLost):
-        contend(store, monkeypatch, expiry - 1, expiry, execute)
+        contend(store, monkeypatch, expiry - 1, expiry, execute, reader=reader)
     assert store.get(SCOPE, job.job_id).state == (
         "collecting" if operation == "start_generating" else "generating")
     assert store.outbox(SCOPE, job.job_id) is None
@@ -471,15 +486,68 @@ def test_fenced_operation_observes_expiry_after_lock_wait(store, monkeypatch, ex
         assert db.execute("SELECT count(*) FROM brief_revisions").fetchone()[0] == 0
 
 
-def test_claim_and_cancel_use_post_lock_clock(store, monkeypatch):
+@pytest.mark.parametrize("reader", [False, True])
+def test_claim_and_cancel_use_post_lock_clock(store, monkeypatch, reader):
     job = admit(store)
     first = contend(store, monkeypatch, 0, 10,
-                    lambda clock: store.claim_one(WORKER, clock=clock))
+                    lambda clock: store.claim_one(WORKER, clock=clock), reader=reader)
     assert first.first_claim_at == at(10).replace("+00:00", "Z")
     assert first.deadline == at(190).replace("+00:00", "Z")
     cancelled = contend(store, monkeypatch, 10, 15,
-                        lambda clock: store.cancel(SCOPE, job.job_id, clock=clock))
+                        lambda clock: store.cancel(SCOPE, job.job_id, clock=clock), reader=reader)
     assert cancelled.updated_at == at(15).replace("+00:00", "Z")
+
+
+@pytest.mark.parametrize("operation", [
+    "complete", "renew", "start_generating", "finish", "assert_current", "claim_one", "recover_one",
+])
+@pytest.mark.parametrize("after", [40, -1], ids=["expired", "clock-rewind"])
+def test_elapsed_transaction_work_rolls_back_attempt(store, monkeypatch, operation, after):
+    from contextlib import contextmanager
+
+    job = admit(store, seconds=40)
+    lease = None
+    if operation != "claim_one":
+        first = store.claim_one(WORKER, clock=lambda: at())
+        lease = first.lease
+        if operation == "complete":
+            store.start_generating(lease, clock=lambda: at())
+    before = store.get(SCOPE, job.job_id)
+    current = [at(30 if operation == "recover_one" else 1)]
+    reached = []
+    original = store._connection
+
+    @contextmanager
+    def delayed_connection(**kwargs):
+        with original(**kwargs) as db:
+            def trace(sql):
+                # Advance during real SQL work, after the initial time check.
+                if sql.startswith("UPDATE brief_jobs") or (
+                    operation == "assert_current" and sql.startswith("SELECT * FROM brief_jobs")
+                ):
+                    reached.append(sql)
+                    current[0] = at(after)
+
+            db.set_trace_callback(trace)
+            yield db
+
+    args = {"clock": lambda: current[0]}
+    if operation == "complete":
+        args.update(draft={}, provenance={"model": "fake"}, validation_version="v1")
+    elif operation == "finish":
+        args["outcome"] = "failed"
+    elif operation == "recover_one":
+        args["validate"] = lambda job: VALID
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_connection", delayed_connection)
+        with pytest.raises(LeaseLost if after == 40 else ClockError):
+            getattr(store, operation)(WORKER if operation.endswith("_one") else lease, **args)
+    assert reached, "expiry must occur during actual transaction work"
+    reopened = BriefStore(store.path)
+    assert reopened.get(SCOPE, job.job_id) == before
+    assert reopened.outbox(SCOPE, job.job_id) is None
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT count(*) FROM brief_revisions").fetchone()[0] == 0
 
 
 def test_contended_claim_does_not_treat_committed_heartbeat_as_clock_rewind(store, monkeypatch):
@@ -490,7 +558,8 @@ def test_contended_claim_does_not_treat_committed_heartbeat_as_clock_rewind(stor
                    lambda clock: store.claim_one(WORKER, clock=clock)) is None
 
 
-def test_guard_commit_observes_deadline_after_lock_wait(store, monkeypatch):
+@pytest.mark.parametrize("reader", [False, True])
+def test_guard_commit_observes_deadline_after_lock_wait(store, monkeypatch, reader):
     job = admit(store, seconds=2)
     first = store.claim_one(WORKER, clock=lambda: at())
     store.start_generating(first.lease, clock=lambda: at())
@@ -502,7 +571,7 @@ def test_guard_commit_observes_deadline_after_lock_wait(store, monkeypatch):
             return guard.complete(draft={}, provenance={"model": "fake"}, validation_version="v1")
 
         with pytest.raises(LeaseLost):
-            contend(store, monkeypatch, 1, 2, finish)
+            contend(store, monkeypatch, 1, 2, finish, reader=reader)
         assert guard.lost and guard.stop_requested.is_set()
     assert not guard.running
     assert store.get(SCOPE, job.job_id).state == "generating"
@@ -515,3 +584,66 @@ def test_operation_clock_requires_callable_strict_utc(store, value):
     admit(store)
     with pytest.raises(SchemaError):
         store.claim_one(WORKER, clock=value)
+
+
+def test_real_reader_held_past_wall_deadline_cannot_publish(store):
+    """Parent reproduction without clock injection or transaction monkeypatches."""
+    store = BriefStore(store.path, busy_timeout=3)
+    job = admit(store, seconds=2)
+    first = store.claim_one(WORKER)
+    store.start_generating(first.lease)
+    deadline = datetime.fromisoformat(first.deadline.replace("Z", "+00:00"))
+    started = Event()
+
+    def publish():
+        started.set()
+        return store.complete(first.lease, draft={}, provenance={"model": "fake"},
+                              validation_version="v1")
+
+    with sqlite3.connect(store.path) as reader, ThreadPoolExecutor(max_workers=1) as pool:
+        assert reader.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        reader.execute("BEGIN")
+        reader.execute("SELECT * FROM brief_jobs").fetchall()
+        future = pool.submit(publish)
+        try:
+            assert started.wait(1)
+            # Hold a normal reader over the real deadline, as in the parent probe.
+            Event().wait(max(0, (deadline - datetime.now(UTC)).total_seconds()) + 0.15)
+        finally:
+            reader.rollback()
+        with pytest.raises(LeaseLost):
+            future.result(timeout=3)
+    assert datetime.now(UTC) >= deadline
+    reopened = BriefStore(store.path)
+    assert reopened.get(SCOPE, job.job_id).state == "generating"
+    assert reopened.outbox(SCOPE, job.job_id) is None
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT count(*) FROM brief_revisions").fetchone()[0] == 0
+
+
+def test_renewal_cannot_hide_original_lease_expiry_during_update(store, monkeypatch):
+    from contextlib import contextmanager
+
+    admit(store)
+    first = store.claim_one(WORKER, clock=lambda: at())
+    current = [at(29)]
+    updated = []
+    original = store._connection
+
+    @contextmanager
+    def delayed_update(**kwargs):
+        with original(**kwargs) as db:
+            def trace(sql):
+                if sql.startswith("UPDATE brief_jobs"):
+                    updated.append(sql)
+                    current[0] = at(30)
+            db.set_trace_callback(trace)
+            yield db
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_connection", delayed_update)
+        with pytest.raises(LeaseLost):
+            store.renew(first.lease, clock=lambda: current[0])
+    assert updated
+    # Tentative renewal to 59 must not supersede the original expiry at 30.
+    assert BriefStore(store.path).get(SCOPE, first.job_id) == first

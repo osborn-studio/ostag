@@ -19,6 +19,30 @@ one live lease globally. A completion only queues one requester-private outbox
 intent. It does not send, acknowledge, or promise exactly-once delivery. U01
 must add the send fence/receipt/uncertain-result protocol; M06 owns collection
 progress. No Monitor schema, server lifecycle or provider integration lives here.
+
+Timing contract: DELETE journaling with BEGIN EXCLUSIVE puts both reader and
+writer lock waits BEFORE the first clock sample. The exclusive lock is retained
+through COMMIT, so a normal reader cannot delay COMMIT past the final fresh
+lease/deadline check. Fenced operations check again after transaction work,
+including result materialization; expiry or clock rewind rolls back all effects.
+For a successful transaction this final check is its logical linearization point
+under the exclusive lock; durability/visibility occurs at SQLite COMMIT. This
+is not a realtime guarantee that the physical commit or function return precedes
+the deadline: arbitrary process scheduling, filesystem or fsync stalls between
+the final check and commit/return cannot be bounded here. A lost response must
+be reconciled through the scoped durable job/outbox, never blindly republished.
+
+Only the default DELETE journal mode is supported; it is checked without setting
+or converting journal mode, including on reused handles under the transaction
+lock. FULL synchronous durability is explicit. Existing owned DELETE databases
+need no migration; foreign/future/partial schemas are refused before writes.
+The tradeoff is that writes also exclude readers; lock waits use busy_timeout,
+but transaction execution and fsync duration are not bounded by that timeout.
+Use a filesystem with working SQLite locks and durability. No WAL is enabled:
+WAL would require same-host local storage and backups retaining the live WAL or
+using SQLite's backup API, plus a separately reviewed owned-database migration.
+SQLite transaction semantics: https://www.sqlite.org/lang_transaction.html
+WAL operational limits: https://www.sqlite.org/wal.html
 """
 
 from __future__ import annotations
@@ -418,7 +442,7 @@ class BriefStore:
     """Owns a dedicated on-disk SQLite file and short per-operation connections.
 
     busy_timeout is finite 0..5 seconds (default 1); no connection is retained.
-    All mutations serialize with BEGIN IMMEDIATE. Lease operations take a trusted,
+    All mutations serialize with BEGIN EXCLUSIVE. Lease operations take a trusted,
     nonblocking, thread-safe UTC clock callable (default utc_now), sampled AFTER
     acquiring the write lock, never a timestamp captured before lock contention.
     Test clocks must advance consistently across all handles/guard threads.
@@ -438,9 +462,14 @@ class BriefStore:
         # Parent directory creation is an operational responsibility, avoiding
         # unrelated filesystem effects when a wrong DB path is supplied.
         with self._connection(opening=True) as db:
+            # Header and schema must come from one snapshot: another initializer
+            # can commit between the separate PRAGMA/SELECT inspection queries.
+            db.execute("BEGIN")
             self._inspect(db, allow_empty=True)
+            db.rollback()
             db.execute("PRAGMA foreign_keys=ON")
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN EXCLUSIVE")
             fresh = self._inspect(db, allow_empty=True)  # serialize competing initializers
             if fresh:
                 for statement in _SCHEMA:
@@ -471,6 +500,8 @@ class BriefStore:
         app = db.execute("PRAGMA application_id").fetchone()[0]
         version = db.execute("PRAGMA user_version").fetchone()[0]
         rows = db.execute("SELECT type,name,sql FROM sqlite_master").fetchall()
+        if db.execute("PRAGMA journal_mode").fetchone()[0] != "delete":
+            raise BriefSchemaError("brief database requires DELETE journal mode; refusing conversion")
         if app == 0 and version == 0 and not rows and allow_empty:
             return True
         if app != APPLICATION_ID:
@@ -487,9 +518,12 @@ class BriefStore:
     @contextmanager
     def _transaction(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
         with self._connection() as db:
+            db.execute("BEGIN")
             self._inspect(db)
+            db.rollback()
             db.execute("PRAGMA foreign_keys=ON")
-            db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            db.execute("PRAGMA synchronous=FULL")
+            db.execute("BEGIN EXCLUSIVE" if write else "BEGIN")
             self._inspect(db)
             yield db
             db.commit()
@@ -582,7 +616,9 @@ class BriefStore:
                           "AND lease_us>? AND deadline_us>? LIMIT 1", (now, now)).fetchone() is not None
 
     @staticmethod
-    def _claim(db: sqlite3.Connection, row: sqlite3.Row, owner: str, now: int) -> Job:
+    def _claim(
+        db: sqlite3.Connection, row: sqlite3.Row, owner: str, now: int, clock: Callable[[], str],
+    ) -> Job:
         first = row["first_claim_us"] if row["first_claim_us"] is not None else now
         deadline = row["deadline_us"] if row["deadline_us"] is not None else (
             first + row["execution_seconds"] * 1_000_000)
@@ -595,8 +631,11 @@ class BriefStore:
         db.execute("UPDATE brief_jobs SET state='collecting',attempt=attempt+1,fence=fence+1,"
                    "owner_id=?,first_claim_us=?,deadline_us=?,lease_us=?,updated_us=? WHERE job_id=?",
                    (owner, first, deadline, lease, now, row["job_id"]))
-        return _job(db.execute("SELECT * FROM brief_jobs WHERE job_id=?",
-                               (row["job_id"],)).fetchone())
+        claimed = db.execute("SELECT * FROM brief_jobs WHERE job_id=?",
+                             (row["job_id"],)).fetchone()
+        result = _job(claimed)
+        BriefStore._fresh_attempt(claimed, clock, now)
+        return result
 
     def claim_one(self, worker: WorkerContext, *, clock: Callable[[], str] = utc_now) -> Job | None:
         """Trusted worker: claim at most one queued job, with one global live lease."""
@@ -609,7 +648,30 @@ class BriefStore:
             if row is None:
                 return None
             self._forward(row, stamp)
-            return self._claim(db, row, owner, stamp)
+            return self._claim(db, row, owner, stamp, clock)
+
+    @staticmethod
+    def _fresh_attempt(row: sqlite3.Row, clock: Callable[[], str], observed: int) -> None:
+        """Final acceptance check against the pre-mutation lease, even after terminalization.
+
+        In particular, renew cannot use its own tentative extension to conceal
+        expiry of the original lease while the transaction was doing work.
+        """
+        fresh = _clock_micros(clock)
+        if fresh < observed:
+            raise ClockError("attempt clock moved backwards during transaction")
+        if fresh >= row["lease_us"] or fresh >= row["deadline_us"]:
+            raise LeaseLost("attempt lease or hard deadline expired during transaction")
+
+    @contextmanager
+    def _attempt(
+        self, lease: Lease, clock: Callable[[], str], *, states: tuple[str, ...] = _ACTIVE,
+    ) -> Iterator[tuple[sqlite3.Connection, sqlite3.Row, int]]:
+        with self._transaction() as db:
+            stamp = _clock_micros(clock)
+            row = self._current(db, lease, stamp, states=states)
+            yield db, row, stamp
+            self._fresh_attempt(row, clock, stamp)
 
     def _current(
         self, db: sqlite3.Connection, lease: Lease, now: int, *, states: tuple[str, ...] = _ACTIVE,
@@ -628,15 +690,12 @@ class BriefStore:
 
     def assert_current(self, lease: Lease, *, clock: Callable[[], str] = utc_now) -> Job:
         """Trusted worker checkpoint only; A04 must additionally reauthorize IO."""
-        with self._transaction() as db:
-            stamp = _clock_micros(clock)
-            return _job(self._current(db, lease, stamp))
+        with self._attempt(lease, clock) as (db, row, stamp):
+            return _job(row)
 
     def renew(self, lease: Lease, *, clock: Callable[[], str] = utc_now) -> Job:
         """Renew only a current unexpired attempt, never beyond its pinned deadline."""
-        with self._transaction() as db:
-            stamp = _clock_micros(clock)
-            row = self._current(db, lease, stamp)
+        with self._attempt(lease, clock) as (db, row, stamp):
             until = min(stamp + LEASE_SECONDS * 1_000_000, row["deadline_us"])
             db.execute("UPDATE brief_jobs SET lease_us=?,updated_us=? WHERE job_id=?",
                        (until, stamp, lease.job_id))
@@ -644,9 +703,7 @@ class BriefStore:
 
     def start_generating(self, lease: Lease, *, clock: Callable[[], str] = utc_now) -> Job:
         """Only collecting -> generating; source semantics belong to A03/A04."""
-        with self._transaction() as db:
-            stamp = _clock_micros(clock)
-            self._current(db, lease, stamp, states=("collecting",))
+        with self._attempt(lease, clock, states=("collecting",)) as (db, row, stamp):
             db.execute("UPDATE brief_jobs SET state='generating',updated_us=? WHERE job_id=?",
                        (stamp, lease.job_id))
             return _job(self._find(db, lease.scope, lease.job_id))
@@ -663,9 +720,7 @@ class BriefStore:
         """Trusted worker explicitly terminates a current attempt without a draft."""
         if type(outcome) is not str or outcome not in ("failed", "needs_input"):
             raise _invalid("worker outcome must be failed or needs_input")
-        with self._transaction() as db:
-            stamp = _clock_micros(clock)
-            row = self._current(db, lease, stamp)
+        with self._attempt(lease, clock) as (db, row, stamp):
             self._terminal(db, row, outcome, stamp)
             return _job(self._find(db, lease.scope, lease.job_id))
 
@@ -707,9 +762,7 @@ class BriefStore:
         if metadata == "{}":
             raise _invalid("nonempty provenance metadata required")
         _identifier(validation_version, "validation_version")
-        with self._transaction() as db:
-            stamp = _clock_micros(clock)
-            row = self._current(db, lease, stamp, states=("generating",))
+        with self._attempt(lease, clock, states=("generating",)) as (db, row, stamp):
             revision_id, delivery_id = uuid4().hex, uuid4().hex
             db.execute("INSERT INTO brief_revisions VALUES (?,?,?,?,?,?)",
                        (revision_id, lease.job_id, encoded, metadata, validation_version, stamp))
@@ -782,7 +835,7 @@ class BriefStore:
                 return None
             if self._live(db, stamp):
                 return None
-            return self._claim(db, current, owner, stamp)
+            return self._claim(db, current, owner, stamp, clock)
 
 
 class LeaseGuard:
