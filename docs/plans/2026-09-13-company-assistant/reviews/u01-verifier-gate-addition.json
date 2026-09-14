@@ -1,0 +1,25 @@
+{
+  "reason": "Added independent schema3->4 preservation gate before first candidate was produced; no existing gate weakened.",
+  "run_task_sha256": "39cc4d9ae923b5695b8192c8a6d798efe0e9328d16f0796e9118ff96542116ad",
+  "fixture": {
+    "source_commit": "5e2e79b15489016085e94b95e9e56594ffb68b26",
+    "source_store_sha256": "508ab3eadced9b87b570686bed9bb3be59927b4c9461c609eddcad474458d680",
+    "sql_sha256": "ecead265602a32d78297d913d1052b6b60c267ce4ad002046e248885e43b52c1",
+    "tables": [
+      "brief_cost_calls",
+      "brief_cost_profiles",
+      "brief_failures",
+      "brief_intakes",
+      "brief_jobs",
+      "brief_outbox",
+      "brief_revisions"
+    ],
+    "ids": {
+      "ready": "bedffb45e47c4a3cbdc04aa80b349306",
+      "unknown": "c4a4d41fd2ba40049e5c9ece656267e0",
+      "reserved": "40b2209f9799498fa1d291741a76a02d",
+      "queued": "cdc45ce56b1340c09cb4aebb4b85c90d"
+    },
+    "synthetic": true
+  }
+}

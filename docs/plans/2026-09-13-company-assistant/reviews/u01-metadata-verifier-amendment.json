@@ -1,0 +1,4 @@
+{
+  "run_task_sha256": "5a0809de6558415a18d458149ccce0ce00b94735201ee8548b28325ab8978ff8",
+  "reason": "Second verification composes exact actual builder candidate plus independently recorded public documentation field rename, reviews all four files. All fixed tests unchanged."
+}

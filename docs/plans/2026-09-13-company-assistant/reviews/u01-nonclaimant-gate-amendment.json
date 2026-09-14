@@ -1,0 +1,5 @@
+{
+  "reason": "Second genuine Fable blocker: losing operation may write winner uncertainty. Added independent two-service contention/failing-status-read probe before third candidate verification; existing gates unchanged.",
+  "probe_sha256": "ff2d4df282071ac0b1d83f9b66b86cced3743d461a67028bf34aa3bace516acd",
+  "run_task_sha256": "8052890b747eb4978a6ea687d54fd9a7a5cc9b398d62a42475ae56cf5e6876f1"
+}

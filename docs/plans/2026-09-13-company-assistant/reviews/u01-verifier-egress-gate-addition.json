@@ -1,0 +1,5 @@
+{
+  "reason": "Independent cancellation scheduling counterexample added before first candidate completes; preserves existing gates.",
+  "run_task_sha256": "76302526e80a1e2fb5de3927ad0c05dd424df9ca1959f129b38d2cb4fa49acc9",
+  "probe_sha256": "ad11f6d829ab6d64787ecaf2a5759ed348f53ef232c9f7d72839f1f610cae1e5"
+}

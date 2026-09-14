@@ -1,11 +1,11 @@
 {
-  "scope": "Locally verified A01/M01/A02/A03/A04 core and first HTTP adapter; full meeting product and production incomplete",
+  "scope": "Locally verified A01/M01/A02/A03/A04 core and HTTP adapter plus U01 delivery core; full meeting product and production incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "95af6f1355b1526b392e9a68e9d31bca4945d48f",
+  "code_commit": "ce66df0f68dc22ab57eb8ce8f982b4e801ed48ef",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "aee4721c52bea36c6be54e266f2dd12b878739e1515d73c6fbe1222e1cfb9104",
+  "code_content_sha256": "cd058fede2ad9766e7a005b261588d9b2d526883d1f9bf2961a9698382329c9d",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -16,7 +16,7 @@
     "ostag/briefs/project_mapping.py": "d94003781fe166fd1139919ad10cc280cc6c12cc62fdebc9d1af1549c0bf12e2",
     "tests/test_meeting_contracts.py": "0a40c3ab032847698bc8d2e8f8cc927eed8e8e9ac95e74865880b2c120be954c",
     "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919",
-    "ostag/briefs/store.py": "508ab3eadced9b87b570686bed9bb3be59927b4c9461c609eddcad474458d680",
+    "ostag/briefs/store.py": "eb03b2dc1bf21799c11d25ca0cf333e07642a59d28443e58266df684f38de698",
     "tests/test_brief_recovery.py": "03ca5d25fb95bd14b810702e8ad4c580e03e82a8463e43d19c78243eec31b31c",
     "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62",
     "ostag/briefs/generation.py": "5717e57f623e002b1757df3a088644dd9261fda7347f68e9d48f2cad12c23d94",
@@ -31,7 +31,9 @@
     "ostag/briefs/openai_transport.py": "df9066f5656a2676eef31cf7a4dc21b987ca300453d5d43eaf634f39dae0e4ad",
     "pyproject.toml": "6862df64b0712c88209b2b286312edccf9e5229e04f34dc3c8a8fa7f79ab661e",
     "tests/test_brief_openai_transport.py": "3c781a10837f6b710631e37be926355b1e48bdee47b232f19751cd3fdada06d1",
-    "uv.lock": "f90cb6bdad729193f0242818167cebfa8e03ee021b4672854cbf2aeb3bae9a38"
+    "uv.lock": "f90cb6bdad729193f0242818167cebfa8e03ee021b4672854cbf2aeb3bae9a38",
+    "ostag/briefs/delivery.py": "23428abed3f4ff26a145de14006108690a52980f7dee96a774e17639e3fd64d6",
+    "tests/test_brief_delivery_observation.py": "5ab1c2957db99f491f5d453d2cb5dad51e8657fc82d58416aada4353ce1a816a"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -42,7 +44,8 @@
     "A02": "verified_local",
     "A03": "verified_local",
     "A04": "service/worker and HTTP adapter verified locally; real provider/platform acceptance open",
-    "A04-provider": "verified_local; live account/provider/semantic certification not_run"
+    "A04-provider": "verified_local; live account/provider/semantic certification not_run",
+    "U01": "verified_local core; actual Feishu adapter and platform acceptance not_run"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -53,22 +56,25 @@
     "M01-AC3": "strict DST and namespace rejection, confirmation snapshot, public evaluation scoring/holdout custody frozen; private holdout not created/not_run",
     "A04-AC1": "Implemented service -> worker -> A03 -> OpenAIReadOnlyTransport -> real HTTPX count/create handling -> SQLite draft/outbox; local synthetic network-boundary integration passed. Live account/provider billing and semantic acceptance NOT completed.",
     "A04-AC2": "Local single worker/private loop, bounded intake/result publication/shutdown and legacy Monitor regression verified; transient SQLite contention is bounded by confirmed wall+monotonic lease/deadline.",
-    "A04-AC3": "Per-source current grant/resource/collection identity/ACL/destination checks at IO and atomic precommit; durable event dedupe, original timing, conservative unknown spend, immutable causes and scoped reconciliation verified locally."
+    "A04-AC3": "Per-source current grant/resource/collection identity/ACL/destination checks at IO and atomic precommit; durable event dedupe, original timing, conservative unknown spend, immutable causes and scoped reconciliation verified locally.",
+    "U01-AC1": "Local stable delivery/revision/private binding and exact not-started replay tested",
+    "U01-AC2": "Exact-ID/full-body proof tested; fully lost response without trusted ID stays unknown and cannot auto-recover",
+    "U01-AC3": "Durable restart/phase separation/bounded observations locally tested; platform/human receipt not certified"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 215,
-    "full_passed": 2103,
+    "target_passed": 122,
+    "full_passed": 2225,
     "warnings": 11,
-    "full_seconds": 44.11,
+    "full_seconds": 68.14,
     "ruff": "passed",
-    "latest_slice": "A04-provider"
+    "latest_slice": "U01"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 7,
+    "successful_reviews": 8,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -80,7 +86,7 @@
       "ostag/briefs/project_mapping.py": "m01-fable-round-1.json",
       "tests/test_meeting_contracts.py": "m01-fable-round-1.json",
       "tests/test_meeting_preflight.py": "m01-fable-round-1.json",
-      "ostag/briefs/store.py": "a04-fable-round-2.json",
+      "ostag/briefs/store.py": "u01-fable-round-3.json",
       "tests/test_brief_recovery.py": "a02-fable-round-1.json",
       "tests/test_brief_store.py": "a02-fable-round-1.json",
       "ostag/briefs/generation.py": "a04-provider-fable-round-1.json",
@@ -95,7 +101,9 @@
       "ostag/briefs/openai_transport.py": "a04-provider-fable-round-1.json",
       "pyproject.toml": "a04-provider-fable-round-1.json",
       "tests/test_brief_openai_transport.py": "a04-provider-fable-round-1.json",
-      "uv.lock": "a04-provider-fable-round-1.json"
+      "uv.lock": "a04-provider-fable-round-1.json",
+      "ostag/briefs/delivery.py": "u01-fable-round-3.json",
+      "tests/test_brief_delivery_observation.py": "u01-fable-round-3.json"
     },
     "unresolved_blockers": 0
   },
@@ -115,7 +123,10 @@
       "loop_c7dbe0c3-90e8-4b94-8555-e49df7039792",
       "loop_2499802b-8187-4884-9714-065b3ee67f5a",
       "loop_b012a364-8608-4e3d-acd5-051564466d0b",
-      "loop_37351b29-72aa-4f9c-bcdc-6298ef8e3484"
+      "loop_37351b29-72aa-4f9c-bcdc-6298ef8e3484",
+      "loop_d30cf801-ab36-442f-8fc0-b3c6d4c6c498",
+      "loop_3885094a-6032-4531-ad3f-6aca9304c445",
+      "loop_f27ef045-1f2c-4e35-a04b-7c43fb4bee4e"
     ],
     "outcomes": [
       "success",
@@ -130,6 +141,9 @@
       "escalated",
       "escalated",
       "success",
+      "escalated",
+      "success",
+      "escalated",
       "escalated",
       "success"
     ],
@@ -149,7 +163,10 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-repair",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-review",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-recovery",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-final"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-final",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-review",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-final"
     ]
   },
   "not_run": [
@@ -165,10 +182,13 @@
     "A04 real-backend acceptance",
     "D01 dual-identity/mobile platform acceptance",
     "production readonly generation adapter live certification",
-    "live API credential/account/tariff/count-endpoint billing acceptance"
+    "live API credential/account/tariff/count-endpoint billing acceptance",
+    "U01 actual Feishu HTTP transport and exact-ID platform proof",
+    "human read/received confirmation",
+    "U01 schema4 production migration and rollback rehearsal"
   ],
   "next_tasks": [
-    "U01"
+    "A05"
   ],
   "slices": {
     "A01": {
@@ -680,14 +700,78 @@
         "six independent actual HTTPX boundary cases",
         "all existing locked packages unchanged and uv lock --check --offline"
       ]
+    },
+    "U01": {
+      "status": "verified_local core; actual Feishu adapter and platform acceptance not_run",
+      "code_commit": "ce66df0f68dc22ab57eb8ce8f982b4e801ed48ef",
+      "code_content_sha256": "ac08e38f82556723e287e1d6be3d77791341e955f7a71fc4933abee144fc5ebe",
+      "files": [
+        "ostag/briefs/delivery.py",
+        "ostag/briefs/store.py",
+        "tests/test_brief_delivery_observation.py"
+      ],
+      "target_tests": {
+        "passed": 122,
+        "warnings": 0,
+        "seconds": 16.52
+      },
+      "full_tests": {
+        "passed": 2225,
+        "warnings": 11,
+        "seconds": 68.14
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "u01-fable-round-1.json",
+        "u01-fable-round-2.json",
+        "u01-fable-round-3.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_f27ef045-1f2c-4e35-a04b-7c43fb4bee4e",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-final",
+      "scope": "Private delivery intent, one-send durable claim, exact-ID observation and additive schema4; injectable trusted transport only",
+      "parent_gates": [
+        "eight prior A04/provider gates unchanged",
+        "frozen schema3 -> schema4 seven-table preservation, old cost access and full A04 generation after migration",
+        "durable cancellation during adapter await prevents send and read egress",
+        "losing claimant timeout cannot mutate winning send or first-failure attribution"
+      ],
+      "platform_io": "synthetic transport only; no live messages, lookups or read-user evidence",
+      "schema": "constructor default2; enable_manual3; enable_delivery4; readable1..4; old ledger and A04 generation remain operational on schema4; no downgrade",
+      "resolved_fable_blocker": "Old _cost_schema accepted only2/3, disabling generation after enabling delivery4; expanded compatibility and added complete post-upgrade generation/ledger regressions",
+      "source_evidence": "u01-sources.json",
+      "composition": "Three actual Codex implementation/test files; public source metadata rename committed separately to recovery base; unchanged metadata also supplied to Fable with a separate digest",
+      "initial_full_verification": "Two initial full runs each had 4 existing secret-hygiene failures because prior public SDK SHA256 field matched credential scanner; in-flight harness amendment missed the loaded verifier. Separate base field rename fixed it without test/scanner changes.",
+      "timing_test_note": "Known old 1 ms generation timeout test failed in builder run; original assertions preserved, final builder and fixed full verification rerun",
+      "metadata_amendment": "u01-metadata-amendment.json",
+      "independent_failure_reproduction": "u01-parent-nonclaimant-red.json",
+      "ac_status": {
+        "U01-AC1": "Local stable delivery/revision/private binding and exact not-started replay tested",
+        "U01-AC2": "Exact-ID/full-body proof tested; fully lost response without trusted ID stays unknown and cannot auto-recover",
+        "U01-AC3": "Durable restart/phase separation/bounded observations locally tested; platform/human receipt not certified"
+      },
+      "resolved_fable_nonclaimant_blocker": "A loser timing out after failed claim could poison winning send; diagnostic mutation is now operation/custody-fenced and independently tested",
+      "prior_loops": [
+        "loop_d30cf801-ab36-442f-8fc0-b3c6d4c6c498",
+        "loop_3885094a-6032-4531-ad3f-6aca9304c445"
+      ],
+      "recovery_evidence": "u01-recovery-evidence.json",
+      "post_documentation_checks": {
+        "secret_hygiene_tests_passed": 4,
+        "receipt": "u01-document-validation.json"
+      }
     }
   },
-  "latest_slice_content_sha256": "a11fdd60e4f2836e37f6e7254a006d1938fd43738994100d837513e46ddc7974",
+  "latest_slice_content_sha256": "ac08e38f82556723e287e1d6be3d77791341e955f7a71fc4933abee144fc5ebe",
   "pending_findings": [],
-  "checkpoint": "A04 HTTP adapter local verification complete; next U01 private delivery observation",
+  "checkpoint": "U01 delivery core locally verified; next A05 Feishu cards and real adapter binding",
   "next_task_details": {
-    "U01": "Implement private outbox delivery observation and uncertain-result handling; preserve current grants and stable correlation; no blind retransmission.",
-    "A04-live": "Use authorized synthetic materials and an explicitly configured live provider identity to certify model/usage/pricing/network behavior during D01; remains separate from local code verification."
+    "A05": "Implement private task cards, trusted Feishu transport mapping and actor/destination/revision/expiry-bound callbacks; certify exact provider ID/body/binding before live acceptance.",
+    "A11": "Wire feature flags, runtime lifecycle and owned-loop configuration before any real pilot.",
+    "D01": "Separate real provider/Feishu identity, network, billing, platform delivery and semantic acceptance from synthetic local tests."
   },
-  "updated_at_utc": "2026-09-14T13:24:02.959910+00:00"
+  "updated_at_utc": "2026-09-14T14:43:39.961229+00:00"
 }

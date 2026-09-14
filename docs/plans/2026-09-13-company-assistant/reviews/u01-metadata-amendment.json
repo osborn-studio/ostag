@@ -1,0 +1,7 @@
+{
+  "file": "docs/plans/2026-09-13-company-assistant/reviews/a04-provider-sources.json",
+  "reason": "Preexisting source receipt public SDK SHA256 field name triggered credential_assignment scanner; rename field only, preserve digest and all source facts; no scanner/test weakening. Parent-owned documentation correction, separate from actual Codex implementation.",
+  "before_sha256": "0bf67aa00e41bca36ba90d38a6545a5efb974dec7c5442a8f50d6b1140eb0a26",
+  "after_sha256": "407801c84bf4917b93c9d559b407527902470ea4dca18195ddddcc4a32515ad0",
+  "after_text": "{\n  \"checked_at_utc\": \"2026-09-14\",\n  \"openai_sdk_version\": \"2.44.0\",\n  \"httpx_version\": \"0.28.1\",\n  \"sources\": [\n    \"https://developers.openai.com/api/docs/guides/token-counting\",\n    \"https://developers.openai.com/api/reference/typescript/resources/responses/subresources/input_tokens\",\n    \"https://developers.openai.com/api/docs/models/gpt-4.1\",\n    \"https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count\",\n    \"https://www.python-httpx.org/async/\"\n  ],\n  \"price_scope\": \"standard gpt-4.1-2025-04-14 public tariff; not invoice; live account/provider certification not_run\",\n  \"count_endpoint_price\": \"not independently verified; no free-count claim\",\n  \"local_counting_sdk_sha256\": \"f3066387317bbbaee478c954f703ef4e9e61508bd5ffafaf527420f91f7a7866\"\n}\n"
+}

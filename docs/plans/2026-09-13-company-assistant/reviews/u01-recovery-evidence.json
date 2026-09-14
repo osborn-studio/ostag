@@ -1,0 +1,25 @@
+{
+  "prior_loop": "loop_d30cf801-ab36-442f-8fc0-b3c6d4c6c498",
+  "prior_outcome": "escalated",
+  "reason": "two full verification runs blocked by preexisting public-source metadata scanner match; attempted in-flight harness amendment missed already-loaded verifier; no Fable call or code merge",
+  "source_snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-review/snapshot-1789395424642279000",
+  "actual_codex_sha256": "e8cf95546b279f8156aafa906c5b7056d90e0c8eff5a3c1738a857e53e61489b",
+  "metadata_base_commit": "35ef6ae9469a6d5c0314066fe278b7ca1089e456",
+  "metadata_amendment": {
+    "file": "docs/plans/2026-09-13-company-assistant/reviews/a04-provider-sources.json",
+    "reason": "Preexisting source receipt public SDK SHA256 field name triggered credential_assignment scanner; rename field only, preserve digest and all source facts; no scanner/test weakening. Parent-owned documentation correction, separate from actual Codex implementation.",
+    "before_sha256": "0bf67aa00e41bca36ba90d38a6545a5efb974dec7c5442a8f50d6b1140eb0a26",
+    "after_sha256": "407801c84bf4917b93c9d559b407527902470ea4dca18195ddddcc4a32515ad0",
+    "after_text": "{\n  \"checked_at_utc\": \"2026-09-14\",\n  \"openai_sdk_version\": \"2.44.0\",\n  \"httpx_version\": \"0.28.1\",\n  \"sources\": [\n    \"https://developers.openai.com/api/docs/guides/token-counting\",\n    \"https://developers.openai.com/api/reference/typescript/resources/responses/subresources/input_tokens\",\n    \"https://developers.openai.com/api/docs/models/gpt-4.1\",\n    \"https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count\",\n    \"https://www.python-httpx.org/async/\"\n  ],\n  \"price_scope\": \"standard gpt-4.1-2025-04-14 public tariff; not invoice; live account/provider certification not_run\",\n  \"count_endpoint_price\": \"not independently verified; no free-count claim\",\n  \"local_counting_sdk_sha256\": \"f3066387317bbbaee478c954f703ef4e9e61508bd5ffafaf527420f91f7a7866\"\n}\n"
+  },
+  "prior_loops": [
+    "loop_d30cf801-ab36-442f-8fc0-b3c6d4c6c498",
+    "loop_3885094a-6032-4531-ad3f-6aca9304c445"
+  ],
+  "review_loop_outcome": "escalated after2 iterations despite launch requesting3; do not treat max-iter as assurance of another attempt",
+  "remaining_blocker": "nonclaimant diagnostic write can poison winning claim; source/schema4 prior blocker already fixed",
+  "genuine_reviews_copied": [
+    "fable-1789395556614966000.receipt.json",
+    "fable-1789395006440374000.receipt.json"
+  ]
+}

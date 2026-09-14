@@ -1,0 +1,59 @@
+{
+  "candidate_sha256": "e8cf95546b279f8156aafa906c5b7056d90e0c8eff5a3c1738a857e53e61489b",
+  "base": "1d0778dad3c9dde10142097f55f6aa427f3153de",
+  "files": [
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/store.py",
+    "tests/test_brief_delivery_observation.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 62653,
+      "outputTokens": 19,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.062748,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 18197,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 86077,
+      "webSearchRequests": 0,
+      "costUSD": 2.6315677500000003,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 16687,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/delivery.py",
+        "issue": "Non-claimant diagnostic write breaks the winning claimant's send fence. `_execute` sets `started = True` before `begin_delivery` and, on ANY later failure (timeout during busy wait, stop, cancel, snapshot read error), calls `_unknown()` even when this operation never obtained the claim (`attempt is None` / lost race). `store.delivery_unknown` has no owner/token fence: it flips any started row to 'unknown' and records the loser's reason as `first_failure_json`. The real claimant's `check_delivery_egress(token=...)` then requires `state == 'started'` and raises Conflict, so it never sends, then records its own `_unknown('conflict'->'store_error')`. Result: a delivery that was never transmitted is permanently fenced as unknown with no candidate ID and a misattributed first-failure diagnostic. This is exactly the 'two handles concurrent begin' scenario the spec targets; the existing test only covers the loser returning a snapshot, not the loser failing.",
+        "reproduction": "Service A (timeout 5s) and service B (timeout ~0.05s, separate BriefStore handle) on the same prepared delivery. A's transport.send awaits an Event. Start A.send; while A holds the SQLite EXCLUSIVE lock inside begin_delivery (or immediately after A commits), start B.send so B spins in _db's busy loop until op.check raises 'timeout' -> B's finally calls _unknown(scope,id,'timeout') -> delivery_unknown updates A's started row to state='unknown', first_failure=timeout. Release A's event: A's exchange() -> check_delivery_egress(token) -> Conflict('send claim is no longer current') -> A never calls transport.send; final snapshot state='unknown', candidate_id=None, first_failure.reason='timeout', transport.sends == []. Fix: only call _unknown when this operation actually holds the claim/observation budget (attempt is not None, or begin_delivery_observation returned True) and make delivery_unknown require matching owner_id+token for started rows (observation path may pass the candidate/ordinal instead), or accept state IN ('started','unknown') with matching token in check_delivery_egress AND scope the first_failure write to the claimant."
+      }
+    ],
+    "notes": [
+      "Post-start Conflict (e.g. outbox cancelled between send and accept, or claim mismatch) is persisted as reason 'store_error' because 'conflict' is not in REASONS; the diagnostic is sanitized but misleading. Consider adding a fixed 'conflict'/'cancelled_intent' reason.",
+      "If the requester cancels after the provider accepted (direct response in hand), _accept_delivery -> _delivery_current rejects on outbox_state='cancelled' and the candidate message_id plus full proof are discarded; delivery stays unknown with no candidate and later observe/check_delivery_egress also refuse. State never implies unsend (good), but a real receipt is lost; document or allow candidate/receipt recording for an already-started claim regardless of local cancellation.",
+      "egress() calls check_delivery_egress with a non-waiting connection; a transient SQLITE_BUSY at that instant surfaces as 'transport_error' -> permanent unknown with no candidate and no IO. Conservative and safe, but a liveness cost worth documenting.",
+      "Error privacy, chained-context suppression, fixed reason codes, digest binding, strict ProviderMessage parsing, single-use egress gate, token fencing across processes, bounded observations (32/64KiB), separate initial uncertainty vs first_failure vs receipt, and additive schema4 (constructor stays 2, enable_manual stays 3, exact-schema/trigger rejection) all read correctly.",
+      "Test suite depends on `git show 5e2e79b1...` and on subprocess importability of `ostag` from the repo root; both passed in prior host runs but are environment-sensitive.",
+      "Honest limitations acknowledged by the candidate and confirmed: no HTTP/Feishu adapter, no human-receipt evidence, lost response without ID is unrecoverable, SQLite work blocks the loop (owned-loop only)."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-u01-227113da",
+  "source_metadata_sha256": "407801c84bf4917b93c9d559b407527902470ea4dca18195ddddcc4a32515ad0"
+}

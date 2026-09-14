@@ -61,3 +61,14 @@ Fable保留的非阻塞限制：极窄截止竞争可能将timeout记为transpor
 下一开发切片为U01：私有outbox投递观测与结果不确定时的处理；之后再按DAG推进界面、生命周期及Feishu/GitHub会议材料采集。
 
 [最终Fable审查](reviews/a04-provider-fable-round-1.json) · [官方接口与费率来源](reviews/a04-provider-sources.json) · [机器执行记录](execution.json)
+
+
+## U01 私有投递核心本地完成
+
+代码 `ce66df0f68dc22ab57eb8ce8f982b4e801ed48ef`。新增独立投递状态、持久发送 claim、精确 message ID 与完整内容验证、不可覆盖的不确定记录、有界观察和显式 schema4 迁移。默认 schema2/手动 schema3 行为保持兼容。
+
+固定验证：122 项目标、2225 项全量通过，11 条既有警告，Ruff及11组父级门槛通过。真实 Fable5.1 对同一候选批准、blockers为空。
+
+这是核心库与合成传输验证。完全丢失响应且无可信 message ID 时仍需人工核验；provider_accepted 不等于真人收到。真实飞书HTTP适配器、卡片、运行期接线与部署验收继续归A05/A11/D01。下一任务为A05。
+
+[契约、验收与Fable意见](U01-DELIVERY.md) · [最终审查](reviews/u01-fable-round-3.json)

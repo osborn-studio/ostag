@@ -1,0 +1,5 @@
+{
+  "reason": "Real Fable blocker: old ledger operations rejected schema4 despite row preservation. Extended independent frozen migration gate to exercise old cost access and full A04 generation after upgrade.",
+  "probe_sha256": "fde714287e777731bd651cb389d8dba9e2ba5f48fba026ea51d019bbc69bc901",
+  "review_receipt": "fable-1789395006440374000.receipt.json"
+}
