@@ -9,3 +9,12 @@
 7. A11/发布：store抛出的领域兼容性异常尚需lifespan按brief域降级接线；主机timezone/pytest通过不能替代目标镜像tzdata、真实Feishu、排空、发布和7天试点评估。
 
 8. A04：纯ExecutionTiming可以描述needs_input范围；服务必须先检查受理结果为accepted再入队，不把dataclass构造成功当受理许可。A02为通用brief存储，不信任payload中的accepted/authorized布尔值。
+
+
+## A02 存储接线和时限
+
+最终A02使用DELETE+BEGIN EXCLUSIVE+FULL，所有fenced方法传可信clock callable，锁后及提交前检查；不要使用旧评审里的now参数或BEGIN IMMEDIATE。A04把store.first_claim_at原样映射为M01 ExecutionTiming.first_claimed_at，恢复不重置。未来入队时间须来自可信入口时钟，不能由请求体提供未来now导致排队阻塞。LeaseGuard独立心跳必须由worker实际接入；先完成生成语义校验再调用guard.complete。
+
+DDL/版本不符会在业务写入前拒绝；SQLite打开hot journal/WAL可能执行内部恢复或建立sidecar，这不是字节级无副作用保证。A11在打开DB前须核对brief与Monitor路径隔离；本轮只证明合成数据库的schema拒绝和已测字节不变，不冒充在线生产库零写现场验证。
+
+成本表由A03前向迁移；保存实际schema1合成样本（queued、active、ready、revision/outbox）作独立升级门槛。新schema上线后的镜像回滚继续遵守DEPLOYMENT中可读区间和brief域降级，不能覆盖Monitor新数据。

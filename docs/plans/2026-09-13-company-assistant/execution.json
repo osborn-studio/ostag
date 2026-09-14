@@ -1,11 +1,11 @@
 {
-  "scope": "Locally verified slices: A01, M01; meeting feature and production not complete",
+  "scope": "Locally verified slices: A01, M01, A02; meeting feature and production not complete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "07081c3891882b5cbfed0985a2cc6007d7f9568f",
+  "code_commit": "5b2abd5fd94f1cf1b051f330b1a543193b53a0ee",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "5efc1bcac5d9487cc39f535fab6b2c23207213d86a16a03c3eee7cddc5ce1629",
+  "code_content_sha256": "b48f8b9b06ca31907e1945cc75bbb9c8166ea76fee26c8e361f27cb40a4fe60e",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -15,7 +15,10 @@
     "ostag/briefs/meeting_models.py": "3bf0bf02f89755ad8d26ec8d65ad487d569b64078b492d6dc07951880490cbd3",
     "ostag/briefs/project_mapping.py": "d94003781fe166fd1139919ad10cc280cc6c12cc62fdebc9d1af1549c0bf12e2",
     "tests/test_meeting_contracts.py": "0a40c3ab032847698bc8d2e8f8cc927eed8e8e9ac95e74865880b2c120be954c",
-    "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919"
+    "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919",
+    "ostag/briefs/store.py": "1d50f7ed0d3b575cded3d7865c866df4ba28155c6c87d3d01dd978591d59d2f6",
+    "tests/test_brief_recovery.py": "03ca5d25fb95bd14b810702e8ad4c580e03e82a8463e43d19c78243eec31b31c",
+    "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -23,7 +26,7 @@
     "A01": "verified_local",
     "remaining_product_tasks": "planned",
     "M01": "verified_local",
-    "A02": "repair_required_local_candidate"
+    "A02": "verified_local"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -36,17 +39,17 @@
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 167,
-    "full_passed": 1479,
+    "target_passed": 142,
+    "full_passed": 1621,
     "warnings": 11,
-    "full_seconds": 21.44,
+    "full_seconds": 22.02,
     "ruff": "passed",
-    "latest_slice": "M01"
+    "latest_slice": "A02"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 3,
+    "successful_reviews": 4,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -57,7 +60,10 @@
       "ostag/briefs/meeting_models.py": "m01-fable-round-1.json",
       "ostag/briefs/project_mapping.py": "m01-fable-round-1.json",
       "tests/test_meeting_contracts.py": "m01-fable-round-1.json",
-      "tests/test_meeting_preflight.py": "m01-fable-round-1.json"
+      "tests/test_meeting_preflight.py": "m01-fable-round-1.json",
+      "ostag/briefs/store.py": "a02-fable-round-1.json",
+      "tests/test_brief_recovery.py": "a02-fable-round-1.json",
+      "tests/test_brief_store.py": "a02-fable-round-1.json"
     },
     "unresolved_blockers": 0
   },
@@ -69,7 +75,8 @@
       "loop_748e7257-cd09-4b9a-b93c-748255390e37",
       "loop_27a33854-35a9-43b6-a595-b3c700da9c76",
       "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c",
-      "loop_aac8db28-6466-4ef6-87a7-6ab8a10c8b66"
+      "loop_aac8db28-6466-4ef6-87a7-6ab8a10c8b66",
+      "loop_b704a9ea-5282-43d2-abe1-36a294bc19b0"
     ],
     "outcomes": [
       "success",
@@ -77,7 +84,8 @@
       "success",
       "escalated; full review feedback truncated, controlled interruption",
       "success",
-      "native_success_parent_gate_failed"
+      "native_success_parent_gate_failed",
+      "success"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -87,7 +95,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone-review",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair"
     ]
   },
   "not_run": [
@@ -101,7 +110,6 @@
     "deployment"
   ],
   "next_tasks": [
-    "A02",
     "A03"
   ],
   "slices": {
@@ -165,15 +173,68 @@
       "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair",
       "prior_blocking_review": "m01-fable-initial-blockers.json",
       "parent_smoke": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair/parent-smoke.json"
+    },
+    "A02": {
+      "status": "verified_local",
+      "code_commit": "5b2abd5fd94f1cf1b051f330b1a543193b53a0ee",
+      "code_content_sha256": "7a9b75cc5eb151252bfd8831064ee5d295d2be875ed47e52da488f4cd825369f",
+      "files": [
+        "ostag/briefs/store.py",
+        "tests/test_brief_recovery.py",
+        "tests/test_brief_store.py"
+      ],
+      "target_tests": {
+        "passed": 142,
+        "warnings": 0,
+        "seconds": 4.56
+      },
+      "full_tests": {
+        "passed": 1621,
+        "warnings": 11,
+        "seconds": 22.02
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "a02-fable-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_b704a9ea-5282-43d2-abe1-36a294bc19b0",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair",
+      "first_code_commit": "ecf38249cf88d994b986cbb75182979eac4812b3",
+      "parent_deadline_regressions": [
+        {
+          "kind": "writer",
+          "journal_mode": "delete",
+          "error": "LeaseLost",
+          "expected_error": true,
+          "returned_at": "2026-09-14T02:46:01.034786Z",
+          "deadline": "2026-09-14T02:46:00.838288Z",
+          "state": "generating",
+          "outbox_present": false,
+          "late_success": false
+        },
+        {
+          "kind": "reader_commit",
+          "journal_mode": "delete",
+          "error": "LeaseLost",
+          "expected_error": true,
+          "returned_at": "2026-09-14T02:46:03.212943Z",
+          "deadline": "2026-09-14T02:46:03.040837Z",
+          "state": "generating",
+          "outbox_present": false,
+          "late_success": false
+        }
+      ],
+      "all_review_history": [
+        "a02-initial-blockers.json",
+        "a02-intermediate-approved.json",
+        "a02-fable-round-1.json"
+      ]
     }
   },
-  "latest_slice_content_sha256": "2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a",
-  "pending_findings": [
-    {
-      "task": "A02",
-      "issue": "DELETE-mode reader can block COMMIT past deadline despite fresh post-BEGIN clock",
-      "evidence": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02/parent-commit-reader-probe.json",
-      "candidate_commit": "ecf38249cf88d994b986cbb75182979eac4812b3"
-    }
-  ]
+  "latest_slice_content_sha256": "7a9b75cc5eb151252bfd8831064ee5d295d2be875ed47e52da488f4cd825369f",
+  "pending_findings": []
 }

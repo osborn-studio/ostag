@@ -1,0 +1,56 @@
+{
+  "candidate_sha256": "7a9b75cc5eb151252bfd8831064ee5d295d2be875ed47e52da488f4cd825369f",
+  "base": "ffee9f13aa2989de1ad233d1df7756cd313cbc04",
+  "files": [
+    "ostag/briefs/store.py",
+    "tests/test_brief_recovery.py",
+    "tests/test_brief_store.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 36436,
+      "outputTokens": 18,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.036526,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 44781,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 50647,
+      "webSearchRequests": 0,
+      "costUSD": 3.2521677500000004,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 43048,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Parent follow-up (reader-blocked COMMIT) is resolved by strategy, not by timing luck: BriefStore._transaction issues BEGIN EXCLUSIVE for every write path, and in rollback (DELETE) journal mode SQLite's pager acquires PENDING then waits (via the busy handler) for all SHARED holders to clear before BEGIN returns. All clock samples (_clock_micros in claim_one/_attempt/cancel/recover_one write phase) occur after that return, and _fresh_attempt re-samples after the transaction's SQL work and before COMMIT. With EXCLUSIVE already held, COMMIT needs no further lock and cannot wait on a normal reader. Failures after the yield propagate through _attempt -> _transaction -> _connection and roll back before commit.",
+      "test_real_reader_held_past_wall_deadline_cannot_publish is a genuine reproduction of the parent probe (real utc_now, real second connection holding BEGIN+SELECT past deadline+0.15s, real thread, no monkeypatch of the store). With the old BEGIN IMMEDIATE it would return a Revision; with the current code the worker blocks at BEGIN EXCLUSIVE and then observes now >= deadline_us in _current -> LeaseLost, and post-conditions (state generating, no outbox, zero revisions) are checked through a fresh BriefStore. Slack is ~0.85s between the reader release (~2.15s) and busy_timeout=3; acceptable but not huge under heavy regression load.",
+      "Journal-mode gate: _inspect queries PRAGMA journal_mode (never sets it) after the header/schema reads on both the pre-check and the EXCLUSIVE re-check, so an externally converted WAL file is refused before any write on both fresh open and reused handles (test_changed_journal_mode_is_refused_without_conversion verifies bytes and mode unchanged). Empty transactions in __init__ for already-owned files do not open a rollback journal, so concurrent reopen leaves bytes identical (test_concurrent_setup_preserves_owned_delete_database).",
+      "Minor test weakness (not a defect): contend(reader=True) treats 'COMMIT' as a boundary. recover_one runs a read-only transaction first, whose COMMIT fires the trace, so in test_recovery_samples_time_after_contended_write_lock[True] the clock is advanced and the holder released before the write phase; the write phase never actually contends. The assertion still holds, the writer variant and test_elapsed_transaction_work_rolls_back_attempt[recover_one] cover the intended path. Dropping 'COMMIT' from the reader boundaries would make the reader variant exercise the BEGIN EXCLUSIVE wait as named.",
+      "Both prior Fable timing hazards are addressed: test_cancellation_latches_guard_and_exception_exit_joins now cancels at at(2) matching the guard clock (no ClockError race with a committed heartbeat), and test_concurrent_completion_is_one_effect uses busy_timeout=3.",
+      "Documented contract is honest: the module docstring states the final fresh check is the logical linearization point under the exclusive lock, that COMMIT durability follows, and that scheduler/fsync stalls between the final check and commit/return are not bounded. No WAL claim is made; WAL operational limits are cited rather than implemented. FULL synchronous retained.",
+      "Fault-injection evidence retained: test_outbox_insert_failure_rolls_back_whole_completion injects a TEMP trigger on the completion connection after schema inspection and proves the trigger fired and that the error is a plain StoreError (not BriefSchemaError); test_silently_ignored_outbox_write_cannot_report_success covers RAISE(IGNORE) via the post-write relational effect assertion; persistent unknown triggers are still rejected by exact sqlite_master comparison.",
+      "Ruff: several lines exceed 100 chars (admit's queued-count check and INSERT column list, claim_one's SELECT, the recovery parametrize line). Only relevant if the project enables E501/isort beyond defaults; the prior verifier pass suggests it does not.",
+      "Operational note for A04: _live raises ClockError in claim_one/recover_one when any active attempt has updated_us > now, and claim_one's _forward compares against the admission intake timestamp, so a future-dated intake `now` blocks claims until then. Also, reading a foreign WAL-mode file (e.g. a Monitor DB) necessarily creates -wal/-shm side files and closing the last connection may checkpoint an existing hot WAL; this is SQLite's own recovery, not a schema mutation, and the store never writes to such files.",
+      "Scope confirmed within the three allowed files; no server/A04 wiring, no Monitor changes, no provider sends, no WAL conversion."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a02-repair-4793b688"
+}

@@ -1,6 +1,6 @@
 # OStag 开发执行记录
 
-本记录与 81195d9b 的已评审方案分开保存，规划文档中的 planned 是当时快照。当前 A01、M01 已完成本地验证并合入 integration；接续 A02、A03，会议功能整体尚未完成。
+本记录与 81195d9b 的已评审方案分开保存，规划文档中的 planned 是当时快照。当前 A01、M01、A02 已完成本地验证并合入 integration；接续 A03，会议功能整体尚未完成。
 
 ## 本轮执行范围
 
@@ -104,8 +104,27 @@ release_check、容器测试、飞书真实读写、生产 health/SSH、容量�
 M01从原候选清单拆出test_meeting_preflight.py，便于权限/预算案例维护；没有修改A01产品文件或依赖。两个本轮M01任务文件均归档，旧13任务保持哈希不变。当前接续A02→A03，A04才接通手工材料作业纵向链路。跨切片约束另见[实施衔接记录](IMPLEMENTATION-NOTES.md)。
 
 
-## A02 中间候选与新增阻塞（待修复）
+## A02 中间候选与新增阻塞（已关闭，过程保留）
 
 原生loop将 `ecf38249cf88d994b986cbb75182979eac4812b3` 合入本地integration；110项目标、1589项全量、Ruff与Fable第二轮均通过。Fable初审要求修复锁前取时间；主审另发现persistent trigger可静默跳过outbox，两者已修复。
 
 但主审随后用真实SQLite读事务复现新的超时提交：DELETE journal下，BEGIN IMMEDIATE后时钟仍有效，COMMIT却被读锁拖到deadline之后才成功。原验证进程已加载旧harness，未运行后来新增的门槛；Fable第二轮冻结输入也没有这个新发现。因此原生success不算A02完成。证据保留在coding-a02/parent-commit-reader-probe.json与parent-deadline-regressions-manual.stdout；追加独立osstack修复，完整3文件重审及读/写锁双门槛通过后才记录完成。
+
+
+## A02 已完成本地验证
+
+最终代码 `5b2abd5fd94f1cf1b051f330b1a543193b53a0ee`，3文件摘要 `7a9b75cc5eb151252bfd8831064ee5d295d2be875ed47e52da488f4cd825369f`。142项目标、1621项全量通过，11条既有警告，Ruff通过；全量22.02秒。真实Fable最终静态审查approved、blockers为空，覆盖完整3文件，而非只看增量。
+
+- A02-AC1：独立briefs领域库，application_id/schema1及可读区间明确；严格完整DDL检查，拒绝不兼容schema和未支持日志模式；Monitor schema未改。
+- A02-AC2：受理/入队原子、私有目的地固定；global单租约、30秒租期/10秒心跳、fence与首次claim的原始deadline跨恢复保持。草稿/revision/outbox/终态同事务完成，取消使待投递意图失效。
+- A02-AC3：队列上限20、至多3次attempt、重复投递/并发完成/锁忙/崩溃/旧fence/非法状态有负例。独占事务将读写锁等待移到时钟检查之前；提交前再查原租约/时限，续租不能用自己的临时延长掩盖事务中原租约过期。
+
+父级真实时钟门槛中的writer与reader_commit均返回LeaseLost、保持generating且无outbox；此前读锁场景会超时成功。修复保留DELETE日志与FULL同步；逻辑接收点是独占锁内的最后新鲜检查，不能承诺任意调度/fsync停顿下物理COMMIT或函数返回早于deadline。没有引入WAL迁移。
+
+并发建库测试又发现多次schema读取可能混合两个提交快照，已用一次只读事务预检修复。Fable非阻塞指出reader recovery参数案例的COMMIT trace会过早释放读锁；该分支另有writer竞争和事务中到期案例覆盖，原样记录，不把这一个案例夸称完整读锁恢复证据。真实reader完成失败的无mock测试和父级门槛均通过。
+
+builder沙箱全量曾因本地.venv路径/缓存权限失败；外部固定验证器在同一候选完成上述1621项，不混用结果。
+
+[最终Fable回执](reviews/a02-fable-round-1.json) · [读写锁门槛](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair/parent-deadline-regressions-1789353931739637000.stdout) · [完整A02修复记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a02-repair)
+
+A02两个任务已归档，旧13任务未变。接续A03；当前尚无生成模型、来源采集、worker服务接线或实际消息投递。
