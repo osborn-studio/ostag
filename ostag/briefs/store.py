@@ -34,8 +34,8 @@ be reconciled through the scoped durable job/outbox, never blindly republished.
 
 Only the default DELETE journal mode is supported; it is checked without setting
 or converting journal mode, including on reused handles under the transaction
-lock. FULL synchronous durability is explicit. Existing owned DELETE databases
-need no migration; foreign/future/partial schemas are refused before writes.
+lock. FULL synchronous durability is explicit. Owned schema1 DELETE databases
+migrate additively to schema2; foreign/future/partial schemas are refused before writes.
 The tradeoff is that writes also exclude readers; lock waits use busy_timeout,
 but transaction execution and fsync duration are not bounded by that timeout.
 Use a filesystem with working SQLite locks and durability. No WAL is enabled:
@@ -66,9 +66,9 @@ from ostag.briefs.models import (
 )
 from ostag.core.identity import Principal
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 READABLE_SCHEMA_MIN = 1
-READABLE_SCHEMA_MAX = 1
+READABLE_SCHEMA_MAX = 2
 APPLICATION_ID = 0x42524653  # BRFS; deliberately different from unmarked Monitor SQLite.
 MAX_JSON_BYTES = 1024 * 1024
 MAX_QUEUED = 20
@@ -372,6 +372,145 @@ class RecoveryValidity:
         return self.grant_current and self.snapshot_fresh and self.sources_available
 
 
+# A03's fifth file is this A02-owned durable extension, intentionally additive.
+# Money is exact micro-USD, bounded per evidence item; totals use Python integers
+# to avoid SQLite SUM overflow. Admission is an estimate, never a billing limit.
+MAX_COST_INTEGER = 10**12
+
+
+class BudgetDenied(Conflict):
+    """No new provider IO: job/day/call capacity or charged-day check failed."""
+
+
+def _cost_int(value: object, field: str, maximum: int = MAX_COST_INTEGER,
+              minimum: int = 0) -> int:
+    if type(value) is not int or not minimum <= value <= maximum:
+        raise _invalid(f"{field} must be an exact integer in [{minimum}, {maximum}]")
+    return value
+
+
+def _hash(value: object, field: str) -> str:
+    if (type(value) is not str or len(value) != 64
+            or any(c not in "0123456789abcdef" for c in value)):
+        raise _invalid(f"{field} must be lowercase SHA256")
+    return value
+
+
+@dataclass(frozen=True)
+class Usage:
+    """Trusted transport/reconciliation evidence; never model-authored JSON.
+
+    cost_micros is observed billable cost, including any provider-side overhead.
+    Missing evidence is represented by absent Usage, never synthetic zero usage.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cost_micros: int
+
+    def __post_init__(self):
+        for field in ("input_tokens", "output_tokens", "cost_micros"):
+            _cost_int(getattr(self, field), field)
+
+    def to_dict(self):
+        return {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
+                "cost_micros": self.cost_micros}
+
+    @classmethod
+    def from_dict(cls, payload):
+        from ostag.briefs.models import _keys
+        return cls(**_keys(payload, ("input_tokens", "output_tokens", "cost_micros")))
+
+
+@dataclass(frozen=True)
+class CostProfile:
+    """Trusted first-use job pin. A03 derives the reservation from pricing bounds.
+
+    parameters_json freezes the full versioned evaluation profile, not a config
+    alias. This store primitive cannot audit provider tokenization/pricing; A04
+    must supply an adapter whose bound includes every provider-billed input token.
+    """
+
+    parameters_json: str
+    evaluation_key: str
+    max_job_micros: int
+    max_calls: int
+    reservation_micros: int
+
+    def __post_init__(self):
+        _hash(self.evaluation_key, "evaluation_key")
+        _cost_int(self.max_job_micros, "max_job_micros", minimum=1)
+        _cost_int(self.max_calls, "max_calls", 3, 1)
+        _cost_int(self.reservation_micros, "reservation_micros", minimum=1)
+        if self.reservation_micros > self.max_job_micros:
+            raise _invalid("maximum call reservation exceeds job cap")
+        if type(self.parameters_json) is not str or len(self.parameters_json) > 16384:
+            raise _invalid("bounded canonical parameters required")
+        try:
+            if _canonical(json.loads(self.parameters_json)) != self.parameters_json:
+                raise _invalid("parameters must be canonical JSON")
+        except (ValueError, RecursionError) as exc:
+            raise _invalid("parameters must be canonical JSON") from exc
+
+    @property
+    def profile_json(self):
+        return _canonical({"parameters_json": self.parameters_json,
+                           "evaluation_key": self.evaluation_key,
+                           "max_job_micros": self.max_job_micros, "max_calls": self.max_calls,
+                           "reservation_micros": self.reservation_micros})
+
+
+@dataclass(frozen=True)
+class CostReservation:
+    reservation_id: str
+    job_id: str
+    call_id: str
+    charged_day: str
+    state: str
+    reserved_micros: int
+    charged_micros: int
+    usage: Usage | None
+    diagnostic: str
+    config_hash: str
+
+    def __post_init__(self):
+        for field in ("reservation_id", "job_id", "call_id", "diagnostic"):
+            _identifier(getattr(self, field), field)
+        _hash(self.config_hash, "config_hash")
+        if type(self.charged_day) is not str or len(self.charged_day) != 10:
+            raise _invalid("charged_day must be a UTC calendar date")
+        _utc(self.charged_day + "T00:00:00Z", "charged_day")
+        _cost_int(self.reserved_micros, "reserved_micros", minimum=1)
+        _cost_int(self.charged_micros, "charged_micros")
+        if type(self.state) is not str or self.state not in (
+            "reserved", "started", "unknown", "settled", "released"
+        ):
+            raise _invalid("unknown cost reservation state")
+        if (self.state == "settled") != (type(self.usage) is Usage):
+            raise _invalid("only settled cost records contain exact Usage")
+        if self.usage is not None:
+            if type(self.usage) is not Usage:
+                raise _invalid("usage must be an explicit Usage")
+            self.usage.__post_init__()
+        expected = (0 if self.state == "released" else
+                    self.usage.cost_micros if self.usage else self.reserved_micros)
+        if self.charged_micros != expected:
+            raise _invalid("charge must retain the maximum until settled or proven unstarted")
+
+    @property
+    def overrun(self):
+        return self.usage is not None and self.usage.cost_micros > self.reserved_micros
+
+
+def _reservation(row: sqlite3.Row) -> CostReservation:
+    usage = None if row["usage_json"] is None else Usage.from_dict(json.loads(row["usage_json"]))
+    charge = (0 if row["state"] == "released" else
+              usage.cost_micros if usage is not None else row["reserved_micros"])
+    return CostReservation(row["reservation_id"], row["job_id"], row["call_id"],
+                           row["charged_day"], row["state"], row["reserved_micros"],
+                           charge, usage, row["diagnostic"], row["config_hash"])
+
+
 # Exact persistent schema definitions (including rejection of every unknown
 # trigger) let partially initialized or unexpectedly modified owned files fail
 # closed. Future migrations must add their prior readable schemas explicitly;
@@ -403,6 +542,24 @@ _SCHEMA = (
         destination TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','cancelled'))
     )""",
 )
+
+
+_COST_SCHEMA = (
+    """CREATE TABLE brief_cost_profiles (
+        job_id TEXT PRIMARY KEY REFERENCES brief_jobs(job_id), profile_json TEXT NOT NULL
+    )""",
+    """CREATE TABLE brief_cost_calls (
+        reservation_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES brief_cost_profiles(job_id),
+        call_id TEXT NOT NULL, fence INTEGER NOT NULL, owner_id TEXT NOT NULL,
+        charged_day TEXT NOT NULL, reserved_micros INTEGER NOT NULL CHECK(reserved_micros > 0),
+        state TEXT NOT NULL CHECK(state IN ('reserved','started','unknown','settled','released')),
+        usage_json TEXT, diagnostic TEXT NOT NULL, config_hash TEXT NOT NULL,
+        daily_limit_micros INTEGER NOT NULL, created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL,
+        UNIQUE(job_id, call_id)
+    )""",
+    "CREATE INDEX brief_cost_day ON brief_cost_calls(charged_day, job_id)",
+)
+_SCHEMAS = {1: _SCHEMA, 2: _SCHEMA + _COST_SCHEMA}
 
 
 def _normalized(sql: str) -> str:
@@ -472,9 +629,13 @@ class BriefStore:
             db.execute("BEGIN EXCLUSIVE")
             fresh = self._inspect(db, allow_empty=True)  # serialize competing initializers
             if fresh:
-                for statement in _SCHEMA:
+                for statement in _SCHEMAS[CURRENT_SCHEMA_VERSION]:
                     db.execute(statement)
                 db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+                db.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION}")
+            elif db.execute("PRAGMA user_version").fetchone()[0] == 1:
+                for statement in _COST_SCHEMA:
+                    db.execute(statement)
                 db.execute(f"PRAGMA user_version={CURRENT_SCHEMA_VERSION}")
             db.commit()
 
@@ -511,7 +672,7 @@ class BriefStore:
                                    f"[{READABLE_SCHEMA_MIN}, {READABLE_SCHEMA_MAX}]")
         actual = {_normalized(row["sql"]) for row in rows
                   if row["sql"] is not None}
-        if actual != {_normalized(sql) for sql in _SCHEMA}:
+        if actual != {_normalized(sql) for sql in _SCHEMAS[version]}:
             raise BriefSchemaError("partial or unexpected brief schema; refusing mutation")
         return False
 
@@ -836,6 +997,220 @@ class BriefStore:
             if self._live(db, stamp):
                 return None
             return self._claim(db, current, owner, stamp, clock)
+
+    @staticmethod
+    def _cost_schema(db: sqlite3.Connection) -> None:
+        if db.execute("PRAGMA user_version").fetchone()[0] != 2:
+            raise BriefSchemaError("cost operations require schema2; reopen for forward migration")
+
+    @staticmethod
+    def _cost_row(db: sqlite3.Connection, reservation_id: str) -> sqlite3.Row:
+        _identifier(reservation_id, "reservation_id")
+        row = db.execute("SELECT * FROM brief_cost_calls WHERE reservation_id=?",
+                         (reservation_id,)).fetchone()
+        if row is None:
+            raise Conflict("unknown cost reservation")
+        return row
+
+    @staticmethod
+    def _cost_clock(db: sqlite3.Connection, namespace: str, stamp: int) -> None:
+        if db.execute("SELECT 1 FROM brief_cost_calls c JOIN brief_jobs j ON j.job_id=c.job_id "
+                      "WHERE j.namespace=? AND c.updated_us>? LIMIT 1",
+                      (namespace, stamp)).fetchone():
+            raise ClockError("clock precedes namespace cost accounting observation")
+
+    @staticmethod
+    def _cost_capacity(db: sqlite3.Connection, job: sqlite3.Row, day: str,
+                       profile: CostProfile, daily_limit: int, additional: int,
+                       new_call: bool) -> None:
+        job_rows = db.execute("SELECT * FROM brief_cost_calls WHERE job_id=?",
+                              (job["job_id"],)).fetchall()
+        day_rows = db.execute(
+            "SELECT c.* FROM brief_cost_calls c JOIN brief_jobs j ON j.job_id=c.job_id "
+            "WHERE j.namespace=? AND c.charged_day=?", (job["namespace"], day)).fetchall()
+        # Python integer sums cannot overflow even across arbitrarily many jobs.
+        for rows, cap in ((job_rows, profile.max_job_micros), (day_rows, daily_limit)):
+            records = [_reservation(row) for row in rows]
+            if any(r.overrun for r in records) or sum(r.charged_micros for r in records) + additional > cap:
+                raise BudgetDenied("job or namespace UTC-day cost cap exhausted/overrun")
+        calls = sum(row["state"] != "released" for row in job_rows)
+        if calls + int(new_call) > profile.max_calls:
+            raise BudgetDenied("cumulative job model-call limit exhausted")
+
+    @staticmethod
+    def _cost_day_fence(clock: Callable[[], str], observed: int, day: str) -> None:
+        fresh = _clock_micros(clock)
+        if fresh < observed:
+            raise ClockError("cost clock moved backwards")
+        if _stamp(fresh)[:10] != day:
+            raise BudgetDenied("UTC day changed before cost admission/start committed")
+
+    @contextmanager
+    def _cost_attempt(self, lease: Lease, clock: Callable[[], str]):
+        # Apply the day fence to A02's LAST clock sample as well, rather than
+        # checking the day just before a later lease-only acceptance sample.
+        charged_day = None
+        def same_day_clock():
+            nonlocal charged_day
+            value = _stamp(_clock_micros(clock))
+            day = value[:10]
+            if charged_day is not None and charged_day != day:
+                raise BudgetDenied("UTC day changed at the final cost commit fence")
+            charged_day = day
+            return value
+        with self._attempt(lease, same_day_clock, states=("generating",)) as current:
+            yield current
+
+    def reserve_cost(self, lease: Lease, *, call_id: str, profile: CostProfile,
+                     daily_limit_micros: int, config_hash: str,
+                     clock: Callable[[], str] = utc_now) -> CostReservation:
+        """Reserve a conservative maximum before IO, bound to the stored namespace.
+
+        First use pins the entire profile for this JOB, across fences/configs and
+        restarts. The daily cap is a current trusted admission value, not a ledger
+        partition. A repeated call ID is a tombstone, including after release;
+        only start_cost's single successful transition permits a provider call.
+        """
+        _identifier(call_id, "call_id")
+        _hash(config_hash, "config_hash")
+        _cost_int(daily_limit_micros, "daily_limit_micros", minimum=1)
+        if type(profile) is not CostProfile:
+            raise _invalid("explicit immutable CostProfile required")
+        profile.__post_init__()
+        with self._cost_attempt(lease, clock) as (db, job, stamp):
+            self._cost_schema(db)
+            self._cost_clock(db, job["namespace"], stamp)
+            pinned = db.execute("SELECT profile_json FROM brief_cost_profiles WHERE job_id=?",
+                                (job["job_id"],)).fetchone()
+            if pinned is not None and pinned[0] != profile.profile_json:
+                raise Conflict("job already pins a different budget/evaluation profile")
+            day = _stamp(stamp)[:10]
+            existing = db.execute("SELECT * FROM brief_cost_calls WHERE job_id=? AND call_id=?",
+                                  (job["job_id"], call_id)).fetchone()
+            if existing is not None:
+                if existing["config_hash"] != config_hash:
+                    raise Conflict("logical call already pins a different config audit hash")
+                return _reservation(existing)
+            self._cost_capacity(db, job, day, profile, daily_limit_micros,
+                                profile.reservation_micros, True)
+            if pinned is None:
+                db.execute("INSERT INTO brief_cost_profiles VALUES (?,?)",
+                           (job["job_id"], profile.profile_json))
+            reservation_id = uuid4().hex
+            db.execute("INSERT INTO brief_cost_calls VALUES (?,?,?,?,?,?,?,'reserved',NULL,"
+                       "'reserved',?,?,?,?)", (reservation_id, job["job_id"], call_id,
+                       lease.fence, lease.worker.owner_id, day, profile.reservation_micros,
+                       config_hash, daily_limit_micros, stamp, stamp))
+            result = _reservation(self._cost_row(db, reservation_id))
+            self._cost_day_fence(clock, stamp, day)
+            return result
+
+    def start_cost(self, lease: Lease, reservation_id: str, *, daily_limit_micros: int,
+                   clock: Callable[[], str] = utc_now) -> CostReservation:
+        """At most one caller starts a logical call. Never start a prior-day reserve.
+
+        Admission is linearized under the EXCLUSIVE lock, with a final fresh day
+        and lease check. A04 must recheck current authorization AFTER this and any
+        other blocking admission/lease work, at the transport invocation boundary.
+        Arbitrary scheduling after return cannot be made atomic with remote IO;
+        adapters must also honor remaining time/cancellation and the charged day.
+        """
+        _cost_int(daily_limit_micros, "daily_limit_micros", minimum=1)
+        with self._cost_attempt(lease, clock) as (db, job, stamp):
+            self._cost_schema(db)
+            self._cost_clock(db, job["namespace"], stamp)
+            row = self._cost_row(db, reservation_id)
+            if (row["job_id"] != lease.job_id or row["fence"] != lease.fence
+                    or row["owner_id"] != lease.worker.owner_id or row["state"] != "reserved"):
+                raise Conflict("logical call already consumed or belongs to a different lease")
+            self._forward(row, stamp)
+            day = _stamp(stamp)[:10]
+            if row["charged_day"] != day:
+                raise BudgetDenied("reservation belongs to a previous UTC day; no IO")
+            profile = CostProfile(**json.loads(db.execute(
+                "SELECT profile_json FROM brief_cost_profiles WHERE job_id=?",
+                (lease.job_id,)).fetchone()[0]))
+            self._cost_capacity(db, job, day, profile, daily_limit_micros, 0, False)
+            db.execute("UPDATE brief_cost_calls SET state='started',diagnostic='started',"
+                       "daily_limit_micros=?,updated_us=? WHERE reservation_id=?",
+                       (daily_limit_micros, stamp, reservation_id))
+            result = _reservation(self._cost_row(db, reservation_id))
+            self._cost_day_fence(clock, stamp, day)
+            return result
+
+    def cost_record(self, scope: RequesterContext, job_id: str, call_id: str) -> CostReservation | None:
+        _identifier(call_id, "call_id")
+        with self._transaction(write=False) as db:
+            self._cost_schema(db)
+            if self._find(db, scope, job_id) is None:
+                return None
+            row = db.execute("SELECT * FROM brief_cost_calls WHERE job_id=? AND call_id=?",
+                             (job_id, call_id)).fetchone()
+            return None if row is None else _reservation(row)
+
+    def _cost_evidence(self, worker: WorkerContext, reservation_id: str, *, action: str,
+                       usage: Usage | None, diagnostic: str,
+                       clock: Callable[[], str]) -> CostReservation:
+        _worker(worker)
+        _identifier(diagnostic, "cost diagnostic")
+        with self._transaction() as db:
+            self._cost_schema(db)
+            stamp = _clock_micros(clock)
+            row = self._cost_row(db, reservation_id)
+            self._forward(row, stamp)
+            state, encoded = row["state"], row["usage_json"]
+            if action == "released":
+                if state not in ("reserved", "released"):
+                    raise Conflict("cannot release a possibly started call")
+            elif action == "settled":
+                if state not in ("started", "unknown", "settled"):
+                    raise Conflict("only a started call can have billable usage evidence")
+                encoded = _canonical(usage.to_dict())
+                if state == "settled" and encoded != row["usage_json"]:
+                    raise Conflict("contradictory repeated usage settlement")
+            elif state not in ("started", "unknown", "settled"):
+                raise Conflict("unknown outcome requires a started call")
+            # Reconciliation never refunds settled evidence or rewrites its first
+            # diagnostic on an identical settlement. Additional rejection reasons
+            # can be attached without changing known money/usage.
+            if action == state and (action != "unknown" or diagnostic == row["diagnostic"]):
+                return _reservation(row)
+            target = "settled" if state == "settled" else action
+            db.execute("UPDATE brief_cost_calls SET state=?,usage_json=?,diagnostic=?,updated_us=? "
+                       "WHERE reservation_id=?", (target, encoded, diagnostic, stamp, reservation_id))
+            result = _reservation(self._cost_row(db, reservation_id))
+            if _clock_micros(clock) < stamp:
+                raise ClockError("reconciliation clock moved backwards")
+            return result
+
+    def settle_cost(self, worker: WorkerContext, reservation_id: str, usage: Usage, *,
+                    clock: Callable[[], str] = utc_now) -> CostReservation:
+        """Bounded trusted reconciliation: one reservation, exact usage, once.
+
+        May record late provider evidence after cancel/lease loss, in its ORIGINAL
+        charged bucket. WorkerContext is an internal capability, not an endpoint
+        credential. A04 must verify evidence belongs to this reservation/provider
+        call. This never changes a job, authorizes IO or permits draft completion.
+        Contradictory settlement is rejected; an overrun is recorded without clamp
+        and blocks new calls for that job and charged namespace/day.
+        """
+        if type(usage) is not Usage:
+            raise _invalid("explicit trusted Usage required")
+        usage.__post_init__()
+        return self._cost_evidence(worker, reservation_id, action="settled", usage=usage,
+                                   diagnostic="settled", clock=clock)
+
+    def mark_cost_unknown(self, worker: WorkerContext, reservation_id: str, diagnostic: str, *,
+                          clock: Callable[[], str] = utc_now) -> CostReservation:
+        """Retain the maximum after timeout/cancel/missing usage; never auto-refund."""
+        return self._cost_evidence(worker, reservation_id, action="unknown", usage=None,
+                                   diagnostic=diagnostic, clock=clock)
+
+    def release_cost(self, worker: WorkerContext, reservation_id: str, *,
+                     clock: Callable[[], str] = utc_now) -> CostReservation:
+        """Release only proven unstarted IO, retaining the call ID tombstone."""
+        return self._cost_evidence(worker, reservation_id, action="released", usage=None,
+                                   diagnostic="precall_cancelled", clock=clock)
 
 
 class LeaseGuard:
