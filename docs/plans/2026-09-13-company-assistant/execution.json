@@ -1,52 +1,64 @@
 {
-  "scope": "A01 contracts verified locally; meeting feature and production not complete",
+  "scope": "Locally verified slices: A01, M01; meeting feature and production not complete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "c740aa250567e45546df3c97af6b9ceeb253b05e",
+  "code_commit": "07081c3891882b5cbfed0985a2cc6007d7f9568f",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "dec4ee344ec3eb9a0c7a704a1dae1860f6cf19b9ac69111ca79b110392fb1c2f",
+  "code_content_sha256": "5efc1bcac5d9487cc39f535fab6b2c23207213d86a16a03c3eee7cddc5ce1629",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
     "ostag/briefs/models.py": "328872e812cea5d3d3427573abbf17fd3fe1912bd7e78f98f2bc45e5f8aca5a5",
     "tests/test_brief_contracts.py": "5c7bbaa0879a4728d35d7bea8dc3b020dcbf4526e705acd917689e64d5a9966e",
-    "tests/test_brief_grants.py": "de7b40172b89727dc2a0138f01e1cf5830c435f5a1e2dfbeed925ec761144af5"
+    "tests/test_brief_grants.py": "de7b40172b89727dc2a0138f01e1cf5830c435f5a1e2dfbeed925ec761144af5",
+    "ostag/briefs/meeting_models.py": "3bf0bf02f89755ad8d26ec8d65ad487d569b64078b492d6dc07951880490cbd3",
+    "ostag/briefs/project_mapping.py": "d94003781fe166fd1139919ad10cc280cc6c12cc62fdebc9d1af1549c0bf12e2",
+    "tests/test_meeting_contracts.py": "0a40c3ab032847698bc8d2e8f8cc927eed8e8e9ac95e74865880b2c120be954c",
+    "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
     "P01": "controlled_osstack_execution_verified; general autonomous runner admission not completed",
     "A01": "verified_local",
     "remaining_product_tasks": "planned",
-    "M01": "repair_in_progress; initial candidate 1451 tests passed, 3 Fable blockers"
+    "M01": "verified_local"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
     "A01-AC2": "current trusted lookup and pinned revision intersect current scoped core permissions; expiry/revoke tested",
-    "A01-AC3": "frozen source IDs and typed fact/commitment/proposal claims; unknown provenance rejected"
+    "A01-AC3": "frozen source IDs and typed fact/commitment/proposal claims; unknown provenance rejected",
+    "M01-AC1": "scope/UTC/timezone/manifest/budget preflight, first-claim timing, bounded observed seal and fail-closed result table verified",
+    "M01-AC2": "current mapping/grant/core permission/egress/requester ACL intersection and stable provider identity drift tested",
+    "M01-AC3": "strict DST and namespace rejection, confirmation snapshot, public evaluation scoring/holdout custody frozen; private holdout not created/not_run"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 191,
-    "full_passed": 1312,
+    "target_passed": 167,
+    "full_passed": 1479,
     "warnings": 11,
-    "full_seconds": 21.41,
-    "ruff": "passed"
+    "full_seconds": 21.44,
+    "ruff": "passed",
+    "latest_slice": "M01"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 2,
+    "successful_reviews": 3,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
       "ostag/briefs/grants.py": "a01-fable-initial.json",
       "ostag/briefs/models.py": "a01-fable-timezone.json",
       "tests/test_brief_contracts.py": "a01-fable-timezone.json",
-      "tests/test_brief_grants.py": "a01-fable-initial.json"
+      "tests/test_brief_grants.py": "a01-fable-initial.json",
+      "ostag/briefs/meeting_models.py": "m01-fable-round-1.json",
+      "ostag/briefs/project_mapping.py": "m01-fable-round-1.json",
+      "tests/test_meeting_contracts.py": "m01-fable-round-1.json",
+      "tests/test_meeting_preflight.py": "m01-fable-round-1.json"
     },
-    "unresolved_blockers": 3
+    "unresolved_blockers": 0
   },
   "osstack": {
     "version": "0.19.0",
@@ -54,13 +66,15 @@
       "loop_986a8681-eecf-43ad-abee-96c8668a731b",
       "loop_a4150ebb-7e4f-40e7-a8a4-aef7f3c12137",
       "loop_748e7257-cd09-4b9a-b93c-748255390e37",
-      "loop_27a33854-35a9-43b6-a595-b3c700da9c76"
+      "loop_27a33854-35a9-43b6-a595-b3c700da9c76",
+      "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c"
     ],
     "outcomes": [
       "success",
       "escalated_due_to_review_format",
       "success",
-      "escalated; full review feedback truncated, controlled interruption"
+      "escalated; full review feedback truncated, controlled interruption",
+      "success"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -68,7 +82,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a01-timezone-review",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair"
     ]
   },
   "not_run": [
@@ -82,8 +97,71 @@
     "deployment"
   ],
   "next_tasks": [
-    "M01",
     "A02",
     "A03"
-  ]
+  ],
+  "slices": {
+    "A01": {
+      "code_commit": "c740aa250567e45546df3c97af6b9ceeb253b05e",
+      "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
+      "code_content_sha256": "dec4ee344ec3eb9a0c7a704a1dae1860f6cf19b9ac69111ca79b110392fb1c2f",
+      "tests": {
+        "python": "3.11.15",
+        "locked_all_extras": true,
+        "target_passed": 191,
+        "full_passed": 1312,
+        "warnings": 11,
+        "full_seconds": 21.41,
+        "ruff": "passed"
+      },
+      "review": {
+        "model": "claude-fable-5-1",
+        "mode": "static; tools disabled",
+        "successful_reviews": 2,
+        "invalid_format_calls": 2,
+        "coverage": {
+          "ostag/briefs/__init__.py": "a01-fable-initial.json",
+          "ostag/briefs/grants.py": "a01-fable-initial.json",
+          "ostag/briefs/models.py": "a01-fable-timezone.json",
+          "tests/test_brief_contracts.py": "a01-fable-timezone.json",
+          "tests/test_brief_grants.py": "a01-fable-initial.json"
+        },
+        "unresolved_blockers": 0
+      }
+    },
+    "M01": {
+      "status": "verified_local",
+      "code_commit": "07081c3891882b5cbfed0985a2cc6007d7f9568f",
+      "code_content_sha256": "2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a",
+      "files": [
+        "ostag/briefs/meeting_models.py",
+        "ostag/briefs/project_mapping.py",
+        "tests/test_meeting_contracts.py",
+        "tests/test_meeting_preflight.py"
+      ],
+      "target_tests": {
+        "passed": 167,
+        "warnings": 0,
+        "seconds": 0.27
+      },
+      "full_tests": {
+        "passed": 1479,
+        "warnings": 11,
+        "seconds": 21.44
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "m01-fable-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_c1e0cfed-6c54-4e93-a5fb-ff79ee67d80c",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair",
+      "prior_blocking_review": "m01-fable-initial-blockers.json",
+      "parent_smoke": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair/parent-smoke.json"
+    }
+  },
+  "latest_slice_content_sha256": "2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a"
 }

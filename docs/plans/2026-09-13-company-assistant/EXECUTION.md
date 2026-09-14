@@ -1,10 +1,10 @@
-# OStag 开发执行记录：A01
+# OStag 开发执行记录
 
-本记录与 81195d9b 的已评审方案分开保存，规划文档中的 planned 是当时快照。当前 A01 已完成本地验证并合入 integration；会议功能整体尚未完成。
+本记录与 81195d9b 的已评审方案分开保存，规划文档中的 planned 是当时快照。当前 A01、M01 已完成本地验证并合入 integration；接续 A02、A03，会议功能整体尚未完成。
 
 ## 本轮执行范围
 
-用户要求使用 osstack 编码。当前仅执行 A01：会议/简报公用的来源与最小授权契约；真实连接器、简报生成、持久化、界面及部署依后续任务推进。
+用户要求使用 osstack 编码。首次切片执行 A01：会议/简报公用的来源与最小授权契约；真实连接器、简报生成、持久化、界面及部署依后续任务推进。
 
 ## 已验证基线
 
@@ -39,7 +39,7 @@ Codex builder 指定原用户配置中的 gpt-6-astra/high，采用 workspace-wr
 release_check、容器测试、飞书真实读写、生产 health/SSH、容量与连接身份现场核查、生产部署。P00 中这部分可见性记录为 unknown/not_run，不作为生产放行证据。
 
 
-## 本轮已交付
+## A01 已交付
 
 代码提交 `c740aa250567e45546df3c97af6b9ceeb253b05e`，位于 `codex/ostag-company-integration`。5 个产品/测试文件的最终内容摘要为 `dec4ee344ec3eb9a0c7a704a1dae1860f6cf19b9ac69111ca79b110392fb1c2f`。
 
@@ -78,10 +78,27 @@ release_check、容器测试、飞书真实读写、生产 health/SSH、容量�
 规划 TASKS.md/backlog.json 保留为已评审的计划快照，不自动改作 osstack队列；实际进度以本文件与execution.json为准。A11/容器验收还须确认目标镜像的时区注册表非空、包含试点配置所选时区；本轮不把主机测试等同于容器验收。通用无人值守runner准入仍未完成；本轮证明的是用户授权下的受控本地开发闭环。真实连接、部署和发布继续执行原VALIDATION/DEPLOYMENT中的门槛。
 
 
-## M01 实施中：首次评审与修复
+## M01 首次评审与修复经过（已关闭）
 
 已先冻结 MEETING-EVALUATION.md（f471737）：18开发用例与6保留用例的责任、评分和门槛明确；私人保留输入尚未创建或运行。M01首版139项目标测试、1451项全量测试、Ruff通过，Fable真实静态评审要求修改3项：执行时限从受理而非首次claim计算；finished布尔值可放行超时结果；时区构造异常未统一转SchemaError。首版未合入integration。
 
-原生osstack只将截断的评审摘要传给第二轮builder，故保留代码后主动终止该轮。又发现原生runner在execute失败后仍启动verify，已停止该次验证及其未完成review；没有接受结果。原loop记录escalated。修复后的固定harness直接读取完整Fable回执，并要求最新builder成功回执与候选摘要匹配才允许verify。新修复任务从首次被评审候选逐字节恢复，使用首次claim作为时限起点，并重新走Codex→测试→Fable；当前尚未宣称M01完成。
+原生osstack只将截断的评审摘要传给第二轮builder，故保留代码后主动终止该轮。又发现原生runner在execute失败后仍启动verify，已停止该次验证及其未完成review；没有接受结果。原loop记录escalated。修复后的固定harness直接读取完整Fable回执，并要求最新builder成功回执与候选摘要匹配才允许verify。新修复任务从首次被评审候选逐字节恢复，使用首次claim作为时限起点，并重新走Codex→测试→Fable；这一轮当时尚未宣称M01完成；最终复审与完成证据见下一节。
 
 [首次Fable阻塞回执](reviews/m01-fable-initial-blockers.json) · [首次loop与中断记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01)
+
+
+## M01 已完成本地验证
+
+代码提交 `07081c3891882b5cbfed0985a2cc6007d7f9568f`，4文件最终摘要 `2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a`，已合入integration。167项目标测试、1479项全量测试通过，11条既有警告，Ruff通过；固定全量验证耗时21.44秒。真实 `claude-fable-5-1` 复审批准，3个阻塞问题逐项关闭；批准绑定同一候选摘要。
+
+- M01-AC1：固定目的/时区/半开窗口、群与仓库ID/分支/受众、全局预算及完整分区清单。预检仅估计最少调用，不等于采集完整。ExecutionTiming从可信首次claim开始，恢复不能换起点；采集封存与结果判断绑定该时限，超时只允许无私有内容的失败状态。
+- M01-AC2：每次受理重新解析映射、grant、核心propose权限、模型出网和逐资源请求者ACL；仓库ID、全名、选择分支与默认分支变更拒绝。新增仓库不自动扩大范围，人员只用明确映射，不猜显示名。
+- M01-AC3：严格日期/DST与跨租户负例；确认契约不构成授权或批准。评测规格及18/6保管/评分协议已冻结；私人holdout输入尚未创建或运行，不计成24场景验收。
+
+独立合成探针复验：12:00受理、12:04:10认领，对应12:07:10硬截止；截止前可判为草稿就绪，等号处返回failed/deadline_exceeded，旧fence不可提交；tzdata OSError转换为SchemaError。没有调用真实资料、生成模型或发送消息。
+
+复审非阻塞意见中的测试导入和100列格式，已由同一候选的pytest/Ruff实际验证。业务接线仍须在入队前拒绝needs_input，并使用存储中原始first claim重建ExecutionTiming；纯数据构造不证明当前授权。
+
+[最终Fable回执](reviews/m01-fable-round-1.json) · [合成探针](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair/parent-smoke.json) · [完整修复记录](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-m01-repair)
+
+M01从原候选清单拆出test_meeting_preflight.py，便于权限/预算案例维护；没有修改A01产品文件或依赖。两个本轮M01任务文件均归档，旧13任务保持哈希不变。当前接续A02→A03，A04才接通手工材料作业纵向链路。跨切片约束另见[实施衔接记录](IMPLEMENTATION-NOTES.md)。
