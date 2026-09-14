@@ -1,11 +1,11 @@
 {
-  "scope": "Locally verified A01/M01/A02/A03/A04 core and HTTP adapter plus U01 delivery core; full meeting product and production incomplete",
+  "scope": "Locally verified A01/M01/A02/A03/A04/U01 and A05 foundations; A05 initial card delivery, complete meeting product and production not complete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "ce66df0f68dc22ab57eb8ce8f982b4e801ed48ef",
+  "code_commit": "cee76573207385099e5b93e33c1fb142174a88eb",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "cd058fede2ad9766e7a005b261588d9b2d526883d1f9bf2961a9698382329c9d",
+  "code_content_sha256": "25d46fcf1b2ec7e7cfb3028a71e26bc418802577ce3e31c32a010f9dc42c4b84",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -33,7 +33,14 @@
     "tests/test_brief_openai_transport.py": "3c781a10837f6b710631e37be926355b1e48bdee47b232f19751cd3fdada06d1",
     "uv.lock": "f90cb6bdad729193f0242818167cebfa8e03ee021b4672854cbf2aeb3bae9a38",
     "ostag/briefs/delivery.py": "23428abed3f4ff26a145de14006108690a52980f7dee96a774e17639e3fd64d6",
-    "tests/test_brief_delivery_observation.py": "5ab1c2957db99f491f5d453d2cb5dad51e8657fc82d58416aada4353ce1a816a"
+    "tests/test_brief_delivery_observation.py": "5ab1c2957db99f491f5d453d2cb5dad51e8657fc82d58416aada4353ce1a816a",
+    "ostag/adapters/feishu.py": "cba8ce56b86bc4c6ebe6bdee511efdbf96038e68ec55b00b59e69af8ec56a618",
+    "ostag/briefs/callbacks.py": "43dbcf604a8aafd5be7f6ace6801ebfa0f9b3d8a8f12c056733eecc4c7860be1",
+    "ostag/briefs/feishu_transport.py": "62babb9669215ffae459a5dfed57e4618f93aaf6985c8f821cbd7394a2c0a118",
+    "ostag/briefs/rendering.py": "7e590c46d1300ab1eb959397b141825aaa8b2604fbdf05d6b322ab7ae20d4bbb",
+    "ostag/work_monitor/feishu_routes.py": "37375893e8fdcb3debe330beab2cd809a73e8ab7c604de2e6581f442fe87a08f",
+    "tests/test_brief_cards.py": "eab7141f3c921a8c8a3d51c435539f61b1894d1ccf773da660be03eada9eec75",
+    "tests/test_brief_feishu_transport.py": "541864ae0cecec3b591dc1098ef14381cd98d7b99b0df4576801c03ac035c08a"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -45,7 +52,8 @@
     "A03": "verified_local",
     "A04": "service/worker and HTTP adapter verified locally; real provider/platform acceptance open",
     "A04-provider": "verified_local; live account/provider/semantic certification not_run",
-    "U01": "verified_local core; actual Feishu adapter and platform acceptance not_run"
+    "U01": "verified_local core; actual Feishu adapter and platform acceptance not_run",
+    "A05-core": "verified_local foundations; initial versioned card delivery and real device/platform acceptance remain open"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -59,22 +67,25 @@
     "A04-AC3": "Per-source current grant/resource/collection identity/ACL/destination checks at IO and atomic precommit; durable event dedupe, original timing, conservative unknown spend, immutable causes and scoped reconciliation verified locally.",
     "U01-AC1": "Local stable delivery/revision/private binding and exact not-started replay tested",
     "U01-AC2": "Exact-ID/full-body proof tested; fully lost response without trusted ID stays unknown and cannot auto-recover",
-    "U01-AC3": "Durable restart/phase separation/bounded observations locally tested; platform/human receipt not certified"
+    "U01-AC3": "Durable restart/phase separation/bounded observations locally tested; platform/human receipt not certified",
+    "A05-AC1": "Local original private preview, bounded pages, sources and next step verified; automatic initial card delivery and mobile/desktop platform acceptance pending",
+    "A05-AC2": "Local signed HTTP route, identity/revision/expiry binding, durable single-use claim and concurrent/restart regressions verified",
+    "A05-AC3": "Local group status privacy and provider_accepted != human received verified; live Feishu certification pending"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 122,
-    "full_passed": 2225,
+    "target_passed": 88,
+    "full_passed": 2313,
     "warnings": 11,
-    "full_seconds": 68.14,
+    "full_seconds": 61.27,
     "ruff": "passed",
-    "latest_slice": "U01"
+    "latest_slice": "A05-core"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 8,
+    "successful_reviews": 9,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -103,7 +114,14 @@
       "tests/test_brief_openai_transport.py": "a04-provider-fable-round-1.json",
       "uv.lock": "a04-provider-fable-round-1.json",
       "ostag/briefs/delivery.py": "u01-fable-round-3.json",
-      "tests/test_brief_delivery_observation.py": "u01-fable-round-3.json"
+      "tests/test_brief_delivery_observation.py": "u01-fable-round-3.json",
+      "ostag/adapters/feishu.py": "a05-core-fable-round-1.json",
+      "ostag/briefs/callbacks.py": "a05-core-fable-round-1.json",
+      "ostag/briefs/feishu_transport.py": "a05-core-fable-round-1.json",
+      "ostag/briefs/rendering.py": "a05-core-fable-round-1.json",
+      "ostag/work_monitor/feishu_routes.py": "a05-core-fable-round-1.json",
+      "tests/test_brief_cards.py": "a05-core-fable-round-1.json",
+      "tests/test_brief_feishu_transport.py": "a05-core-fable-round-1.json"
     },
     "unresolved_blockers": 0
   },
@@ -126,7 +144,8 @@
       "loop_37351b29-72aa-4f9c-bcdc-6298ef8e3484",
       "loop_d30cf801-ab36-442f-8fc0-b3c6d4c6c498",
       "loop_3885094a-6032-4531-ad3f-6aca9304c445",
-      "loop_f27ef045-1f2c-4e35-a04b-7c43fb4bee4e"
+      "loop_f27ef045-1f2c-4e35-a04b-7c43fb4bee4e",
+      "loop_9003bbe8-3ba8-41df-bafe-644e49c94c86"
     ],
     "outcomes": [
       "success",
@@ -145,6 +164,7 @@
       "success",
       "escalated",
       "escalated",
+      "success",
       "success"
     ],
     "replayed_candidate_unchanged": true,
@@ -166,7 +186,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a04-provider-final",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-review",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-final"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-final",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05"
     ]
   },
   "not_run": [
@@ -183,9 +204,12 @@
     "D01 dual-identity/mobile platform acceptance",
     "production readonly generation adapter live certification",
     "live API credential/account/tariff/count-endpoint billing acceptance",
-    "U01 actual Feishu HTTP transport and exact-ID platform proof",
     "human read/received confirmation",
-    "U01 schema4 production migration and rollback rehearsal"
+    "U01 schema4 production migration and rollback rehearsal",
+    "A05 initial versioned private card outbox and auto-delivery lifecycle",
+    "A05 real Feishu create/get and sender identity certification",
+    "A05 real mobile/desktop card acceptance",
+    "A05 default-disabled server composition and trusted credential/grant/source mirrors"
   ],
   "next_tasks": [
     "A05"
@@ -763,15 +787,57 @@
         "secret_hygiene_tests_passed": 4,
         "receipt": "u01-document-validation.json"
       }
+    },
+    "A05-core": {
+      "status": "verified_local foundations; initial versioned card delivery and real device/platform acceptance remain open",
+      "code_commit": "cee76573207385099e5b93e33c1fb142174a88eb",
+      "code_content_sha256": "e96465bb7d7e3eed22f34010bde19d5d3cba1b0e10d648bc0c3ff338ee4c1b17",
+      "files": [
+        "ostag/adapters/feishu.py",
+        "ostag/briefs/callbacks.py",
+        "ostag/briefs/feishu_transport.py",
+        "ostag/briefs/rendering.py",
+        "ostag/work_monitor/feishu_routes.py",
+        "tests/test_brief_cards.py",
+        "tests/test_brief_feishu_transport.py"
+      ],
+      "target_tests": {
+        "passed": 88,
+        "warnings": 1,
+        "seconds": 1.75
+      },
+      "full_tests": {
+        "passed": 2313,
+        "warnings": 11,
+        "seconds": 61.27
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "a05-core-fable-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_9003bbe8-3ba8-41df-bafe-644e49c94c86",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05",
+      "scope": "Private paginated rendering, durable one-use read-only callbacks, explicit adapter/router injection, actual HTTPX U01 TEXT transport; no automatic card sends or server composition defaults",
+      "parent_gates": "12 passed: previous 11 plus actual A04 stored revision -> A05 preview, late source revocation and spent-token preservation",
+      "live_io": "not_run; HTTPX MockTransport and real HTTP stack with mock network only",
+      "ac_status": {
+        "A05-AC1": "Local original private preview, bounded pages, sources and next step verified; automatic initial card delivery and mobile/desktop platform acceptance pending",
+        "A05-AC2": "Local signed HTTP route, identity/revision/expiry binding, durable single-use claim and concurrent/restart regressions verified",
+        "A05-AC3": "Local group status privacy and provider_accepted != human received verified; live Feishu certification pending"
+      }
     }
   },
-  "latest_slice_content_sha256": "ac08e38f82556723e287e1d6be3d77791341e955f7a71fc4933abee144fc5ebe",
+  "latest_slice_content_sha256": "e96465bb7d7e3eed22f34010bde19d5d3cba1b0e10d648bc0c3ff338ee4c1b17",
   "pending_findings": [],
-  "checkpoint": "U01 delivery core locally verified; next A05 Feishu cards and real adapter binding",
+  "checkpoint": "A05 interaction/HTTP foundations locally verified; finish versioned initial card delivery and runtime composition before pilot",
   "next_task_details": {
-    "A05": "Implement private task cards, trusted Feishu transport mapping and actor/destination/revision/expiry-bound callbacks; certify exact provider ID/body/binding before live acceptance.",
-    "A11": "Wire feature flags, runtime lifecycle and owned-loop configuration before any real pilot.",
-    "D01": "Separate real provider/Feishu identity, network, billing, platform delivery and semantic acceptance from synthetic local tests."
+    "A05": "Add separately versioned immutable card outbox, initial private card delivery and pagination/refresh token lifecycle; preserve U01 TEXT IDs/payloads and one-send custody. Validate with same-source integration and failure injection.",
+    "A11": "Wire explicit controller, trusted stored-revision loader, all-source authorization mirrors, credential/private-owner mirrors and owned delivery loop into default-disabled server lifecycle.",
+    "D01": "Real authorized Feishu test destination: create/get sender identity, actual card schema, desktop/mobile layout, revocation, platform acceptance and independent human/semantic evaluation."
   },
-  "updated_at_utc": "2026-09-14T14:43:39.961229+00:00"
+  "updated_at_utc": "2026-09-14T15:24:36.486410+00:00"
 }

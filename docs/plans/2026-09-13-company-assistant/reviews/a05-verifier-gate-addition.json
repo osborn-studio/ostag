@@ -1,0 +1,7 @@
+{
+  "reason": "Actual A04 generation -> stored revision -> A05 preview plus revoke during render must deny final release and retain spent token",
+  "before_sha256": "3d3fb7d9488ee0a8434795f69c5988eee350f53163c7d18152379eaa7ed10b90",
+  "after_sha256": "f8689fa7647e5af90a8ac04108e9afbd7c2d95955fc7902b4187fff7502eaa97",
+  "timing": "builder running; verifier subprocess has not launched; first verify reads amended file",
+  "probe_sha256": "812ef3b90affa25e5e60ccde41b504592687e8c0f183e7f8a0ccc48a69f739e2"
+}
