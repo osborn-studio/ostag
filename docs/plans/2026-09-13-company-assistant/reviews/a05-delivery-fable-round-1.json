@@ -1,0 +1,62 @@
+{
+  "candidate_sha256": "2142a64451e923d250b33fea3e28a9dbf65d3ccb6798943ddb23a235964de6a8",
+  "base": "4dec1ff86b8011977429d741a975eb82bedc0c24",
+  "files": [
+    "ostag/adapters/feishu.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/card_transport.py",
+    "ostag/briefs/rendering.py",
+    "ostag/work_monitor/feishu_routes.py",
+    "tests/test_brief_card_delivery.py",
+    "tests/test_brief_card_navigation.py",
+    "tests/test_brief_card_transport.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 73213,
+      "outputTokens": 20,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.073313,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 45512,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 97385,
+      "webSearchRequests": 0,
+      "costUSD": 4.22332,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 43663,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Plaintext live callback tokens are persisted in cards.card_json and cards.response_card (required for byte-exact re-prepare and exact response card), unlike the legacy digest-only CallbackLedger. Any reader of the ledger file (or CardLedger.frozen caller with scope) holds usable capabilities until epoch rotation/expiry; frozen() is documented trusted-only but not otherwise fenced.",
+      "CardLedger.begin: if the final _clock_live (deadline/stop/rollback) fails after the policy passed, it COMMITS a permanent 'started' row without returning custody or performing IO. Fail-closed against resend, but a deadline expiring at that instant silently makes the card undeliverable forever with no diagnostic. test_expiry_during_begin_final_check_cannot_reopen_after_restart accepts either outcome.",
+      "CardTransport._exchange discards gate_error and raises a fixed CardTransportError, including when before_egress raised asyncio.CancelledError (U01 feishu_transport re-raises the exact gate exception). Harmless for activation because the parent has already abandoned the task, but the child task ends as a plain exception rather than cancelled.",
+      "Navigation tokens (initial and every replacement) inherit the prepare-time cards.expires; an ACK late in the TTL leaves little navigation time, and this slice provides no explicit re-issue path for an acknowledged card after expiry (spec says 'explicit fresh authorized preview flow'; only the legacy br_ controller exists).",
+      "_navigate calls the loader/authorize mirrors and renders the page (two full render_private passes over the entire draft) while holding the SQLite write lock (BEGIN IMMEDIATE). With large previews (tests use 40x900-char gaps) this can hold the lock for hundreds of ms, causing concurrent deliveries/callbacks in other processes to spin/fail on _Busy. Same-service multi-thread callbacks fail closed via the non-blocking _lock; _last_time is not thread-safe (benign).",
+      "Several _SCHEMA string lines exceed 100 columns; if the repo's Ruff config enables E501 with line-length <=100 the lint gate will fail (not in Ruff defaults).",
+      "test_two_processes_prepare_send_exactly_one uses multiprocessing 'fork' inside pytest on macOS; Python 3.12 emits DeprecationWarning when threads exist. If the suite runs with filterwarnings=error this test will fail; otherwise fine.",
+      "ledger.unknown after stop/deadline intentionally uses the raw service clock (bypassing the stop latch) so the unknown/first_failure marker is still durably written; highwater rollback checks still apply.",
+      "Acknowledge rejects a correct provider response that arrives after cards.expires (conservative unknown, no resend). Documented behaviour, but operators should expect legitimate late ACKs to be recorded as unknown.",
+      "Verification is static only; I did not run the test suite, Ruff, or any Fable/host gates."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a05-delivery-a21c966b",
+  "source_metadata_sha256": "67e9716b81d750714bb904598d903458ee10c2520174f17e618aa3972f1980d9"
+}
