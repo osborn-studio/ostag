@@ -38,6 +38,7 @@ def create_feishu_card_router(
     *,
     copilot: object | Callable[[], object | None] | None = None,
     briefs: object | None = None,
+    brief_cards: object | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -80,6 +81,25 @@ def create_feishu_card_router(
         value = verified.payload["event"]["action"]["value"]
         if set(value) != {"callback_id"} or not isinstance(value["callback_id"], str):
             return failure_card("操作无效")
+        if value['callback_id'].startswith('bc_'):
+            from ostag.briefs.card_delivery import CardDeliveryService
+
+            try:
+                if type(brief_cards) is not CardDeliveryService:
+                    raise ValueError('unavailable')
+                header, event = verified.payload['header'], verified.payload['event']
+                tenant = header.get('tenant_key')
+                if (type(tenant) is not str or not tenant
+                        or event['operator'].get('tenant_key', tenant) != tenant):
+                    raise ValueError('unavailable')
+                card = brief_cards.handle_callback(value['callback_id'],
+                    principal=verified.principal, destination=verified.destination,
+                    tenant_id=tenant, app_id=header['app_id'],
+                    message_id=event['context'].get('open_message_id'))
+                return {'card': raw_card(card)}
+            except Exception:
+                # Inert/spent/unknown/disabled card-v1 capabilities never fall through.
+                return {'toast': {'type': 'error', 'content': 'Brief card unavailable'}}
         if value['callback_id'].startswith('br_'):
             # FeishuCardSecurity is the mandatory authentication boundary. Never
             # use action-supplied actor, tenant, chat, revision or message fields.

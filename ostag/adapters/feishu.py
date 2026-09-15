@@ -20,10 +20,11 @@ class FeishuAdapter:
     platform = "feishu"
 
     def __init__(self, config: Settings, *, runner: Any | None = None,
-                 brief_controller: Any | None = None):
+                 brief_controller: Any | None = None, brief_card_service: Any | None = None):
         self.config = config
         self.runner = runner
         self._brief_controller = brief_controller
+        self._brief_card_service = brief_card_service
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client: Any | None = None
         self._inflight: set[Any] = set()
@@ -35,7 +36,7 @@ class FeishuAdapter:
     def prepare_brief_preview(self, scope, job_id: str, revision_id: str, *, page: int = 0):
         """Opt-in local preparation only; never send/reply via legacy transports.
 
-        Initial card delivery is unimplemented pending its own versioned outbox.
+        Initial card delivery uses the separate opt-in deliver_brief_card entry.
         This separately authorized preview does not replace U01's frozen TEXT.
         """
         from ostag.briefs.callbacks import BriefCallbackController, CallbackError
@@ -43,6 +44,14 @@ class FeishuAdapter:
         if type(self._brief_controller) is not BriefCallbackController:
             raise CallbackError('brief preview unavailable')
         return self._brief_controller.prepare_preview(scope, job_id, revision_id, page=page)
+
+    async def deliver_brief_card(self, scope, job_id: str, revision_id: str):
+        """Explicit card-v1 first delivery; no legacy send/reply or scheduler."""
+        from ostag.briefs.card_delivery import CardDeliveryService, CardDeliveryError
+
+        if type(self._brief_card_service) is not CardDeliveryService:
+            raise CardDeliveryError('brief card unavailable')
+        return await self._brief_card_service.deliver(scope, job_id, revision_id)
 
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))

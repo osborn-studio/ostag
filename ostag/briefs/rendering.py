@@ -10,7 +10,8 @@ client autolink behavior. Trusted SourceLink button URLs are the sole exception.
 Each page retains the deterministic review/coverage notice and gap count. Long
 strings are split visibly into numbered parts, including EVERY coverage gap.
 Pages are explicitly selected locally or by separately issued bound callbacks;
-there is no auto-send lifecycle, versioned card outbox, rollout or device proof.
+card_delivery owns the separate opt-in card-v1 outbox and delivery lifecycle.
+This pure renderer provides no scheduler, rollout or device proof.
 An oversized trusted URL is visibly omitted, never shortened to another URL;
 the source identifiers and review/coverage content remain available.
 """
@@ -79,6 +80,7 @@ class PrivatePreview:
     sources: SourceSet = field(repr=False)
     draft: ValidatedDraft = field(repr=False)
     state: str = 'draft_ready'
+    outbox_id: str | None = None
 
     def __post_init__(self):
         if (type(self.scope) is not RequesterContext or type(self.binding) is not FeishuBinding
@@ -130,7 +132,7 @@ class PrivatePreview:
             if draft.to_dict() != payload:
                 raise RenderError('invalid preview')
             result = cls(scope, outbox.revision.job_id, outbox.revision.revision_id,
-                         outbox.destination, binding, sources, draft, state)
+                         outbox.destination, binding, sources, draft, state, outbox.delivery_id)
         except Exception:
             pass
         if result is None:
@@ -225,3 +227,38 @@ def render_group_status(job_id: str, state: str):
     if type(job_id) is not str or len(job_id) > 128 or state not in _STATES:
         raise RenderError('invalid status')
     return {'elements': [_element('Task ' + defang(job_id)), _element(_STATES[state])]}
+
+
+@dataclass(frozen=True)
+class NavigationPage:
+    """Bounded page metadata; private card stays out of repr."""
+    page: int
+    pages: int
+    card: dict = field(repr=False)
+
+
+def render_navigation(preview: PrivatePreview, *, page=0, controls=None):
+    """card-v1 controls, preserving the legacy renderer and its fail-closed bounds.
+
+    The existing renderer determines pagination and defanging. Navigation replaces
+    its final local instruction with bounded opaque controls; URLs remain solely
+    trusted SourceLinks. No legacy br_ token is accepted here.
+    """
+    card = render_private(preview, page=page)
+    count = int(re.fullmatch(r'Page [0-9]+ of ([0-9]+)',
+                           card['elements'][2]['text']['content'])[1])
+    if count > 65536:
+        raise RenderError('invalid page')
+    expected = {'Refresh'} | ({'Previous'} if page else set()) | (
+        {'Next'} if page + 1 < count else set())
+    if controls is not None:
+        if (type(controls) is not dict or set(controls) != expected
+                or any(type(t) is not str or not re.fullmatch(r'bc_[A-Za-z0-9_-]{32}', t)
+                       for t in controls.values())):
+            raise RenderError('invalid callback')
+        card['elements'][-1] = {'tag': 'action', 'actions': [
+            {'tag': 'button', 'text': _plain(label), 'value': {'callback_id': controls[label]}}
+            for label in ('Previous', 'Refresh', 'Next') if label in controls]}
+    if _bytes(card) > MAX_CARD_BYTES or len(card['elements']) > 12:
+        raise RenderError('preview page exceeds bound')
+    return NavigationPage(page, count, card)
