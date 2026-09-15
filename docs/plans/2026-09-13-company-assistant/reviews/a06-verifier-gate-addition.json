@@ -1,0 +1,8 @@
+{
+  "time_ns": 1789484635643179000,
+  "before_sha256": "67ce11a16e1995de60c2cb51ec2666f8afa73e5257b59ce164964ca9bd1dc380",
+  "after_sha256": "75780cc9485ebee2759bb1211494c2907acdb84e6b24bb228e75dfbcfe150252",
+  "timing": "builder executing; verify process not yet launched",
+  "new_gate": "parent_revision_withdrawal.py",
+  "reason": "A06-AC3: bounded storage must preserve withdrawal for an admitted adoption"
+}

@@ -1,11 +1,11 @@
 {
-  "scope": "A01/M01/A02/A03/A04/U01 and A05 local first-card/navigation verified; full meeting product and deployment incomplete",
+  "scope": "A01/M01/A02/A03/A04/U01/A05 local delivery/navigation and A06 domain revisions verified; full meeting product and deployment incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "849fa69e91189a6541815ba1ce7af7393c1ae496",
+  "code_commit": "8ef7aa72f75de24178ce922b10143df44a0a6708",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "dcddede1717574c2e3c273a4c596761eb99e73fce6391c02efb543d85f39f662",
+  "code_content_sha256": "800fd070b7457b8101d8ffda619ac905bc3e52af2db61c3db20b9f4f87cea2b0",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -45,7 +45,9 @@
     "ostag/briefs/card_transport.py": "0f75435d96a5262cf7ace71570d72d5fa214bd3bc47e7761d27cd5fa9c8cddc1",
     "tests/test_brief_card_delivery.py": "dfbf9df0f76a919732fd93fe479ca0632cfb141b2fdcb14bedd066fc977f8d1d",
     "tests/test_brief_card_navigation.py": "5b3f163cc9a898ddcd9e25bb54e84bd8c35ad1994f3013b570783ee3c4d428cb",
-    "tests/test_brief_card_transport.py": "1ed742cd8de5ec40299ef948fb57a43240ceca710ce66179100dd3818a65a2a4"
+    "tests/test_brief_card_transport.py": "1ed742cd8de5ec40299ef948fb57a43240ceca710ce66179100dd3818a65a2a4",
+    "ostag/briefs/revisions.py": "bdc83f8b7574b4da84dc2592d0df3e4f88a0b396afdd47ff4474a882bcb0a120",
+    "tests/test_brief_revisions.py": "6cb7ff712771d8d50e9b3b8791515789048a81e4da1ff744ea134444ccfd0a61"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -60,7 +62,8 @@
     "U01": "core and explicit TEXT HTTP adapter verified locally; live exact-ID platform proof not_run",
     "A05-core": "verified_local foundations; initial versioned card delivery and real device/platform acceptance remain open",
     "A05-delivery": "verified_local first-card delivery and navigation; real platform/device and A11 runtime composition not_run",
-    "A05": "local first-card and navigation implementation verified; real mobile/desktop acceptance pending"
+    "A05": "local first-card and navigation implementation verified; real mobile/desktop acceptance pending",
+    "A06": "verified_local domain/service API; signed correction/adoption buttons and A11 live composition not_run"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -77,22 +80,25 @@
     "U01-AC3": "Durable restart/phase separation/bounded observations locally tested; platform/human receipt not certified",
     "A05-AC1": "Original authorized private first-card delivery and bounded task/source/next-step pages tested locally; real mobile/desktop acceptance not_run",
     "A05-AC2": "Inert bootstrap activation only after owned ACK commit; signed identity/message/revision/digest/epoch/expiry callbacks and restart/concurrency verified locally",
-    "A05-AC3": "Unknown send never auto-resends or activates; group and exception privacy tested; create ACK is neither content verification nor human receipt"
+    "A05-AC3": "Unknown send never auto-resends or activates; group and exception privacy tested; create ACK is neither content verification nor human receipt",
+    "A06-AC1": "Local immutable new revision with parent, authenticated editor, timestamp and exact human annotation; original source facts remain frozen",
+    "A06-AC2": "Exact expected revision blocks stale original-card version at local API; historical replay cannot re-adopt; business_approved is always false. Signed adoption button composition remains A11",
+    "A06-AC3": "Human corrections and original draft visible separately across bounded pages; adoption retractable with reserved event/global capacity; revoked access fails closed"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 82,
-    "full_passed": 2395,
+    "target_passed": 103,
+    "full_passed": 2498,
     "warnings": 11,
-    "full_seconds": 56.48,
+    "full_seconds": 60.46,
     "ruff": "passed",
-    "latest_slice": "A05-delivery"
+    "latest_slice": "A06"
   },
   "review": {
     "model": "claude-fable-5-1",
     "mode": "static; tools disabled",
-    "successful_reviews": 10,
+    "successful_reviews": 11,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -133,7 +139,9 @@
       "ostag/briefs/card_transport.py": "a05-delivery-fable-round-1.json",
       "tests/test_brief_card_delivery.py": "a05-delivery-fable-round-1.json",
       "tests/test_brief_card_navigation.py": "a05-delivery-fable-round-1.json",
-      "tests/test_brief_card_transport.py": "a05-delivery-fable-round-1.json"
+      "tests/test_brief_card_transport.py": "a05-delivery-fable-round-1.json",
+      "ostag/briefs/revisions.py": "a06-fable-round-1.json",
+      "tests/test_brief_revisions.py": "a06-fable-round-1.json"
     },
     "unresolved_blockers": 0
   },
@@ -158,7 +166,8 @@
       "loop_3885094a-6032-4531-ad3f-6aca9304c445",
       "loop_f27ef045-1f2c-4e35-a04b-7c43fb4bee4e",
       "loop_9003bbe8-3ba8-41df-bafe-644e49c94c86",
-      "loop_ea2dab70-2c78-4aa6-9877-2636fbe18a07"
+      "loop_ea2dab70-2c78-4aa6-9877-2636fbe18a07",
+      "loop_504bb09b-ed08-4dbf-be44-d340672ed613"
     ],
     "outcomes": [
       "success",
@@ -177,6 +186,7 @@
       "success",
       "escalated",
       "escalated",
+      "success",
       "success",
       "success",
       "success"
@@ -202,7 +212,8 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-review",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-final",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05-delivery"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05-delivery",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a06"
     ]
   },
   "not_run": [
@@ -226,10 +237,12 @@
     "A05 real first-card create acknowledgement and mobile/desktop acceptance",
     "A11 automatic first-card dispatch and production lifespan integration",
     "A10 private card content retention/redaction without resetting permanent send tombstones",
-    "A05 explicit reissue/renewal of an acknowledged expired card preview"
+    "A05 explicit reissue/renewal of an acknowledged expired card preview",
+    "A06 authenticated signed correction/adoption/retraction card UI and end-to-end Feishu acceptance",
+    "A06 multi-user rendering/lock latency certification and retention/deletion integration"
   ],
   "next_tasks": [
-    "A06"
+    "A10"
   ],
   "slices": {
     "A01": {
@@ -890,17 +903,55 @@
         "Protect card ledger filesystem: frozen initial/response cards necessarily contain live callback capabilities"
       ],
       "next_runtime_dependency": "A11 requires A05/A06/A10; this slice exposes explicit deliver and callback methods without default scheduler/lifespan"
+    },
+    "A06": {
+      "status": "verified_local domain/service API; signed correction/adoption buttons and A11 live composition not_run",
+      "code_commit": "8ef7aa72f75de24178ce922b10143df44a0a6708",
+      "code_content_sha256": "ec22aa74799ab1881b9ef4e0f7680631dfaa0eb1b4743bdbfc90e1f68dc83f7b",
+      "files": [
+        "ostag/briefs/revisions.py",
+        "tests/test_brief_revisions.py"
+      ],
+      "target_tests": {
+        "passed": 103,
+        "warnings": 0,
+        "seconds": 0.78
+      },
+      "full_tests": {
+        "passed": 2498,
+        "warnings": 11,
+        "seconds": 60.46
+      },
+      "ruff": "passed",
+      "review_model": "claude-fable-5-1",
+      "review_mode": "static; tools disabled",
+      "review_receipts": [
+        "a06-fable-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_504bb09b-ed08-4dbf-be44-d340672ed613",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a06",
+      "scope": "Separate immutable human annotation chain and reversible revision-bound CONTENT adoption; original source/revision/outbox/card unchanged",
+      "parent_gates": "14 passed: prior 13 plus independent per-job/shared-capacity withdrawal probe",
+      "platform_evidence": "Actual local A04 outbox bridge and SQLite tests; no live Feishu buttons/messages or client acceptance",
+      "known_followups": [
+        "A11 must bind authenticated signed card action to server-stored exact revision; domain API is not an HTTP authentication boundary",
+        "A10 must include original snapshots, corrections, adoption history and card capabilities in retention/deletion",
+        "Synchronous exclusive SQLite transaction includes bounded full rendering and policy mirrors; provision dedicated execution and measure under multi-user load",
+        "Conservative withdrawal capacity reservation reduces usable capacity; no automatic pruning or ledger rotation",
+        "DELETE/FULL is not a power-loss durability guarantee; production gate must verify synchronization/filesystem policy across all ledgers"
+      ]
     }
   },
-  "latest_slice_content_sha256": "2142a64451e923d250b33fea3e28a9dbf65d3ccb6798943ddb23a235964de6a8",
+  "latest_slice_content_sha256": "ec22aa74799ab1881b9ef4e0f7680631dfaa0eb1b4743bdbfc90e1f68dc83f7b",
   "pending_findings": [],
-  "checkpoint": "A05 local delivery/navigation verified; next A06 corrections/adoption, A10 retention then A11 runtime integration",
+  "checkpoint": "A06 local revisions/adoption verified; next A10 retention/revocation, A05 recovery, then A11 runtime composition",
   "next_task_details": {
-    "A06": "Implement new revision with correction author/parent, revision-bound adoption/retraction and no implicit business approval.",
-    "A10": "Complete source revocation/deletion/retention and tombstone policy, including private card ledgers without reopening sent intent.",
+    "A10": "Implement source revocation/deletion/retention across generation, U01/card ledgers and A06 original/correction/adoption records; preserve non-revivable send tombstones.",
     "A05-refresh": "Before A11, add explicit authorized re-preview of acknowledged expired cards without resending original delivery; account for retained capabilities and render-lock contention.",
-    "A11": "After A06/A10, wire disabled-by-default settings, owned workers/loops, trusted mirrors, callback route and first-card dispatch into real server lifecycle.",
+    "A11": "After A10 and A05 recovery, compose opt-in owned workers, source/identity/authorization mirrors, signed revision-bound correction/adoption/retraction and delivery into server lifecycle.",
     "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct."
   },
-  "updated_at_utc": "2026-09-15T01:32:36.944047+00:00"
+  "updated_at_utc": "2026-09-15T15:24:57.423839+00:00"
 }

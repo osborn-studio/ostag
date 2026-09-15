@@ -1,0 +1,7 @@
+{
+  "time_ns": 1789484969818625000,
+  "timing": "iteration1 builder running; feedback is read on next execute",
+  "prior_prompt_sha256": "7998ce77367b7c2af75b643e39c6450b19c9356bb35597c55785b620bf91d972",
+  "prompt_sha256": "5820e7b9e760e32be266048be3c6864d1ee6d420ee2667d5869b4b61872b3074",
+  "confirmed": "withdrawal blocked by event limit after successful adoption"
+}

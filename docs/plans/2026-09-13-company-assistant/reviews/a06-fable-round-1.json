@@ -1,0 +1,57 @@
+{
+  "candidate_sha256": "ec22aa74799ab1881b9ef4e0f7680631dfaa0eb1b4743bdbfc90e1f68dc83f7b",
+  "base": "2c74e6cd52f84d0cdcd4d24f370d3e8c2e54233f",
+  "files": [
+    "ostag/briefs/revisions.py",
+    "tests/test_brief_revisions.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 35513,
+      "outputTokens": 17,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.035598000000000005,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 37035,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 48278,
+      "webSearchRequests": 0,
+      "costUSD": 2.81733,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 34974,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Verified paths (static): exact expected_revision_id required for correct/adopt/withdraw (no 'latest' default); replay is detected by (scope,job,request) BEFORE the head check and compares (operation, expected, text, section, item_id) exactly, returning the immutable stored event plus separately recomputed current state, so a replayed adopt after withdraw or after a new correction never re-adopts; UNIQUE(scope,job,parent) backs the CAS for one child per parent; new correction resets adopted_revision_id in _history; withdraw requires adopted==expected==head; RevisionState.business_approved is a constant False property. Final _fresh(scope,job,raw) + clock fence run after all SQL/rendering and before COMMIT; failure rolls back via connection close.",
+      "Reads and renders are writes: every operation (including read/render and replays) takes BEGIN EXCLUSIVE, requires clock >= highwater and updates revision_meta.highwater. Consequences: the ledger must be writable to read; any backward clock skew (or a slightly slower clock on a second instance sharing the file) blocks reads with RevisionClockError; and with the 50 ms busy timeout, a concurrent reader fails with RevisionStorageError whenever another operation (which holds the EXCLUSIVE lock through loader/authorize callbacks, full 1 MiB root revalidation in _snapshot, and full-page rendering) exceeds 50 ms. This is consistent with 'distinct operations exactly serialize' but is a real availability limit; A11 should expect and surface busy failures as retryable.",
+      "The two-connection tests (test_two_connections_serialize_head_and_deduplicate_event, test_distinct_adoptions_serialize_and_same_withdraw_deduplicates) only catch RevisionConflict; if the winning transaction (with synchronous=FULL fsyncs and quick_check) exceeds 50 ms on a slow disk, the loser raises RevisionStorageError and the test fails. Likely fine on an internal APFS SSD tmp_path, but flaky on slower storage.",
+      "test_lock_wait_then_revocation_is_seen_before_commit does not actually demonstrate a lock wait: the blocker is rolled back immediately after authorize fires (which happens in the pre-lock _fresh), so the worker usually never blocks on BEGIN EXCLUSIVE. It does prove the final precommit re-authorization sees revocation; the test name overclaims.",
+      "revision_roots declares `job TEXT NOT NULL UNIQUE` in addition to PRIMARY KEY(scope,job). This makes job IDs globally unique across namespaces/principals in the ledger: if BriefStore job IDs could ever collide across scopes, a second scope's legitimate register would fail with RevisionStorageError (IntegrityError) rather than succeed or be Denied, an existence oracle. With server-random job IDs this is negligible, but the constraint is undocumented and unnecessary given loader-based ownership.",
+      "_verify runs PRAGMA quick_check(1) plus full schema comparison on every operation (three to four times per call, inside and outside the transaction). Cost is O(file size); with up to MAX_ROWS roots of up to MAX_ROOT_BYTES each this can grow large. Row bounds are enforced; byte bounds are not.",
+      "Capacity reserve is conservative across multiple roots: correct/adopt reserve `roots` global rows, so with several registered roots and a tight capacity a root may never be able to adopt even when free rows exist. Documented as conservative; just be aware when choosing capacity.",
+      "Rendering differs from rendering.py in one respect: an oversized trusted SourceLink button (e.g. a 2000-char URL made of astral characters, ~12 bytes each under ensure_ascii) is not visibly omitted; the whole render raises RevisionLimit. Only trusted roots can trigger this, so it is fail-closed rather than unsafe.",
+      "Unexpected Python errors (e.g. TypeError from a missing keyword argument, RenderError from defang) are mapped to RevisionStorageError by _public. Hygienic, but the diagnostic is misleading for caller bugs; test_explicit_initialize_and_mutation_revision_are_required relies on this by catching the RevisionError base.",
+      "Unverifiable assumptions from imported test helpers (preview(text=...), preview(Coverage(...)), evidence/output/validate, Authority/BriefWorker, FeishuBinding.to_dict/bool-generation rejection, RequesterContext.__post_init__) are consistent with the quoted contracts but were not checked against their source. Ruff line-length config is unknown; several lines are ~103 chars, similar to existing rendering.py lines.",
+      "Doc contradiction to note for A11: the module says neither callback may do IO under the ledger lock, yet the loader is expected to be 'normally constructed from the A04 outbox' and is invoked inside the EXCLUSIVE transaction at precommit. Composition must supply a pre-materialized/local mirror or accept that BriefStore reads occur under this ledger's lock."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a06-revisions-57c09b31",
+  "source_metadata_sha256": "d2effe1db7b19d07aa047cd45cfdc939d41c8d8c614d11d41f5d3492c878b6c7"
+}
