@@ -68,7 +68,7 @@
     "A05-delivery": "verified_local first-card delivery and navigation; real platform/device and A11 runtime composition not_run",
     "A05": "local first-card and navigation implementation verified; real mobile/desktop acceptance pending",
     "A06": "verified_local domain/service API; signed correction/adoption buttons and A11 live composition not_run",
-    "A10": "candidate tests passed; canonical Fable5.1 quota exhausted; not integrated or deployed",
+    "A10": "candidate_blocked_not_integrated",
     "MONITOR-REPLAY": "verified_local; production pending"
   },
   "acceptance": {
@@ -156,7 +156,8 @@
     "unresolved_blockers": 0,
     "historical_models": [
       "claude-fable-5-1"
-    ]
+    ],
+    "pending_candidate_blockers": 1
   },
   "osstack": {
     "version": "0.19.0",
@@ -184,7 +185,9 @@
       "loop_78e2f729-446f-41c8-9ed3-1ae98a46f9e2",
       "loop_66408a74-4178-435a-8ad7-2c11203ac17a",
       "loop_7aca1ddf-6570-4417-98d4-1b9984fd0948",
-      "loop_07fb0f39-b4fd-405b-a267-3ec7dad519b4"
+      "loop_07fb0f39-b4fd-405b-a267-3ec7dad519b4",
+      "loop_a3b0c04f-2598-4892-ad12-7d06c8630a63",
+      "loop_0a15858e-6a15-4f31-9cc1-8c6a00354959"
     ],
     "outcomes": [
       "success",
@@ -210,7 +213,9 @@
       "escalated",
       "escalated",
       "escalated",
-      "success"
+      "success",
+      "escalated",
+      "escalated"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -238,7 +243,9 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay-repair"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay-repair",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus-review"
     ]
   },
   "not_run": [
@@ -271,7 +278,7 @@
     "A10 production retention/revocation lifecycle and cleanup scheduler"
   ],
   "next_tasks": [
-    "A10"
+    "A10-authority-ordering"
   ],
   "slices": {
     "A01": {
@@ -1023,8 +1030,11 @@
   "latest_slice_content_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
   "pending_findings": [
     {
-      "id": "A10-review-pending",
-      "reason": "Opus independent review hit weekly quota; no verdict. Read-only independent Codex reviewer working on exact actual Opus-built candidate."
+      "id": "A10-authority-ordering",
+      "priority": "P1",
+      "status": "blocks A10 integration",
+      "source": "reviews/a10-codex-round-1.json",
+      "reason": "[P1] Recheck original current authority after the new blocking retention gate. BriefCallbackController._current calls _authorize(p) and then check_guard. The same ordering occurs in CardDeliveryService._current (card_delivery.py:643-646), RevisionService._fresh (revisions.py:469-473), DeliveryService._policy (delivery.py:464-480), and DeliveryService._retained_result (delivery.py:682-688). check_guard performs file identity reads plus a RetentionLedger BEGIN IMMEDIATE transaction and commit; it can wait for another connection for up to 50 ms before succeeding. It only revalidates retention authority, not the original source/grant/private-binding authority. Consequently a source grant can expire or its current mirror can be revoked during this deliberately introduced DB wait while retention remains authorized. The later checks cover retention expiry and operation/card time bounds, not the original grant; a private response, egress, ACK acceptance, or revision operation can then succeed using the stale original authorization. This contradicts A10 requirement 4 and the existing callback contract that the final source/grant/mapping check follows all DB waits and rendering. Generation already avoids this specific deadline gap by retaining and checking its source/grant bounds after retention IO. Arrange the bounded retention IO before the final nonblocking original-authority check, while preserving the final retention/time fence, or provide an equivalent combined validation that retains and checks all relevant bounds. Merely swapping two checks is not sufficient if the final original-authority callback introduces another wait or outlives the retained retention deadline: preserve its existing nonblocking mirror contract and define one coherent combined authorization fence for both authorities."
     },
     {
       "id": "monitor-ack-publication-lifecycle",
@@ -1041,17 +1051,18 @@
       }
     }
   ],
-  "checkpoint": "Opus5-coded monitor fix independently approved and integrated; Opus5 A10 candidate awaits Codex review after Claude429",
+  "checkpoint": "Opus5 monitor replay fix integrated; A10 Opus-built candidate blocked by independent Codex review; awaiting coding model choice after Claude weekly429",
   "next_task_details": {
     "A10": "Restore exact preserved portability candidate in native osstack; verify final hash and run real canonical Fable5.1 after quota recovers. Resolve findings, validate Ubuntu/Python3.11 runtime and only then integrate. No substitute approval.",
     "A05-refresh": "Before A11, add explicit authorized re-preview of acknowledged expired cards without resending original delivery; account for retained capabilities and render-lock contention.",
     "A11": "After A10 and A05 recovery, compose opt-in owned workers, source/identity/authorization mirrors, signed revision-bound correction/adoption/retraction and delivery into server lifecycle.",
-    "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct."
+    "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct.",
+    "A10-authority-ordering": "Repair combined original/retention authorization fence; add original grant expiry/revoke inside real retention DB wait regressions. Re-run targeted/full/parent/macOS/Linux checks and independent review before integration. See A10-AUTHORITY-FENCE.md."
   },
   "updated_at_utc": "2026-09-16T02:09:46.816758+00:00",
   "candidates": {
     "A10": {
-      "status": "Actual Opus5-built candidate; not integrated; independent Codex review pending after Opus weekly quota429",
+      "status": "blocked: independent Codex review requests changes; not integrated",
       "candidate_sha256": "5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360",
       "snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/snapshot-1789532813789323000",
       "builder_receipt": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/builder-1789532813789323000.receipt.json",
@@ -1072,7 +1083,9 @@
         "scope": "same candidate plus independently approved monitor replay repair; not evidence of A10 approval"
       },
       "failed_review_receipt": "reviews/a10-opus-unavailable.json",
-      "replacement_review": "independent Codex collaboration agent /root/a10_independent_review; read-only; actual Opus code unchanged"
+      "replacement_review": "Independent Codex static review completed; one grouped P1 authority-ordering blocker",
+      "review_receipt": "reviews/a10-codex-round-1.json",
+      "unresolved_blockers": 1
     }
   },
   "candidate_history": {
