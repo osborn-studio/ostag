@@ -1,0 +1,42 @@
+{
+  "status": "passed",
+  "expected_old_gap": false,
+  "results": [
+    {
+      "path": "registered_job",
+      "change": "source_acl",
+      "generation_authorized": false,
+      "retention_transaction_committed": true
+    },
+    {
+      "path": "registered_job",
+      "change": "grant_revoked",
+      "generation_authorized": false,
+      "retention_transaction_committed": true
+    },
+    {
+      "path": "registered_job",
+      "change": "private_destination",
+      "generation_authorized": false,
+      "retention_transaction_committed": true
+    },
+    {
+      "path": "intake",
+      "change": "source_acl",
+      "generation_authorized": false,
+      "retention_transaction_committed": true
+    },
+    {
+      "path": "intake",
+      "change": "grant_revoked",
+      "generation_authorized": false,
+      "retention_transaction_committed": true
+    },
+    {
+      "path": "intake",
+      "change": "private_destination",
+      "generation_authorized": false,
+      "retention_transaction_committed": true
+    }
+  ]
+}

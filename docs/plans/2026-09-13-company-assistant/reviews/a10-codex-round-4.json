@@ -1,0 +1,42 @@
+{
+  "candidate_sha256": "51707a4390814a396785c0204463c3acb227b6524cdc234aeec506e0df01d792",
+  "base": "a9360fbd2ae67e6931bc47c22bc4215e23c24b95",
+  "files": [
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/retention.py",
+    "ostag/briefs/revisions.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_retention.py",
+    "tests/test_brief_revocation.py"
+  ],
+  "reviewer": "independent actual Codex CLI",
+  "requested_model": "gpt-6-astra",
+  "events_file": "codex-review-1789565527572214000.stdout",
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/worker.py: checkpoint; ostag/briefs/openai_transport.py: OpenAIReadOnlyTransport.generate.post",
+        "issue": "[P1] A10 does not gate actual provider egress after connection waits. request.reauthorize() runs before client.send(), while the real HTTPX transport subsequently awaits connection acquisition, DNS and TLS. No retention check follows those waits before transmitting source content. The new connection test pauses __aenter__, which does not cover the real connection boundary.",
+        "reproduction": "Static reproduction, not executed: register a job expiring at t=10, enter the count request at t=9, and hold actual connection establishment until t=10 while remaining within the generation deadline. Without calling expire() or running cleanup, resume the connection. HTTPX sends the private count body without another retention check; the subsequent create checkpoint is too late to prevent that disclosure."
+      },
+      {
+        "file": "ostag/briefs/card_delivery.py: CardDeliveryService._execute.acceptance_policy",
+        "issue": "[P2] ACK credential verification still precedes the newly blocking retention check. acceptance_policy calls transport.check_ack() before policy(), whose _current() performs retention SQL. Credential rotation during that wait can therefore activate navigation tokens using an ACK that no longer passes the transport's required current credential-digest check. The original authorizer's binding-generation check does not replace this separate credential check.",
+        "reproduction": "Static reproduction, not executed: receive a valid CardCreateAck, let check_ack succeed, then hold the retention transaction during acknowledgement. Rotate the resolver's access token while keeping the same FeishuBinding and source permissions, then release the lock. The retention check and original authorizer succeed, so acknowledge commits create_acknowledged and activates tokens. Re-running check_ack with the current credential snapshot would reject that ACK."
+      }
+    ],
+    "notes": [
+      "Static review of supplied source only; no tools, tests, external models, or candidate-hash verification were run.",
+      "The prior cost-diagnostic redaction and late TEXT observation findings are addressed in this source.",
+      "Native Ubuntu validation remains unverified. Linux launch requires libc statx and filesystem STATX_BTIME support; A11 composition and remote-platform acceptance remain separate gates."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a10-retention-d0ebe36b",
+  "review_effort": "high",
+  "source_metadata_sha256": "66b92c3f15a4cf80dfcec1508dcef69b96ffde32388512f1964f5378939ffaad"
+}

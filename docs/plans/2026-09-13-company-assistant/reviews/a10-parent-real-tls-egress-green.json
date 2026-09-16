@@ -1,0 +1,67 @@
+{
+  "status": "passed",
+  "expected_old_gap": false,
+  "results": [
+    {
+      "mode": "valid",
+      "private_body_sent": true,
+      "authorization_samples": [
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          false
+        ]
+      ],
+      "real_loopback_tcp_tls": true
+    },
+    {
+      "mode": "expiry",
+      "private_body_sent": false,
+      "authorization_samples": [
+        [
+          9,
+          false
+        ],
+        [
+          10,
+          false
+        ]
+      ],
+      "real_loopback_tcp_tls": true
+    },
+    {
+      "mode": "revocation",
+      "private_body_sent": false,
+      "authorization_samples": [
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          true
+        ]
+      ],
+      "real_loopback_tcp_tls": true
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "historical_read_limit_errors_resolved_by_exact_supplement": [
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.kimi-code/sessions/wd_kimi-packet-1789572067641769000_be86b7856fc6/session_6eaf7619-fe6d-4218-aee9-27a586b2ae1b/agents/main/tool-results/Read-tool_7goWwZNvlUHp1yA7HIOKYzdl-a23a06f4-00bc-47c1-8ecf-6715884ac59f.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.kimi-code/sessions/wd_kimi-packet-1789572067641769000_be86b7856fc6/session_6eaf7619-fe6d-4218-aee9-27a586b2ae1b/agents/main/tool-results/Read-tool_v3dsd9HohHdZeyz6QtDTl90c-a99d0aa3-a053-4d4c-96fa-bac58c74219f.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    },
+    {
+      "path": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000/verification-evidence-01.txt",
+      "issue": "empty, denied or truncated read"
+    }
+  ],
+  "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+  "expected_read_paths": 44,
+  "completed_expected_paths": 44,
+  "source_chunks": 38,
+  "evidence_chunks": 5,
+  "missing": [],
+  "problems": [],
+  "scope": "Mechanical coverage of actual Kimi Read tool responses; not proof of reasoning quality or independent test execution"
+}

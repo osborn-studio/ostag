@@ -1,10 +1,15 @@
-# A10 撤权与保留：候选实施与恢复方案
+# A10 撤权与保留：本地实现与验证
 
-**状态：A10候选未集成，独立审查发现1项P1阻断。** 当前Opus5编码摘要 `5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360`。目标121项、macOS全量2619项、16组额外检查通过；Linux目标121项和与已批准监控修复组合的2636项通过。测试通过不覆盖新发现的授权顺序缺口。
+A10 已完成本地集成：Codex 修复原授权在保留策略数据库等待期间失效的问题，诊断字段和迟到发送失败破坏清理完整性的问题，并修复真实连接等待后的发送授权与卡片ACK凭据轮换问题，独立 Kimi K3 会话批准准确候选 `9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943`。macOS 与原生 Linux 全量各 **2819 项通过**，各 11 条既有警告；A10 目标 304 项、21组额外检查、Ruff 和锁文件检查通过。代码提交 `8812e8087f5b40d6ea8b0a7426202b00f5804608`。
 
-真实Opus5完成本轮编码；其独立审查先超时、后返回周额度429，未提供结论。独立Codex只读审查随后确认：部分路径在原有权限检查之后执行保留策略数据库等待，等待中失效的原有授权没有被再次核验。因此禁止集成这一候选，不能把任何一次测试通过当作批准。
+[验证证据](reviews/a10-codex-validation.json) · [最终独立审查](reviews/a10-kimi-k3-round-1.json) · [旧候选复现](reviews/a10-authority-old-red.json) · [修复后检查](reviews/a10-authority-final-green.json)。此前 Claude 周额度耗尽没有产生批准；本轮按用户最新要求由实际 Codex CLI（gpt-6-astra）编码、实际 Kimi Code CLI（kimi-code/k3，配置提供方managed:kimi-code、模型k3）独立审计并核查测试证据。Kimi没有亲自执行这些测试；固定验证器执行，Kimi审阅结果。首轮Kimi因Read分页失败给出inconclusive，不计批准；最终将源码拆成带原行号的小文件，验证材料按字符上限分块；Kimi在同一审计会话完成补读。
 
-[独立审查回执](reviews/a10-codex-round-1.json) · [修复和验证方案](A10-AUTHORITY-FENCE.md) · [Claude实际额度错误](reviews/a10-opus-unavailable.json)。Claude提示9月18日凌晨3点（洛杉矶时间）重置；后续编码模型待用户选择。下文是早期候选历史；以本段和execution.json为最新状态。
+Linux 为隔离 ARM64 环境（Ubuntu6.8内核、Debian12、Python3.11），未运行需挂载其他仓库的 osstack 跨仓库冒烟，不代表 Ubuntu x86_64 CI 或腾讯生产文件系统验收。完整会议采集、A11服务接线、真实飞书平台验收和生产部署尚未完成。下一步 A05过期预览恢复、A11；保留监控命令发布/ACK 生命周期后续核查。
+
+## 清理后的晚到结果
+
+独立Codex复审发现的成本诊断文本残留和迟到TEXT观察记录重建均纳入修复。验收覆盖旧schema合法诊断字段内的合成私有标记、清理后的新诊断写入、真实暂停发送恢复后的失败以及数值结算。清理完成后继续保留原调用/发送身份、已开始和未知状态，不能退款或重新发送来消除不确定性。验证的是当前受控本地SQLite，不是内存、历史备份或远端内容删除。[旧候选复现](reviews/a10-retirement-old-red.json) · [最终回归](reviews/a10-retirement-final-green.json)。
+
 
 ## 使用和边界
 
@@ -32,29 +37,21 @@
 
 当前普通 SQLite 表使用 secure_delete 和受控 VACUUM 去除活动数据库中的逻辑正文与旧空闲页内容。这不覆盖 RAM、历史备份、SSD 快照、外部索引或远端卡片，也不会删除飞书/GitHub 原始资料。SQLite 对 secure_delete 的适用范围及 EXTRA 的目录同步语义见[官方说明](https://www.sqlite.org/pragma.html#pragma_secure_delete)和[同步说明](https://www.sqlite.org/pragma.html#pragma_synchronous)。
 
-## 已执行验证和未完成的复审
+## 审查历史
 
-osstack 第一轮任务运行2次构建：最初候选全量2557项通过，但独立清理探针失败；修复后全量2585项通过，16组独立检查通过。随后实际调用 Fable5.1 返回额度耗尽，原生任务以 escalated 结束，未自动集成。
-
-之后通过新的 osstack 原生隔离运行修复 Linux 文件身份兼容问题。该候选目标测试 **117项通过**，全量 **2615项通过**（11条警告），原16组独立门槛、Ruff和锁文件检查通过。其固定验证器保留了必需的 Fable 门槛：明确输出 review pending 并阻止集成，没有反复请求已耗尽账户或使用别的模型代替。
-
-测试覆盖生成中撤权、实际 HTTPX 测试传输边界、签名卡片领域回调、旧内容重入、共享来源到期、每项正文和发布状态写入被忽略、清理回执丢失/重试、另一用户数据隔离及当前 SQLite 文件标记清除。网络数据是合成夹具，未调用真实模型或发送真实平台消息。
-
-独立检查确认并推动修复了共享来源较早期限在 SQL 后漏检，以及成本配置写入被忽略时误报清理完成；扩展回归又覆盖了任务/发布状态、TEXT回执、回调绑定等相同故障。没有把早期部分测试通过当成正式审查批准。
-
-**Linux运行验证仍未执行。** 当前宿主为macOS，Docker客户端存在但daemon不可用。Python官方将 birthtime 列为部分系统可选属性，不能把本机通过当成Ubuntu兼容证明。[Python stat_result文档](https://docs.python.org/3.11/library/os.html#os.stat_result)。最终候选的具体Linux实现与模拟测试结果见下节；真实Linux CI、目标文件系统和故障恢复仍需验收。
+早期候选经过多轮测试和独立审查，先后修复清理完整性、Linux文件身份、授权顺序、晚到结果、真实网络发送和ACK凭据问题。Fable/Opus的额度或超时失败没有计为批准；后续按用户指定由Codex实现、Kimi K3审计。最终候选和完整结果见本文开头；失败记录与模型回执保存在[执行历史](EXECUTION.md)及reviews目录。
 
 ## Linux文件身份修复的实际范围
 
 先前实现直接要求Python的birthtime字段，会影响Ubuntu/Python3.11测试。新候选在该字段缺失时，通过Linux libc的statx读取文件创建时间；使用打开的普通文件描述符，并交叉核对设备、inode、返回能力标记和采样后的路径。校验固定ABI布局、时间戳范围，任何不支持或不一致均拒绝，不降级成仅inode或会随写入变化的ctime/mtime。
 
-新增30项测试涵盖成功路径、缺失能力标记、错误返回、ABI和时间字段、采样期间替换、文件描述符关闭，以及正常更新/VACUUM后的重开。macOS上的Linux分支使用模拟ABI；另有未模拟的原生文件身份测试，在Linux运行时会实际调用statx，但本轮没有Linux执行证据。生产所用libc、内核和挂载卷必须支持所需能力，否则该功能拒绝启动/使用。[Linux statx布局与能力标记](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/stat.h) · [文件描述符调用标记](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/fcntl.h)。
+新增30项测试涵盖成功路径、缺失能力标记、错误返回、ABI和时间字段、采样期间替换、文件描述符关闭，以及正常更新/VACUUM后的重开。macOS上的Linux分支使用模拟ABI；另有未模拟的原生文件身份测试，在Linux运行时会实际调用statx，本轮已经在隔离Linux ARM64环境实际执行通过。生产所用libc、内核和挂载卷必须支持所需能力，否则该功能拒绝启动/使用。[Linux statx布局与能力标记](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/stat.h) · [文件描述符调用标记](https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/fcntl.h)。
 
 元数据读取和同步SQLite操作仍依赖可信本地存储。忙等待参数不是对底层磁盘/文件系统IO的硬时限，A11需要专用执行上下文、实际负载测量和停机恢复验证。迁移到不同主机或恢复成新文件不会自动继承旧文件身份。
 
-## 恢复审查与集成
+## 集成状态
 
-Fable额度恢复后，在新的osstack隔离工作树恢复上述完整快照，确认候选摘要和10个文件的摘要，再由真实claude-fable-5-1对完整候选进行只读挑战。修复任何实际阻断后重新运行受影响检查和最终完整门槛。获得精确候选的批准回执后才能集成；不能用前一阶段A06的批准替代A10。原任务队列仍保持待处理，原13个历史任务和冻结会议评测不变。
+最终13个文件的内容摘要已与实际Kimi批准回执、macOS/Linux测试、21组独立检查和本地代码提交逐一对应。osstack完成本地集成；本次A10队列归档，原13个历史任务和冻结会议评测保持不变。审计读取与参数/JSON解析故障单独保留，不计为模型批准，也没有通过修改产品代码来消除这些工具故障。发送边界和ACK细节见[A10发送验证](A10-EGRESS.md)。
 
 ## 下一步实施顺序
 

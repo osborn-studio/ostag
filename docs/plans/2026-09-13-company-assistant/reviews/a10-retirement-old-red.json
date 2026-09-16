@@ -1,0 +1,20 @@
+{
+  "status": "passed",
+  "expected_old_gap": true,
+  "results": [
+    {
+      "case": "legacy_and_late_diagnostic",
+      "legacy_text_retained": false,
+      "late_text_retained": true,
+      "late_input_rejected": false,
+      "numeric_settlement_preserved": true
+    },
+    {
+      "case": "late_text_failure",
+      "observations_after_cleanup": 1,
+      "cleanup_after_late_failure": "partial",
+      "state": "unknown",
+      "no_bytes_sent": true
+    }
+  ]
+}

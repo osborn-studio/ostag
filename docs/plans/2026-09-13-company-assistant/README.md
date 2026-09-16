@@ -1,8 +1,8 @@
 # OStag 公司助理：开发、测试、验证与部署实施方案
 
-最新：Opus5编码的[监控重试修复](MONITOR-REPLAY.md)已通过独立Opus复审并完成本地集成。A10候选虽通过测试，但独立Codex审查发现1项P1授权顺序阻断，**尚未集成**；见[修复方案](A10-AUTHORITY-FENCE.md)。Claude周额度已耗尽，后续编码模型待选择。完整会议运行时与生产部署尚未完成。
+最新：A10授权顺序修复与监控重试修复已本地集成，macOS与原生Linux全量各2819项通过。A10由Codex修复、Kimi K3独立审计，监控修复保留原Opus批准；见[A10验证](A10-RETENTION.md)。下一步A05过期预览恢复与A11，完整会议运行时和生产部署尚未完成。
 
-日期：2026-09-13。状态：详细实施方案候选，供本轮用户审阅；本轮只编制文档、核验源码和基线，没有开发产品功能、入队、push、merge或deploy。所有“验收指标”均是拟议上线标准，不是已取得结果。
+初版规划日期：2026-09-13；下文规划与当时基线作为历史保留，当前实现以最新执行状态为准。所有拟议上线指标仍须逐项取得证据，本地通过不代表生产验收。
 
 ## 本轮增强：会议准备与OpenTag增量
 
@@ -58,7 +58,7 @@ flowchart TD
 
 原因：MonitorStore按user_version拒绝新版数据库，增加迁移会让旧镜像回滚失败。A新增业务库可让旧镜像继续运行既有Monitor，保留brief库等待前向恢复。新增存储仍需独立备份、保留与兼容规则，不能认为分库自动解决跨系统事务。每版manifest声明brief可读schema区间；迁移只前向。旧版遇到更高brief schema只停brief域并上报degraded，不抛出lifespan使旧业务停机。需要查看新版brief数据时用原digest的只读维护模式，不能强行降schema。
 
-拟议模块均尚未实现：`ostag/briefs/`下models/grants/store/service/worker/validation/rendering；`ostag/connectors/brief_sources.py`提供只读资料契约。保留frozen dataclass与显式严格解析风格；不全仓改pydantic，不为A新增框架或向量库。
+初版拟议模块如下，当前实现情况见EXECUTION.md：`ostag/briefs/`下models/grants/store/service/worker/validation/rendering；`ostag/connectors/brief_sources.py`提供只读资料契约。保留frozen dataclass与显式严格解析风格；不全仓改pydantic，不为A新增框架或向量库。
 
 协议示意（需在A01固定v1语法与负例）：
 

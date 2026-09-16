@@ -1,5 +1,15 @@
 # OStag 开发执行记录
 
+## 2026-09-16 最新验证状态
+
+A10 已完成本地集成：Codex 修复原授权在保留策略数据库等待期间失效的问题，诊断字段和迟到发送失败破坏清理完整性的问题，并修复真实连接等待后的发送授权与卡片ACK凭据轮换问题，独立 Kimi K3 会话批准准确候选 `9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943`。macOS 与原生 Linux 全量各 **2819 项通过**，各 11 条既有警告；A10 目标 304 项、21组额外检查、Ruff 和锁文件检查通过。代码提交 `8812e8087f5b40d6ea8b0a7426202b00f5804608`。
+
+[验证证据](reviews/a10-codex-validation.json) · [最终独立审查](reviews/a10-kimi-k3-round-1.json) · [旧候选复现](reviews/a10-authority-old-red.json) · [修复后检查](reviews/a10-authority-final-green.json)。此前 Claude 周额度耗尽没有产生批准；本轮按用户最新要求由实际 Codex CLI（gpt-6-astra）编码、实际 Kimi Code CLI（kimi-code/k3，配置提供方managed:kimi-code、模型k3）独立审计并核查测试证据。Kimi没有亲自执行这些测试；固定验证器执行，Kimi审阅结果。首轮Kimi因Read分页失败给出inconclusive，不计批准；最终将源码拆成带原行号的小文件，验证材料按字符上限分块；Kimi在同一审计会话完成补读。
+
+Linux 为隔离 ARM64 环境（Ubuntu6.8内核、Debian12、Python3.11），未运行需挂载其他仓库的 osstack 跨仓库冒烟，不代表 Ubuntu x86_64 CI 或腾讯生产文件系统验收。完整会议采集、A11服务接线、真实飞书平台验收和生产部署尚未完成。下一步 A05过期预览恢复、A11；保留监控命令发布/ACK 生命周期后续核查。
+
+以下是按时间保留的执行历史，早期“未集成/待选模型”状态已被上述结果取代。
+
 最新：Opus5编码的[监控重试修复](MONITOR-REPLAY.md)已通过独立Opus复审并完成本地集成。A10候选虽通过测试，但独立Codex审查发现1项P1授权顺序阻断，**尚未集成**；见[修复方案](A10-AUTHORITY-FENCE.md)。Claude周额度已耗尽，后续编码模型待选择。完整会议运行时与生产部署尚未完成。
 
 ## 本轮执行范围

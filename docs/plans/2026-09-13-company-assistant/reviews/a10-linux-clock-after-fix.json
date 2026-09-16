@@ -1,0 +1,1 @@
+{"samples": 4238, "backward_steps": [], "minimum_wall_step_ns": 5044583, "duration_seconds": 30, "test_vm_only": "After settling: systemd-timesyncd stopped for own a10VM session; Lima host clock sole authority"}

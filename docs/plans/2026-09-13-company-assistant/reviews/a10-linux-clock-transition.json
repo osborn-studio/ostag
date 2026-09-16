@@ -1,0 +1,1 @@
+{"samples": 3466, "backward_steps": [{"wall_step_ns": -6167071185, "monotonic_step_ns": 5150958}], "minimum_wall_step_ns": -6167071185, "test_vm_only": "Stopped systemd-timesyncd for this running a10 VM; Lima host synchronization remains sole clock authority, no host setting changed"}

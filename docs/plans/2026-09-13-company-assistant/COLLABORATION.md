@@ -1,41 +1,33 @@
-# Codex、Claude Fable 5.1 与 osstack 共创流程
+# Codex、Kimi K3 与 osstack 协作流程
 
-## 角色与证据
+## 当前角色
 
-每个切片固定一个builder、一个独立reviewer；默认Codex实现，Claude Fable 5.1挑战和审查，也可以互换。各自独立worktree，迁移/配置/runner等公共入口同一时段只允许一名writer。用户没有指定具体Codex调用ID时，以本任务实际模型及工具返回身份记录，不用推测名字冒称GPT-6 Astra。
+按用户最新要求“use codex for coding and kimi k3 for auditing and verfication”，Codex负责实现，Kimi K3负责独立审计和核查验证证据，osstack负责隔离执行与验收循环。本轮实际编码CLI请求gpt-6-astra；实际Kimi Code CLI请求kimi-code/k3，配置提供方managed:kimi-code、模型k3。记录请求标识与实际工具回执，不推测未返回的服务端模型身份，也不把替代模型称作Fable或Opus。
 
-Fable必须显式请求`claude-fable-5-1`、不设fallback，检查返回modelUsage.canonicalModel；Haiku等CLI辅助用量单独记。模型错、不可用或无验证身份时暂停该模型评审，继续与其无关的确定性准备，不能换模型后声称Fable已审。
+每个切片只有一名代码writer；迁移、配置、runner等共享入口不能并行修改。reviewer只读准确候选及必要上下文，提出具体反例；Codex以代码和可重复测试回应。本轮Kimi没有执行测试：固定验证器执行macOS/Linux回归，Kimi审查源码、断言和证据。完整范围与真实平台验收必须区分。
 
-循环：冻结需求/AC和输入版本→builder实现最小切片→目标测试→Fable独立看最终完整diff及必要上下文→Codex用代码/复现回应→有变更则更新候选→同一最终候选通过检查→才形成PR。开发任务PR目标为拟建`codex/ostag-company-integration`，走现有不限制base的pull_request CI；main每窗口只接收一个release PR，并且D02可信锁/preflight先安装核验。squash发布后将新main正常合回integration并跑CI，保留未发布工作，不reset/force-push；共享config/flag文件同一时段单writer，其他任务基于已合入版本重放自身变更。此处是方案，本轮不创建integration分支或PR。Fable会自行提出反例而不是只做文字复述；最终事实由测试/原系统/用户验收核对。
+## 执行循环
 
-评审结构：verdict（approved/changes_requested/blocked）、reviewed_tree_hash、实际模型、findings（严重度、触发条件、文件/行、影响、修订和验证）。退出0只是CLI成功；缺schema、拒绝、模型不符、tree不符一律不是通过。模型长文中出现“通过”不能替代结构化结果。
+冻结需求和验收条件 → Codex实现最小切片 → 固定目标/全量/独立检查 → Kimi审计准确最终候选 → 修复实际问题并重验 → 绑定源码摘要、测试和批准回执 → 本地集成。代码变化后不能沿用旧摘要的通过记录；仅修复审计读取或输出解析时，允许在逐字节确认同一候选后复用确定性测试证据，并保留工具故障历史。
 
-## 固定验证器与防自改
+评审结论包含candidate_sha256、verdict、blockers和notes。CLI退出0不代表批准。若JSON带说明文字或代码围栏，必须从原始输出中无歧义提取、校验结构、核对摘要，并保存原始输出；不能把一句“通过”改写成批准。读取工具截断时补齐准确材料，核查实际读取记录。本轮最终材料覆盖44/44，独立审计批准且阻断项为0，见[A10回执](reviews/a10-kimi-k3-round-1.json)。
 
-协议/授权/取消/恢复的确定性验收由当前批准版本固定；语义保留集由operator/reviewer独立保管。builder不读保留集，也不能改外部verifier后过关。普通功能任务不可修改固定gate目录或信任hash；gate维护单独切片、独立评审并重新发布外部只读副本。
+## 固定验证与证据
 
-工件：task_id/attempt_id、依赖回执、plan hash、base/tree/commit、变更文件、运行命令/退出码/非空测试数、环境/模型、review结果、live evidence、operator决定与风险。真实原文/凭据不进Git；必要摘录先脱敏。失败也保留，不自动删失败worktree前丢证据。
+builder不能修改独立验收脚本、保留评测集或验收条件来过关。验证器自身需要修正时，由独立维护方说明原断言的问题并保存前后证据；本轮按Kimi挑战，将ACK测试从“删除全部按钮行”改为“旧按钮不能再导航私有内容”，保留有效对照和真实SQLite等待。
 
-## osstack的真实前置
+记录任务、基线、准确代码摘要、变更文件、命令/退出码、非空测试数量、环境、模型调用、审查和限制。所有失败保留，osstack清理工作树前先保存不可变代码快照。真实业务原文与凭据不进Git。模型审计、技术测试、真实平台回执、真人采用分别记录。
 
-本轮只做`osstack --version`与`osstack loop doctor --workspace ... --json`：0.19.0，13个旧任务，daemon未检查。P01不是部署或真实业务的自动许可。
+## osstack与仓库
 
-优先复验已有M0分支runner_probe，禁止将40项规划JSON直接塞进tasks。原生queue不执行本backlog depends_on。每次由已验收guard验证依赖和范围，单attempt生成进入独立任务工作目录，确认实际discover只见该attempt；`--cycles 1`不等于只处理一个任务。
+本轮使用osstack0.19.0原生隔离循环和自定义execute/verify命令。策略只允许本次任务的能力；原13个历史任务仍在队列中，由默认blocked策略隔离，不能把40项规划直接批量入队。原生queue不替代本项目的依赖检查；每次只放行依赖已验收的切片，保留明确范围与输出状态。不要把cycles=1理解为只执行一个任务。
 
-原13任务留在原工作区。新执行checkout若继承旧tasks，复制到仓库外只读保全并在专用checkout隔离，执行层必须检查队列扫描实际结果，禁止泛化清理原tasks。task_id每次重试递增attempt，状态文件和失败工件独立。queue无执行字符串/凭据，命令参数来自固定可信launcher。
+本地集成分支为codex/ostag-company-integration。osstack可以自动提交并快进该分支；这不等于GitHub main合并或生产发布。原OStag工作目录保持不动。开发PR、release PR、CI和生产部署继续遵循现有流程；squash发布后正常合回main，保留尚未发布工作，不reset或force-push。
 
-运行前证明：builder/verifier非空；指定模型无fallback；writer无越界写；reviewer只读；非法schema/失败/假成功/旧队列/抢占/超时反例拒绝；合回仅专用integration分支，不能main或生产checkout。osstack可能自动commit/ff-only合回，不能把本地合回等同GitHub合并/部署。
+运行前检查模型可用性、非空builder/verifier、改动范围、只读审查、准确摘要和失败拒绝。升级osstack或CLI时先看实际帮助/源码，不假设不存在的参数。本轮Kimi会话恢复需沿用已绑定agent，不能同时再次传agent-file；长文件同时按行数与字符数拆分。
 
-新版本必须重查实际CLI帮助和installed源码，不使用想象中的`--depends-on`、`--model`或`import backlog`。通过skill wrapper的doctor可以替代原生doctor，但不改变上述真实限制。
+## 历史与后续
 
-如果P01尚未准备好，A的受控实现可以在本任务执行，仍保持独立Fable评审和固定验收；在完成首个A1纵向切片检查点复盘P01，不把通用loop工程变成无限前置，也不暗自宣布loop已接管。生产发布始终走现有受治理流程。
+2026-09-13的Fable规划讨论以及早期Fable/Opus代码审查保留其真实范围，见[规划审查](REVIEW.md)、[会议共创](MEETING-REVIEW.md)和[执行记录](EXECUTION.md)。额度耗尽、超时、格式错误和未完成读取均不计批准。最新模型选择替代此前固定Fable的要求。
 
-## 本轮咨询与后续代码评审的区别
-
-本轮Fable工具关闭，读取的是Codex提供的代码事实与完整规划文本，做方案挑战，没有自行跑仓库或服务器。因此只能报告“规划已讨论/修订”，不能报告“实现通过Fable代码审查”。真实实施时还需对准确diff、代码与测试做新一轮review。
-
-用户对已有开发范围的授权按会话持续使用；需要新增资料范围或真实外部写时说明具体对象与理由，不问笼统“可不可以继续”。本轮只要求详细方案，不启动旧历史授权里的全部自动开发/部署。
-
-## 本轮会议与上游共创
-
-新增审查集中在时间窗历史正确性、组织权限交集、合并/部署区分、会议决策价值和上游已有/新增差异。Fable只收到脱敏规划与源码事实，不发送12私有仓库的原始业务内容或真实聊天。新增讨论记录见MEETING-REVIEW.md；历史四轮记录保持不变。
+用户已有开发授权按会话持续使用。本轮完成A10本地集成；下一步A05过期预览恢复和A11运行时接线，随后完成会议采集和真实平台验收。尚未push、main合并或部署，完整会议产品未宣告完成。

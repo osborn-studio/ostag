@@ -1,11 +1,11 @@
 {
-  "scope": "Locally integrated A06 and monitor replay repair; A10 candidate still pending independent review; meeting runtime and deployment incomplete",
+  "scope": "Local slices through A10 and monitor replay repair verified; meeting collectors/runtime, real platform acceptance and deployment incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "7de75d4b2f2c0b7392abfca3b2942b14866a9563",
+  "code_commit": "8812e8087f5b40d6ea8b0a7426202b00f5804608",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "c711a434d9b61e1555b93c2dfb1817b8437c2591e34fe58b6001dcc6f1e4453b",
+  "code_content_sha256": "35a3e3a651cbf3429f7c11e3f912c662d48ee419713de223eb65953d225360b0",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -16,42 +16,45 @@
     "ostag/briefs/project_mapping.py": "d94003781fe166fd1139919ad10cc280cc6c12cc62fdebc9d1af1549c0bf12e2",
     "tests/test_meeting_contracts.py": "0a40c3ab032847698bc8d2e8f8cc927eed8e8e9ac95e74865880b2c120be954c",
     "tests/test_meeting_preflight.py": "390cead1bc02bcfcfe79e8e9caccd0aa6c26ae43ed57bf01d0ff582629ab1919",
-    "ostag/briefs/store.py": "eb03b2dc1bf21799c11d25ca0cf333e07642a59d28443e58266df684f38de698",
+    "ostag/briefs/store.py": "0653f87736e215cd85c9803116a3d0b1f3bde8648a50fe1efd3012d604ec9a71",
     "tests/test_brief_recovery.py": "03ca5d25fb95bd14b810702e8ad4c580e03e82a8463e43d19c78243eec31b31c",
     "tests/test_brief_store.py": "2894a8647bc44a0f2e7662dae4f1b3d23b7676ccccde01cc661b1288c49cda62",
     "ostag/briefs/generation.py": "5717e57f623e002b1757df3a088644dd9261fda7347f68e9d48f2cad12c23d94",
     "ostag/briefs/validation.py": "ace890a6d8ec5ad01f62d3d42d3f1c2fae7c5da9fb43cb17a8d1ac583417a53e",
     "tests/test_brief_generation.py": "fe78132f0cb458df1c0a7706029dc3ba93076a8af2514b8966ba6b4fe44c6b7c",
     "tests/test_brief_validation.py": "618b5b17ebb8a03afa891e556a723cc50592edef1f31cf554d23706eb7a08367",
-    "ostag/briefs/service.py": "a809dc95ae13e9dd7c6846bc7cf5ec082d5a911d9da3af31fbbe584a8b1b160b",
-    "ostag/briefs/worker.py": "0f23fc655622917f76d21312a4bfb385d8a38aa9b87afbf9ef89d54258cfed87",
+    "ostag/briefs/service.py": "d19682dd87e3951a556398e87d33a098bfccfc3df566e112b042d8c9e77cb493",
+    "ostag/briefs/worker.py": "e38495773e084fd203d87d2f3452ddb2fb269b1b8c24735eece615c0df5c2aed",
     "ostag/core/runner.py": "71b0897fe5cfcb6d1d827bc2bf30cc583eabeedaf1d582eaf60bfe0a25889f7d",
     "tests/test_brief_service.py": "3ff61eb5f814fbf8483ae51684155e2653c3c4f86a82b02b99a284fad48caff3",
     "tests/test_brief_worker.py": "16be62a0f674675d1c7751c11cedd7a065fd56f0f1f93af174298a1541e10537",
-    "ostag/briefs/openai_transport.py": "df9066f5656a2676eef31cf7a4dc21b987ca300453d5d43eaf634f39dae0e4ad",
+    "ostag/briefs/openai_transport.py": "d5954b24f1f6347e35d554f393ef6deb747bcd6e4294fe99e83eb4f73be87beb",
     "pyproject.toml": "6862df64b0712c88209b2b286312edccf9e5229e04f34dc3c8a8fa7f79ab661e",
     "tests/test_brief_openai_transport.py": "3c781a10837f6b710631e37be926355b1e48bdee47b232f19751cd3fdada06d1",
     "uv.lock": "f90cb6bdad729193f0242818167cebfa8e03ee021b4672854cbf2aeb3bae9a38",
-    "ostag/briefs/delivery.py": "23428abed3f4ff26a145de14006108690a52980f7dee96a774e17639e3fd64d6",
+    "ostag/briefs/delivery.py": "0dc6e6660ae8380ce3bc098dda342807109ffc005baa8fc26623288b98e34f2f",
     "tests/test_brief_delivery_observation.py": "5ab1c2957db99f491f5d453d2cb5dad51e8657fc82d58416aada4353ce1a816a",
     "ostag/adapters/feishu.py": "6158fdda5c11aa3e3b584e7a3fa7276820765de4911aacafb737669c2db35a44",
-    "ostag/briefs/callbacks.py": "43dbcf604a8aafd5be7f6ace6801ebfa0f9b3d8a8f12c056733eecc4c7860be1",
-    "ostag/briefs/feishu_transport.py": "62babb9669215ffae459a5dfed57e4618f93aaf6985c8f821cbd7394a2c0a118",
+    "ostag/briefs/callbacks.py": "36907d13b96b9e9476b8ddaf6c0f149d7e035fa19273cfefad3388b170c0617d",
+    "ostag/briefs/feishu_transport.py": "0cf8fc52b4e517515d0e8e22f5d87a21a66c0ed092e56fa9fa5652de707a14ce",
     "ostag/briefs/rendering.py": "a838ab4b1b4a0e72d8b460e8f43ef6611d266219f0daa45d42a5d84b0874e894",
     "ostag/work_monitor/feishu_routes.py": "95a9588026a1f09f5dd568832e3322deec62ad305dbcc53cf84cd1eabefc2861",
     "tests/test_brief_cards.py": "eab7141f3c921a8c8a3d51c435539f61b1894d1ccf773da660be03eada9eec75",
     "tests/test_brief_feishu_transport.py": "541864ae0cecec3b591dc1098ef14381cd98d7b99b0df4576801c03ac035c08a",
-    "ostag/briefs/card_delivery.py": "be4aa0c22529fc2a57d8f8704eec81a6d77c0303be28e15ed6c6a17a8eefcc70",
-    "ostag/briefs/card_transport.py": "0f75435d96a5262cf7ace71570d72d5fa214bd3bc47e7761d27cd5fa9c8cddc1",
+    "ostag/briefs/card_delivery.py": "cecb213d73df7477938411f502ecce529efe1e367c7cb15edb346496316a30bf",
+    "ostag/briefs/card_transport.py": "69dbc90818eff78518da53a9dd8fd06173289959dabdd568eab53474e098f356",
     "tests/test_brief_card_delivery.py": "dfbf9df0f76a919732fd93fe479ca0632cfb141b2fdcb14bedd066fc977f8d1d",
     "tests/test_brief_card_navigation.py": "5b3f163cc9a898ddcd9e25bb54e84bd8c35ad1994f3013b570783ee3c4d428cb",
     "tests/test_brief_card_transport.py": "1ed742cd8de5ec40299ef948fb57a43240ceca710ce66179100dd3818a65a2a4",
-    "ostag/briefs/revisions.py": "bdc83f8b7574b4da84dc2592d0df3e4f88a0b396afdd47ff4474a882bcb0a120",
+    "ostag/briefs/revisions.py": "efc4a4105f2828c986baefed568b06c042caf5d2e919dbddf24ca8f640d243ae",
     "tests/test_brief_revisions.py": "6cb7ff712771d8d50e9b3b8791515789048a81e4da1ff744ea134444ccfd0a61",
     "ostag/work_monitor/service.py": "3a189ab3f57d2926fa1e337e4d813ed89ebcf5ede208649157224b6dfe952ec8",
     "tests/test_monitor_apply_replay.py": "688ec606ca78a62f16952d575f40d47dc72711f009866584486385fa466491fe",
     "tests/test_work_monitor_controls.py": "5ce40b3cc8e7a740c283b40819ac400bfc9233d1b41dcc5ef21fe04aef086b4a",
-    "tests/test_work_monitor_scheduler.py": "e15f1b662499a2b20987f176f32f276345b0574c1f34a2669989e062c7be721f"
+    "tests/test_work_monitor_scheduler.py": "e15f1b662499a2b20987f176f32f276345b0574c1f34a2669989e062c7be721f",
+    "ostag/briefs/retention.py": "63944e78561f9e9fa9e794085201a2d17bcf1e0d1965bca5f2cbb0a3bf0ebf28",
+    "tests/test_brief_retention.py": "299703e521a8b96930c7ebc56b5359fb24f3fc8c6fb78626897f93bd44920c9f",
+    "tests/test_brief_revocation.py": "b6f29a0465b926649d7096afa3b6c07008086f64a1d0d432c8005fd169448389"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -68,7 +71,7 @@
     "A05-delivery": "verified_local first-card delivery and navigation; real platform/device and A11 runtime composition not_run",
     "A05": "local first-card and navigation implementation verified; real mobile/desktop acceptance pending",
     "A06": "verified_local domain/service API; signed correction/adoption buttons and A11 live composition not_run",
-    "A10": "candidate_blocked_not_integrated",
+    "A10": "verified_local; A11 runtime and production pending",
     "MONITOR-REPLAY": "verified_local; production pending"
   },
   "acceptance": {
@@ -94,17 +97,18 @@
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 66,
-    "full_passed": 2515,
+    "target_passed": 304,
+    "full_passed": 2819,
     "warnings": 11,
-    "full_seconds": 58.31,
+    "full_seconds": 91.17,
     "ruff": "passed",
-    "latest_slice": "MONITOR-REPLAY"
+    "latest_slice": "A10+MONITOR-REPLAY",
+    "linux_full_passed": 2819
   },
   "review": {
-    "model": "claude-opus-5",
-    "mode": "static; tools disabled",
-    "successful_reviews": 12,
+    "model": "Kimi Code CLI requested kimi-code/k3",
+    "mode": "independent Kimi read-only audit; same-session continuation completed truncated evidence",
+    "successful_reviews": 13,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -116,48 +120,54 @@
       "ostag/briefs/project_mapping.py": "m01-fable-round-1.json",
       "tests/test_meeting_contracts.py": "m01-fable-round-1.json",
       "tests/test_meeting_preflight.py": "m01-fable-round-1.json",
-      "ostag/briefs/store.py": "u01-fable-round-3.json",
+      "ostag/briefs/store.py": "a10-kimi-k3-round-1.json",
       "tests/test_brief_recovery.py": "a02-fable-round-1.json",
       "tests/test_brief_store.py": "a02-fable-round-1.json",
       "ostag/briefs/generation.py": "a04-provider-fable-round-1.json",
       "ostag/briefs/validation.py": "a03-fable-round-2.json",
       "tests/test_brief_generation.py": "a03-fable-round-2.json",
       "tests/test_brief_validation.py": "a03-fable-round-2.json",
-      "ostag/briefs/service.py": "a04-fable-round-2.json",
-      "ostag/briefs/worker.py": "a04-fable-round-2.json",
+      "ostag/briefs/service.py": "a10-kimi-k3-round-1.json",
+      "ostag/briefs/worker.py": "a10-kimi-k3-round-1.json",
       "ostag/core/runner.py": "a04-fable-round-2.json",
       "tests/test_brief_service.py": "a04-fable-round-2.json",
       "tests/test_brief_worker.py": "a04-fable-round-2.json",
-      "ostag/briefs/openai_transport.py": "a04-provider-fable-round-1.json",
+      "ostag/briefs/openai_transport.py": "a10-kimi-k3-round-1.json",
       "pyproject.toml": "a04-provider-fable-round-1.json",
       "tests/test_brief_openai_transport.py": "a04-provider-fable-round-1.json",
       "uv.lock": "a04-provider-fable-round-1.json",
-      "ostag/briefs/delivery.py": "u01-fable-round-3.json",
+      "ostag/briefs/delivery.py": "a10-kimi-k3-round-1.json",
       "tests/test_brief_delivery_observation.py": "u01-fable-round-3.json",
       "ostag/adapters/feishu.py": "a05-delivery-fable-round-1.json",
-      "ostag/briefs/callbacks.py": "a05-core-fable-round-1.json",
-      "ostag/briefs/feishu_transport.py": "a05-core-fable-round-1.json",
+      "ostag/briefs/callbacks.py": "a10-kimi-k3-round-1.json",
+      "ostag/briefs/feishu_transport.py": "a10-kimi-k3-round-1.json",
       "ostag/briefs/rendering.py": "a05-delivery-fable-round-1.json",
       "ostag/work_monitor/feishu_routes.py": "a05-delivery-fable-round-1.json",
       "tests/test_brief_cards.py": "a05-core-fable-round-1.json",
       "tests/test_brief_feishu_transport.py": "a05-core-fable-round-1.json",
-      "ostag/briefs/card_delivery.py": "a05-delivery-fable-round-1.json",
-      "ostag/briefs/card_transport.py": "a05-delivery-fable-round-1.json",
+      "ostag/briefs/card_delivery.py": "a10-kimi-k3-round-1.json",
+      "ostag/briefs/card_transport.py": "a10-kimi-k3-round-1.json",
       "tests/test_brief_card_delivery.py": "a05-delivery-fable-round-1.json",
       "tests/test_brief_card_navigation.py": "a05-delivery-fable-round-1.json",
       "tests/test_brief_card_transport.py": "a05-delivery-fable-round-1.json",
-      "ostag/briefs/revisions.py": "a06-fable-round-1.json",
+      "ostag/briefs/revisions.py": "a10-kimi-k3-round-1.json",
       "tests/test_brief_revisions.py": "a06-fable-round-1.json",
       "ostag/work_monitor/service.py": "monitor-opus-round-1.json",
       "tests/test_monitor_apply_replay.py": "monitor-opus-round-1.json",
       "tests/test_work_monitor_controls.py": "monitor-opus-round-1.json",
-      "tests/test_work_monitor_scheduler.py": "monitor-opus-round-1.json"
+      "tests/test_work_monitor_scheduler.py": "monitor-opus-round-1.json",
+      "ostag/briefs/retention.py": "a10-kimi-k3-round-1.json",
+      "tests/test_brief_retention.py": "a10-kimi-k3-round-1.json",
+      "tests/test_brief_revocation.py": "a10-kimi-k3-round-1.json"
     },
     "unresolved_blockers": 0,
     "historical_models": [
-      "claude-fable-5-1"
+      "claude-fable-5-1",
+      "claude-opus-5",
+      "gpt-6-astra"
     ],
-    "pending_candidate_blockers": 1
+    "pending_candidate_blockers": 0,
+    "model_scope": "A10 final repair/review; previous per-file Fable/Opus receipts retain their recorded scopes"
   },
   "osstack": {
     "version": "0.19.0",
@@ -187,7 +197,13 @@
       "loop_7aca1ddf-6570-4417-98d4-1b9984fd0948",
       "loop_07fb0f39-b4fd-405b-a267-3ec7dad519b4",
       "loop_a3b0c04f-2598-4892-ad12-7d06c8630a63",
-      "loop_0a15858e-6a15-4f31-9cc1-8c6a00354959"
+      "loop_0a15858e-6a15-4f31-9cc1-8c6a00354959",
+      "loop_65f79efd-cfef-4178-b602-7a177a5d09b2",
+      "loop_585c5c58-1ca4-4506-a77d-b7d81a1ff414",
+      "loop_3ad3e603-8b9b-4ee5-8a4b-a7ff40dd5ea3",
+      "loop_af78f2b1-528f-4488-bdd7-4713e00b8465",
+      "loop_bc54c140-85f5-4060-af26-0a67c52f39ea",
+      "loop_ed7b7bab-7d18-4b75-b3c8-ca6c80a2505d"
     ],
     "outcomes": [
       "success",
@@ -215,7 +231,13 @@
       "escalated",
       "success",
       "escalated",
-      "escalated"
+      "escalated",
+      "escalated",
+      "escalated",
+      "escalated",
+      "escalated",
+      "escalated",
+      "success"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -245,7 +267,13 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay-repair",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus-review"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus-review",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-authority-fence",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-retirement-fence",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/LOOP-STATE.json",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/LOOP-REVIEW-STATE.json",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/LOOP-REVIEW-FINAL-STATE.json",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress"
     ]
   },
   "not_run": [
@@ -268,17 +296,14 @@
     "A05 default-disabled server composition and trusted credential/grant/source mirrors",
     "A05 real first-card create acknowledgement and mobile/desktop acceptance",
     "A11 automatic first-card dispatch and production lifespan integration",
-    "A10 private card content retention/redaction without resetting permanent send tombstones",
     "A05 explicit reissue/renewal of an acknowledged expired card preview",
     "A06 authenticated signed correction/adoption/retraction card UI and end-to-end Feishu acceptance",
-    "A06 multi-user rendering/lock latency certification and retention/deletion integration",
-    "A10 canonical Fable5.1 final candidate review",
-    "A10 candidate integration",
-    "A10 actual Linux/Python3.11 runtime validation",
+    "A06 multi-user rendering/lock latency certification and production retention lifecycle integration",
     "A10 production retention/revocation lifecycle and cleanup scheduler"
   ],
   "next_tasks": [
-    "A10-authority-ordering"
+    "A05-refresh",
+    "A11"
   ],
   "slices": {
     "A01": {
@@ -1025,17 +1050,65 @@
         "parent_gates_passed": 2,
         "approval": "Independent Opus5 approved same candidate; receipt opus-1789535300328616000.receipt.json"
       }
+    },
+    "A10": {
+      "status": "verified_local; A11 runtime and production pending",
+      "code_commit": "8812e8087f5b40d6ea8b0a7426202b00f5804608",
+      "code_content_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+      "files": [
+        "ostag/briefs/callbacks.py",
+        "ostag/briefs/card_delivery.py",
+        "ostag/briefs/card_transport.py",
+        "ostag/briefs/delivery.py",
+        "ostag/briefs/feishu_transport.py",
+        "ostag/briefs/openai_transport.py",
+        "ostag/briefs/retention.py",
+        "ostag/briefs/revisions.py",
+        "ostag/briefs/service.py",
+        "ostag/briefs/store.py",
+        "ostag/briefs/worker.py",
+        "tests/test_brief_retention.py",
+        "tests/test_brief_revocation.py"
+      ],
+      "target_tests": {
+        "passed": 304,
+        "warnings": 1,
+        "seconds": 33.7
+      },
+      "full_tests": {
+        "passed": 2819,
+        "warnings": 11,
+        "seconds": 91.17
+      },
+      "linux_full_tests": {
+        "passed": 2819,
+        "warnings": 11,
+        "seconds": 108.14
+      },
+      "linux_target_tests": {
+        "passed": 304,
+        "warnings": 1,
+        "seconds": 49.6
+      },
+      "parent_gates": 21,
+      "ruff": "passed",
+      "builder_model": "Codex CLI requested gpt-6-astra",
+      "review_model": "independent Kimi Code CLI requested kimi-code/k3; configured managed:kimi-code model k3",
+      "review_receipts": [
+        "a10-kimi-k3-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_ed7b7bab-7d18-4b75-b3c8-ca6c80a2505d",
+      "iterations": 1,
+      "coding_loop_id": "loop_3ad3e603-8b9b-4ee5-8a4b-a7ff40dd5ea3",
+      "coding_iterations": 4,
+      "verification_model_read_limit_recovery": "same actual Kimi session resumed with exact16k-character evidence slices; no code change or test-result substitution",
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress",
+      "validation": "reviews/a10-codex-validation.json"
     }
   },
-  "latest_slice_content_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
+  "latest_slice_content_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
   "pending_findings": [
-    {
-      "id": "A10-authority-ordering",
-      "priority": "P1",
-      "status": "blocks A10 integration",
-      "source": "reviews/a10-codex-round-1.json",
-      "reason": "[P1] Recheck original current authority after the new blocking retention gate. BriefCallbackController._current calls _authorize(p) and then check_guard. The same ordering occurs in CardDeliveryService._current (card_delivery.py:643-646), RevisionService._fresh (revisions.py:469-473), DeliveryService._policy (delivery.py:464-480), and DeliveryService._retained_result (delivery.py:682-688). check_guard performs file identity reads plus a RetentionLedger BEGIN IMMEDIATE transaction and commit; it can wait for another connection for up to 50 ms before succeeding. It only revalidates retention authority, not the original source/grant/private-binding authority. Consequently a source grant can expire or its current mirror can be revoked during this deliberately introduced DB wait while retention remains authorized. The later checks cover retention expiry and operation/card time bounds, not the original grant; a private response, egress, ACK acceptance, or revision operation can then succeed using the stale original authorization. This contradicts A10 requirement 4 and the existing callback contract that the final source/grant/mapping check follows all DB waits and rendering. Generation already avoids this specific deadline gap by retaining and checking its source/grant bounds after retention IO. Arrange the bounded retention IO before the final nonblocking original-authority check, while preserving the final retention/time fence, or provide an equivalent combined validation that retains and checks all relevant bounds. Merely swapping two checks is not sufficient if the final original-authority callback introduces another wait or outlives the retained retention deadline: preserve its existing nonblocking mirror contract and define one coherent combined authorization fence for both authorities."
-    },
     {
       "id": "monitor-ack-publication-lifecycle",
       "status": "pre-existing follow-up; not a blocker for bounded replay fix",
@@ -1051,43 +1124,14 @@
       }
     }
   ],
-  "checkpoint": "Opus5 monitor replay fix integrated; A10 Opus-built candidate blocked by independent Codex review; awaiting coding model choice after Claude weekly429",
+  "checkpoint": "A10 combined authority fence fixed with actual Codex, independent Kimi K3 approval and fresh macOS/Linux tests; next A05-refresh then A11",
   "next_task_details": {
-    "A10": "Restore exact preserved portability candidate in native osstack; verify final hash and run real canonical Fable5.1 after quota recovers. Resolve findings, validate Ubuntu/Python3.11 runtime and only then integrate. No substitute approval.",
     "A05-refresh": "Before A11, add explicit authorized re-preview of acknowledged expired cards without resending original delivery; account for retained capabilities and render-lock contention.",
     "A11": "After A10 and A05 recovery, compose opt-in owned workers, source/identity/authorization mirrors, signed revision-bound correction/adoption/retraction and delivery into server lifecycle.",
-    "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct.",
-    "A10-authority-ordering": "Repair combined original/retention authorization fence; add original grant expiry/revoke inside real retention DB wait regressions. Re-run targeted/full/parent/macOS/Linux checks and independent review before integration. See A10-AUTHORITY-FENCE.md."
+    "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct."
   },
-  "updated_at_utc": "2026-09-16T02:09:46.816758+00:00",
-  "candidates": {
-    "A10": {
-      "status": "blocked: independent Codex review requests changes; not integrated",
-      "candidate_sha256": "5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360",
-      "snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/snapshot-1789532813789323000",
-      "builder_receipt": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/builder-1789532813789323000.receipt.json",
-      "target_tests": {
-        "passed": 121
-      },
-      "mac_full_tests": {
-        "passed": 2619,
-        "warnings": 11
-      },
-      "parent_gates": 16,
-      "linux_target_tests": {
-        "passed": 121
-      },
-      "linux_combined_tests": {
-        "passed": 2636,
-        "warnings": 11,
-        "scope": "same candidate plus independently approved monitor replay repair; not evidence of A10 approval"
-      },
-      "failed_review_receipt": "reviews/a10-opus-unavailable.json",
-      "replacement_review": "Independent Codex static review completed; one grouped P1 authority-ordering blocker",
-      "review_receipt": "reviews/a10-codex-round-1.json",
-      "unresolved_blockers": 1
-    }
-  },
+  "updated_at_utc": "2026-09-16T15:49:08.823593+00:00",
+  "candidates": {},
   "candidate_history": {
     "A10-before-Opus": {
       "status": "candidate_tests_passed_review_pending_not_integrated",
@@ -1143,6 +1187,104 @@
         "integrated_code_unchanged": true,
         "candidate_sha256_verified": true
       }
+    },
+    "A10-blocked-Opus": {
+      "status": "blocked: independent Codex review requests changes; not integrated",
+      "candidate_sha256": "5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360",
+      "snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/snapshot-1789532813789323000",
+      "builder_receipt": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/builder-1789532813789323000.receipt.json",
+      "target_tests": {
+        "passed": 121
+      },
+      "mac_full_tests": {
+        "passed": 2619,
+        "warnings": 11
+      },
+      "parent_gates": 16,
+      "linux_target_tests": {
+        "passed": 121
+      },
+      "linux_combined_tests": {
+        "passed": 2636,
+        "warnings": 11,
+        "scope": "same candidate plus independently approved monitor replay repair; not evidence of A10 approval"
+      },
+      "failed_review_receipt": "reviews/a10-opus-unavailable.json",
+      "replacement_review": "Independent Codex static review completed; one grouped P1 authority-ordering blocker",
+      "review_receipt": "reviews/a10-codex-round-1.json",
+      "unresolved_blockers": 1
     }
-  }
+  },
+  "resolved_findings": [
+    {
+      "id": "A10-authority-ordering",
+      "status": "fixed and independently approved",
+      "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+      "evidence": "reviews/a10-codex-validation.json"
+    }
+  ],
+  "combined_validation": {
+    "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+    "baseline_commit": "a9360fbd2ae67e6931bc47c22bc4215e23c24b95",
+    "code_commit": "8812e8087f5b40d6ea8b0a7426202b00f5804608",
+    "mac_full": {
+      "passed": 2819,
+      "warnings": 11,
+      "seconds": 91.17
+    },
+    "linux_full": {
+      "passed": 2819,
+      "warnings": 11,
+      "seconds": 108.14
+    },
+    "target_tests": {
+      "passed": 304,
+      "warnings": 1,
+      "seconds": 33.7
+    },
+    "linux_target_tests": {
+      "passed": 304,
+      "warnings": 1,
+      "seconds": 49.6
+    },
+    "parent_gates": 21,
+    "linux_parent_gates": 21,
+    "ruff": "passed",
+    "lock_check": "passed",
+    "linux_limit": "OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE=1; no sibling repositories or host credentials mounted. Not Ubuntu x86_64 or Tencent production certification.",
+    "environment": "native Linux aarch64 Ubuntu6.8 kernel/Debian12 userspace/Python3.11",
+    "clock_setup": "Dedicated a10 VM guest NTP paused for this session; Lima host synchronization is sole clock authority; product rollback denial unchanged",
+    "clock_validation": {
+      "samples": 4238,
+      "backward_steps": [],
+      "minimum_wall_step_ns": 5044583,
+      "duration_seconds": 30,
+      "test_vm_only": "After settling: systemd-timesyncd stopped for own a10VM session; Lima host clock sole authority"
+    },
+    "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress",
+    "files_sha256": {
+      "ostag/briefs/callbacks.py": "36907d13b96b9e9476b8ddaf6c0f149d7e035fa19273cfefad3388b170c0617d",
+      "ostag/briefs/card_delivery.py": "cecb213d73df7477938411f502ecce529efe1e367c7cb15edb346496316a30bf",
+      "ostag/briefs/card_transport.py": "69dbc90818eff78518da53a9dd8fd06173289959dabdd568eab53474e098f356",
+      "ostag/briefs/delivery.py": "0dc6e6660ae8380ce3bc098dda342807109ffc005baa8fc26623288b98e34f2f",
+      "ostag/briefs/feishu_transport.py": "0cf8fc52b4e517515d0e8e22f5d87a21a66c0ed092e56fa9fa5652de707a14ce",
+      "ostag/briefs/openai_transport.py": "d5954b24f1f6347e35d554f393ef6deb747bcd6e4294fe99e83eb4f73be87beb",
+      "ostag/briefs/retention.py": "63944e78561f9e9fa9e794085201a2d17bcf1e0d1965bca5f2cbb0a3bf0ebf28",
+      "ostag/briefs/revisions.py": "efc4a4105f2828c986baefed568b06c042caf5d2e919dbddf24ca8f640d243ae",
+      "ostag/briefs/service.py": "d19682dd87e3951a556398e87d33a098bfccfc3df566e112b042d8c9e77cb493",
+      "ostag/briefs/store.py": "0653f87736e215cd85c9803116a3d0b1f3bde8648a50fe1efd3012d604ec9a71",
+      "ostag/briefs/worker.py": "e38495773e084fd203d87d2f3452ddb2fb269b1b8c24735eece615c0df5c2aed",
+      "tests/test_brief_retention.py": "299703e521a8b96930c7ebc56b5359fb24f3fc8c6fb78626897f93bd44920c9f",
+      "tests/test_brief_revocation.py": "b6f29a0465b926649d7096afa3b6c07008086f64a1d0d432c8005fd169448389"
+    },
+    "review_receipt": "a10-kimi-k3-round-1.json",
+    "read_coverage": "reviews/a10-kimi-read-coverage.json",
+    "no_live_platform_or_production_acceptance": true
+  },
+  "superseded_requirements": [
+    {
+      "requirement": "A10 canonical Fable5.1 final candidate review",
+      "reason": "Latest user selected actual Codex coding and Kimi K3 audit; completed actual Kimi approval is authoritative for this slice."
+    }
+  ]
 }
