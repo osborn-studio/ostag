@@ -1,0 +1,11 @@
+{
+  "status": "unavailable",
+  "requested_model": "claude-fable-5-1",
+  "api_error_status": 429,
+  "model_usage": {},
+  "message": "You've reached your Fable limit. Switch to another model, or manage usage credits at claude.ai/settings/usage?from=cc_cli_limit_message, to continue.",
+  "verdict": null,
+  "reviewed_candidate": null,
+  "attempted_candidate": "588eb6424faf9421207c3a8a3a30c629ba62d629f3bbe5aeddb3975f95981d35",
+  "source_artifact": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10/fable-1789523902722754000.stdout"
+}
