@@ -1,5 +1,12 @@
 """U01 private Feishu delivery observation CORE, with no network implementation.
 
+Explicit retention= adds the typed A10 gate from retention.py. Its bounded local
+SQLite authority read is the documented exception to the no-I/O policy-callback
+contract; it never acquires this ledger from inside a retention transaction.
+Original current authorizers and final clocks remain required. Retirement is a
+sanctioned opt-in exception to append-only content, never to send/event identity.
+
+
 Conceptual adaptation: amplifthq/opentag 3a3136d, provider-delivery/reconciliation.ts.
 This is Python/SQLite semantics, not Slack proof. A05 must implement and certify
 an actual Feishu adapter; D01 must separately verify platform acceptance.
@@ -20,8 +27,10 @@ including generation. It must not access this store, call a network, or accept
 endpoint/model approval flags. It runs after lock waits, as the final precommit
 policy, immediately before egress, and before accepting observations. After the
 final policy only clock/cancellation checks and commit are permitted under lock.
-The adapter must invoke before_egress immediately at EACH actual send/read, after
-any internal awaits, and must honor failures without wrapping or proceeding.
+The adapter must invoke before_egress exactly once after connection waits and
+honor failures without wrapping or proceeding. The owned HTTP adapter additionally
+uses the typed gate's separate before_body recheck after header writes. Each
+boundary is single-use; neither grants a retry or a second send.
 
 The async transport is trusted code, not an authentication credential or a
 sandbox. No retries, redirects, fallback sends, text search, hidden network work,
@@ -89,7 +98,39 @@ _ID = re.compile(r"[A-Za-z0-9_:.@/-]{1,256}\Z")
 _MESSAGE_ID = re.compile(r"[A-Za-z0-9_-]{8,256}\Z")
 REASONS = frozenset({"transport_error", "invalid_proof", "missing_proof", "timeout",
                      "cancelled", "stopped", "authorization_denied", "clock_error",
-                     "store_error", "interrupted", "not_found"})
+                     "store_error", "interrupted", "not_found", "conflict"})
+
+
+class _TransportEgressGate:
+    """Internal two-boundary adapter contract, preserving the one-call callback.
+
+    Calling the ordinary callback twice permanently invalidates acceptance. Only
+    the owned POST adapter uses before_body, once after the header-write await;
+    it reruns the same authority without granting another header/send attempt.
+    The check may be synchronous (TEXT) or return an awaitable (card), matching
+    the existing transport contract. Async callers must await each result.
+    """
+    def __init__(self, check):
+        self._check = check
+        self._used = self._body_used = self._invalid = False
+
+    @property
+    def valid(self):
+        return self._used and not self._invalid
+
+    def __call__(self):
+        if self._used:
+            self._invalid = True
+            raise DeliveryError("transport_error")
+        self._used = True
+        return self._check()
+
+    def before_body(self):
+        if not self.valid or self._body_used:
+            self._invalid = True
+            raise DeliveryError("transport_error")
+        self._body_used = True
+        return self._check()
 
 
 class DeliveryError(Conflict):
@@ -413,7 +454,7 @@ class DeliveryService:
     """
     def __init__(self, *, store: BriefStore, worker: WorkerContext, transport: FeishuTransport,
                  authorize: Callable[[DeliveryIntent], None], clock=utc_now,
-                 timeout: float = 5.0, max_concurrency: int = 1):
+                 timeout: float = 5.0, max_concurrency: int = 1, retention=None):
         if (not callable(authorize) or not callable(clock) or type(worker) is not WorkerContext
                 or not callable(getattr(transport, "send", None))
                 or not callable(getattr(transport, "observe", None))):
@@ -422,6 +463,9 @@ class DeliveryService:
                 or not 0 < timeout <= 30 or type(max_concurrency) is not int
                 or not 1 <= max_concurrency <= 8):
             raise DeliveryError("invalid_operation_bounds")
+        from ostag.briefs.retention import configure_guard
+        self._retention_enabled = configure_guard(retention, store)
+        self.retention = retention
         self.store, self.worker, self.transport = store, worker, transport
         self.authorize, self.clock = authorize, clock
         self.timeout, self.max_concurrency = timeout, max_concurrency
@@ -449,10 +493,11 @@ class DeliveryService:
         return _Operation(self)
 
     def _policy(self, op, intent):
+        from ostag.briefs.retention import check_guard
         denied = False
         try:
-            if self.authorize(intent) is not None:
-                denied = True
+            check_guard(self, intent.scope, intent.job_id, intent.revision_id,
+                        authorize=lambda: self.authorize(intent))
         except (Exception, asyncio.CancelledError):
             denied = True
         if denied:
@@ -520,6 +565,8 @@ class DeliveryService:
             if snapshot is None:
                 raise DeliveryError("conflict")
             intent = snapshot.intent
+            if self._retention_enabled:
+                self._policy(op, intent)
             # Reading historical scoped status is not authorization to send.
             if sending and snapshot.state != "pending":
                 return snapshot
@@ -533,15 +580,21 @@ class DeliveryService:
                 attempt = await self._db(op, self.store.begin_delivery, self.worker, intent,
                                         clock=op.clock, precommit=policy)
                 if attempt is None:
-                    return await self._db(op, self.store.delivery_snapshot, self.worker,
-                                          scope, delivery_id)
+                    current = await self._db(op, self.store.delivery_snapshot, self.worker,
+                                             scope, delivery_id)
+                    if self._retention_enabled:
+                        self._policy(op, current.intent)
+                    return current
             else:
                 observation = await self._db(
                     op, self.store.begin_delivery_observation, self.worker,
                     intent, clock=op.clock, precommit=policy)
                 if observation is None:
-                    return await self._db(op, self.store.delivery_snapshot, self.worker,
-                                          scope, delivery_id)
+                    current = await self._db(op, self.store.delivery_snapshot, self.worker,
+                                             scope, delivery_id)
+                    if self._retention_enabled:
+                        self._policy(op, current.intent)
+                    return current
 
             async def exchange():
                 # This runs IN the scheduled coroutine, after all scheduling/DB
@@ -549,25 +602,36 @@ class DeliveryService:
                 await self._db(op, self.store.check_delivery_egress, self.worker, intent,
                                token=attempt.token if sending else None, observation=observation,
                                clock=op.clock, precommit=policy)
-                egress_used = False
                 def egress():
-                    nonlocal egress_used
-                    if egress_used:
-                        raise DeliveryError("transport_error")
-                    egress_used = True
                     # Adapter may have awaited after entry: recheck persisted
                     # cancellation again, without waiting, then current policy.
-                    self.store.check_delivery_egress(
-                        self.worker, intent, token=attempt.token if sending else None,
-                        observation=observation, clock=op.clock, precommit=policy)
-                    policy()
+                    # This is local authority, even though called by transport:
+                    # don't turn a durable denial/store failure into remote IO
+                    # failure. Raise only a fixed code, outside exception context.
+                    denied = None
+                    try:
+                        self.store.check_delivery_egress(
+                            self.worker, intent, token=attempt.token if sending else None,
+                            observation=observation, clock=op.clock, precommit=policy)
+                        policy()
+                    except DeliveryError as exc:
+                        denied = _reason(exc, "conflict")
+                    except ClockError:
+                        denied = "clock_error"
+                    except Conflict:
+                        denied = "conflict"
+                    except Exception:
+                        denied = "store_error"
+                    if denied:
+                        raise DeliveryError(denied)
+                gate = _TransportEgressGate(egress)
                 failure = None
                 try:
                     if sending:
-                        response = await self.transport.send(attempt, before_egress=egress)
+                        response = await self.transport.send(attempt, before_egress=gate)
                     else:
                         response = await self.transport.observe(
-                            intent, observation.message_id, before_egress=egress)
+                            intent, observation.message_id, before_egress=gate)
                 except DeliveryError as exc:
                     failure = _reason(exc, "transport_error")
                 except asyncio.CancelledError:
@@ -576,7 +640,7 @@ class DeliveryService:
                     failure = "transport_error"
                 if failure:
                     return failure, None
-                if not egress_used:
+                if not gate.valid:
                     return "invalid_proof", None
                 return None, response
 
@@ -625,22 +689,57 @@ class DeliveryService:
                 task.add_done_callback(released)
             else:
                 self._active -= 1
+        cancelled_result = False
         if reason:
             if attempt is not None or observation is not None:
                 self._unknown(scope, delivery_id, reason if reason in REASONS else "store_error",
                               attempt=attempt, observation=observation)
             if reason == "cancelled":
                 raise asyncio.CancelledError()
-            if reason in ("transport_error", "invalid_proof"):
+            legacy_cancel = (reason == "conflict" and attempt is not None
+                             and not self._retention_enabled)
+            if reason in ("transport_error", "invalid_proof") or legacy_cancel:
                 # A detached private status may be returned after a sanitized IO
-                # failure. No extra network work and no blocking DB retry here.
+                # failure, or legacy local cancellation with retained custody.
+                # Keep the local conflict diagnostic; never label it remote IO.
+                # No extra network work and no blocking DB retry here.
                 try:
                     result = self.store.delivery_snapshot(self.worker, scope, delivery_id)
                 except Exception:
                     result = None
+                if legacy_cancel:
+                    if (result is not None and result.state == "unknown"
+                            and result.generation_state == "cancelled"
+                            and result.outbox_state == "cancelled"):
+                        cancelled_result = True
+                    else:
+                        result = None
             if result is None:
                 raise DeliveryError(reason)
+        if cancelled_result:
+            self._retained_result(op, result, check_authority=True)
+        else:
+            self._retained_result(op, result)
         return result
+
+    def _retained_result(self, op, result, *, check_authority=False):
+        """Private history released after fallback DB waits still needs current gates."""
+        if not self._retention_enabled and not check_authority:
+            return
+        from ostag.briefs.retention import check_guard
+        denied = False
+        try:
+            check_guard(self, result.intent.scope, result.intent.job_id, result.intent.revision_id,
+                        authorize=lambda: self.authorize(result.intent))
+            # The operation has closed its transport latch in finally; check the
+            # original time/cancellation bounds without reopening that latch.
+            if (self._stop.is_set() or op.owner.cancelling() or monotonic() >= op.deadline
+                    or _micros(self.clock()) < op.last_us):
+                raise DeliveryError("authorization_denied")
+        except (Exception, asyncio.CancelledError):
+            denied = True
+        if denied:
+            raise DeliveryError("authorization_denied")
 
 
 def _snapshot(row, scope, generation_state, outbox_state, observations):

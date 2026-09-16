@@ -165,13 +165,16 @@ class BriefService:
                  config: GenerationConfig | None, settings: Callable[[], Settings],
                  grants: GrantLookup, sources: Callable[[RequesterContext, str], SourceSnapshot | None],
                  destination: Callable[[RequesterContext], PrivateDestination | None],
-                 clock: Callable[[], str] = utc_now, max_intake: int = 8):
+                 clock: Callable[[], str] = utc_now, max_intake: int = 8, retention=None):
         for callback in (settings, grants, sources, destination, clock):
             if not callable(callback):
                 raise _invalid("mandatory trusted current callbacks required")
         bounded_int(max_intake, "max_intake", 20, 1)
         if config is not None and type(config) is not GenerationConfig:
             raise _invalid("explicit pinned generation config required")
+        from ostag.briefs.retention import configure_guard
+        self._retention_enabled = configure_guard(retention, store)
+        self.retention = retention
         self.store, self.transport = store, transport
         self.config = None if config is None else replace(config)
         self.settings, self.grants, self.sources = settings, grants, sources
@@ -193,16 +196,54 @@ class BriefService:
         self._closed.set()
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def authorize_current(self, request, scope, destination, *, stopped):
-        """No store/guard calls: safe for the trusted non-reentrant precommit gate.
+    def authorize_current(self, request, scope, destination, *, stopped, job_id=None):
+        """Compose durable retention with the final current original mirrors.
 
-        Caller performs ALL blocking persistence work before entering here.
+        All primary SQL waits precede this call. A10's bounded retention I/O
+        then precedes EVERY mutable settings/source/grant/destination lookup,
+        including admission precommit, count/create egress and completion.
+        Captured timestamps alone cannot detect ACL removal or binding changes.
+        The mirror pass retains all original time/stop checks; the guard then
+        fences its captured retention expiry/rollback without successful-path
+        I/O. See retention.py for the precise concurrent decision boundary.
+
+        Compatibility: no external mirror signatures/schema changes; disabled
+        retention runs the same mirror pass once. Enabled mirrors must be
+        nonblocking and non-reentrant, with no SQL, network or policy mutations.
+        A11 must provide these trusted current mirrors and serialize mutations
+        with admission/dispatch when stronger cross-authority ordering is needed.
+        """
+        def mirror():
+            self._authorize_mirror(request, scope, destination, stopped=stopped)
+
+        if not self._retention_enabled:
+            return mirror()
+        from ostag.briefs.retention import RetentionGuard, check_guard
+        if type(self.retention) is not RetentionGuard:
+            raise _invalid("retention unavailable")
+        # Preserve A03/A04's sanitized checkpoint-denied outcome, including
+        # failed original mirrors; never classify these as provider/store errors.
+        denied = False
+        try:
+            if job_id is None:
+                self.retention.intake(scope, request.sources, authorize=mirror)
+            else:
+                check_guard(self, scope, job_id, authorize=mirror)
+        except Exception:
+            denied = True
+        if denied:
+            raise _invalid("retention authority denied")
+
+    def _authorize_mirror(self, request, scope, destination, *, stopped):
+        """Original current authority, with no retention or primary store I/O.
+
         Each source is individually checked, including its collection identity.
         Retain every returned time bound: later callbacks can exhaust an earlier
         snapshot's freshness or grant lifetime. Recheck them together against a
         final trusted clock after all lookups, without another store/policy read.
-        The final stop/time checks are nonblocking. Cross-system atomicity is
-        impossible; callback completion is the logical authorization point.
+        The final stop/time checks are nonblocking. This is the original-authority
+        component; retention.py defines the composed logical authorization point
+        and the limits of sequential observations of concurrent policy changes.
         """
         if stopped() or not self.configured:
             raise _invalid("authorization unavailable")
@@ -279,6 +320,9 @@ class BriefService:
             if existing is not None:
                 if not self.store.matches_request(scope, existing.job_id, request_hash):
                     return BriefStatus("conflict")
+                if self._retention_enabled:
+                    from ostag.briefs.retention import check_guard
+                    check_guard(self, scope, existing.job_id)
                 return BriefStatus(existing.state, existing.job_id)
             if not request.sources or not any(s.excerpt.strip() for s in request.sources):
                 return BriefStatus("needs_input")
@@ -349,11 +393,21 @@ class BriefService:
         signal = Event()
         with self._cancel_lock:
             self._active_cancellations[(scope, job_id)] = signal
+        if self._retention_enabled:
+            from ostag.briefs.retention import RetentionGuard
+            if type(self.retention) is not RetentionGuard:
+                signal.set()
+            else:
+                self.retention.watch(scope, job_id, signal)
         return signal
 
     def unwatch_cancellation(self, scope: RequesterContext, job_id: str):
         with self._cancel_lock:
-            self._active_cancellations.pop((scope, job_id), None)
+            signal = self._active_cancellations.pop((scope, job_id), None)
+        if self._retention_enabled:
+            from ostag.briefs.retention import RetentionGuard
+            if type(self.retention) is RetentionGuard:
+                self.retention.unwatch(scope, job_id, signal)
 
     def cancel(self, scope: RequesterContext, job_id: str):
         """Trusted requester context only; persisted cancellation also invalidates outbox."""

@@ -40,6 +40,16 @@ transport. No arbitrary client, endpoint, auth/config discovery, proxy, redirect
 retry, tools, files, conversation, background processing or response storage.
 Cancellation closes local resources; it cannot establish remote termination.
 
+Both count and create use a one-shot public AsyncByteStream. With the owned
+HTTP/1.1 transport, it is pulled after connection acquisition/DNS/TCP/TLS and
+header writes; no prefetch, retry, redirect or HTTP/2 flow-control buffer sits
+between this gate and submission of the single bounded body chunk to the write.
+The gate is a local write-handoff point, NOT an atomic socket/revocation primitive:
+httpcore/AnyIO still schedule inside that in-flight write and TLS/socket/OS buffers
+may retain submitted bytes. Revocation cannot recall them, and timeout/denial
+never implies zero remote disclosure or zero spend. Injected transports are
+trusted infrastructure and must preserve this stream-consumption contract.
+
 HTTP bodies are capped at 6 MiB + 16 KiB (1 MiB input escaped at worst 6x plus
 fixed framing); response envelopes at 8 MiB before UTF-8 decoding/JSON allocation,
 count at 4 KiB, and each response at 4096 network chunks. Compression is explicitly
@@ -261,7 +271,7 @@ class OpenAIReadOnlyTransport:
                 check()
                 async with asyncio.timeout_at(deadline) as timer:
                     async with httpx.AsyncClient(
-                        trust_env=False, follow_redirects=False,
+                        trust_env=False, follow_redirects=False, http2=False,
                         limits=httpx.Limits(max_connections=1, max_keepalive_connections=0),
                         transport=self._transport,
                         headers={"Authorization": "Bearer " + self._key,
@@ -269,26 +279,47 @@ class OpenAIReadOnlyTransport:
                                  "Accept-Encoding": "identity"},
                     ) as client:
                         async def post(path, body, bound):
-                            nonlocal deadline, authorization_reason
-                            # Build before the final gate. No DB or scheduling await
-                            # follows authorization before entering actual HTTP IO.
                             client.cookies.clear()  # Explicit bearer auth only, even after count.
                             outgoing = client.build_request("POST", _ORIGIN + path, content=body)
-                            check()
-                            try:
-                                remaining = request.reauthorize()
-                            except Exception as exc:
-                                authorization_reason = _authorization_reason(exc)
-                            if authorization_reason is not None:
-                                # Unwind owned resources without carrying the
-                                # callback's object, text, context or traceback.
-                                raise OpenAITransportError("provider transport failed")
-                            if remaining is not None:
-                                if not _seconds(remaining):
-                                    raise OpenAITransportError("invalid authorization time")
-                                deadline = min(deadline, loop.time() + remaining)
-                                timer.reschedule(deadline)
-                            check()  # catches a stalled synchronous callback too
+                            def authorize_body():
+                                nonlocal deadline, authorization_reason
+                                check()
+                                try:
+                                    remaining = request.reauthorize()
+                                except Exception as exc:
+                                    authorization_reason = _authorization_reason(exc)
+                                if authorization_reason is not None:
+                                    # Unwind owned resources without carrying the
+                                    # callback's object, text, context or traceback.
+                                    raise OpenAITransportError("provider transport failed")
+                                if remaining is not None:
+                                    if not _seconds(remaining):
+                                        raise OpenAITransportError("invalid authorization time")
+                                    deadline = min(deadline, loop.time() + remaining)
+                                    timer.reschedule(deadline)
+                                check()  # catches a stalled synchronous callback too
+
+                            class Body(httpx.AsyncByteStream):
+                                consumed = False
+
+                                async def __aiter__(self):
+                                    if self.consumed:
+                                        raise OpenAITransportError("provider transport failed")
+                                    self.consumed = True
+                                    authorize_body()
+                                    yield body
+
+                            async def trace(name, info):
+                                if name == "http11.send_request_headers.started":
+                                    authorize_body()
+
+                            # Public HTTPX stream boundary: httpcore consumes this
+                            # only after pool/DNS/TCP/TLS AND header-write awaits.
+                            # Keep the frozen content for trusted test transports;
+                            # production IO consumes stream, never Request.content.
+                            outgoing.stream = Body()
+                            outgoing.extensions["trace"] = trace
+                            authorize_body()
                             outgoing.extensions["timeout"] = httpx.Timeout(
                                 deadline - loop.time()).as_dict()
                             response = await client.send(outgoing, stream=True)

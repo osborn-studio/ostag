@@ -619,6 +619,18 @@ FAILURE_CAUSES = frozenset({
 })
 
 
+# Retirement keeps these documented local causes and accounting transitions.
+# Legacy active jobs may still use identifier-shaped custom diagnostics; those
+# are content, not accounting, and become "retired" at cleanup or late writes.
+_RETIRED_COST_DIAGNOSTICS = FAILURE_CAUSES | {
+    "reserved", "started", "settled", "precall_cancelled", "crash", "retired",
+}
+
+
+def _retired_cost_diagnostic(diagnostic: str) -> str:
+    return diagnostic if diagnostic in _RETIRED_COST_DIAGNOSTICS else "retired"
+
+
 def _failure_cause(cause: str) -> None:
     if type(cause) is not str or cause not in FAILURE_CAUSES:
         raise _invalid("unknown sanitized failure cause")
@@ -655,6 +667,16 @@ def _job(row: sqlite3.Row) -> Job:
 def _revision(row: sqlite3.Row) -> Revision:
     return Revision(row["revision_id"], row["job_id"], row["payload_json"],
                     row["provenance_json"], row["validation_version"], _stamp(row["created_us"]))
+
+
+def _retirement_method(operation):
+    """Sanitize new maintenance surfaces without a module import cycle."""
+    from functools import wraps
+    @wraps(operation)
+    def call(*args, **kwargs):
+        from ostag.briefs.retention import _safe
+        return _safe(operation)(*args, **kwargs)
+    return call
 
 
 class BriefStore:
@@ -752,6 +774,109 @@ class BriefStore:
             yield db
             db.commit()
 
+    @_retirement_method
+    def retention_cancel(self, scope, job_id):
+        """A10 durable scoped fence; handles every terminal phase idempotently.
+
+        Authority tombstone must already be committed by RetentionCoordinator.
+        No clock rollback may restore authority; retain the original accounting
+        timestamps and unknown/started spend. This method never recalls a send.
+        """
+        from ostag.briefs.retention import owned_retirement
+        with owned_retirement(self) as db:
+            self._retirement_fence(db, scope, job_id)
+
+    def _retirement_fence(self, db, scope, job_id):
+        row = self._find(db, scope, job_id)
+        if row is None:
+            raise Conflict("retirement scope unavailable")
+        fence = row['fence'] + (row['state'] != 'cancelled')
+        if row['state'] != 'cancelled':
+            self._terminal(db, row, 'cancelled', row['updated_us'])
+        db.execute("UPDATE brief_outbox SET state='cancelled' WHERE job_id=?", (job_id,))
+        current = self._find(db, scope, job_id)
+        if (current['state'] != 'cancelled' or current['fence'] != fence
+                or current['lease_us'] is not None or current['owner_id'] is not None
+                or db.execute("SELECT 1 FROM brief_outbox WHERE job_id=? AND state!='cancelled'",
+                              (job_id,)).fetchone()):
+            raise StoreError("retirement incomplete")
+
+    def _verify_retired(self, db, scope, job_id):
+        """Read every content postcondition, also used to validate durable receipts.
+
+        Schema ownership is checked by the caller. Cost metadata is an exact
+        numeric/digest whitelist; its canonical config must be the retired
+        sentinel. U01 diagnostics/reads and cost usage contain only bounded
+        reason codes, identities and numeric accounting, never source text.
+        """
+        from ostag.briefs.retention import _RETIRED
+        row = self._find(db, scope, job_id)
+        if (row is None or row['payload_json'] != _RETIRED or row['state'] != 'cancelled'
+                or row['lease_us'] is not None or row['owner_id'] is not None):
+            raise StoreError("retirement incomplete")
+        if (db.execute("SELECT 1 FROM brief_outbox WHERE job_id=? AND state!='cancelled'",
+                       (job_id,)).fetchone()
+                or db.execute('SELECT 1 FROM brief_revisions WHERE job_id=? AND '
+                              '(payload_json!=? OR provenance_json!=?)',
+                              (job_id, _RETIRED, _RETIRED)).fetchone()):
+            raise StoreError("retirement incomplete")
+        profile = db.execute('SELECT profile_json FROM brief_cost_profiles WHERE job_id=?',
+                             (job_id,)).fetchone()
+        if profile is not None:
+            parsed = CostProfile(**json.loads(profile[0]))
+            if parsed.parameters_json != _RETIRED or parsed.profile_json != profile[0]:
+                raise StoreError("retirement incomplete")
+        if any(r[0] != _retired_cost_diagnostic(r[0]) for r in db.execute(
+                'SELECT diagnostic FROM brief_cost_calls WHERE job_id=?', (job_id,))):
+            raise StoreError("retirement incomplete")
+        if db.execute('PRAGMA user_version').fetchone()[0] == DELIVERY_SCHEMA_VERSION:
+            if (db.execute('SELECT 1 FROM brief_deliveries WHERE job_id=? AND '
+                           '(intent_json!=? OR receipt_json IS NOT NULL)',
+                           (job_id, _RETIRED)).fetchone()
+                    or db.execute('SELECT 1 FROM brief_delivery_observations WHERE delivery_id IN '
+                                  '(SELECT delivery_id FROM brief_deliveries WHERE job_id=?)',
+                                  (job_id,)).fetchone()):
+                raise StoreError("retirement incomplete")
+
+    @_retirement_method
+    def retire_local(self, scope, job_id):
+        """Remove ALL current SQL content, preserving send/idempotency/cost custody.
+
+        The canonical {retired:true} sentinel is a denied content state, not an
+        empty active draft. No schema upgrade is needed: cancelled permanent job
+        and outbox rows fence old binaries too. Numeric cost pins/digests survive;
+        full configuration (including prompt_template) does not. Actual numeric
+        settlement remains possible through the existing reconciliation API.
+        """
+        from ostag.briefs.retention import _RETIRED, owned_retirement
+        with owned_retirement(self, compact=True) as db:
+            self._retirement_fence(db, scope, job_id)
+            db.execute('UPDATE brief_jobs SET payload_json=? WHERE job_id=?', (_RETIRED, job_id))
+            db.execute('UPDATE brief_revisions SET payload_json=?,provenance_json=? WHERE job_id=?',
+                       (_RETIRED, _RETIRED, job_id))
+            profile = db.execute('SELECT profile_json FROM brief_cost_profiles WHERE job_id=?',
+                                 (job_id,)).fetchone()
+            if profile is not None:
+                value = json.loads(profile[0])
+                # Whitelist numeric accounting plus original comparison digest.
+                safe = {key: value[key] for key in ('evaluation_key', 'max_job_micros',
+                                                   'max_calls', 'reservation_micros')}
+                safe['parameters_json'] = _RETIRED
+                db.execute('UPDATE brief_cost_profiles SET profile_json=? WHERE job_id=?',
+                           (_canonical(safe), job_id))
+            for call in db.execute('SELECT reservation_id,diagnostic FROM brief_cost_calls '
+                                   'WHERE job_id=?', (job_id,)).fetchall():
+                safe_diagnostic = _retired_cost_diagnostic(call['diagnostic'])
+                if safe_diagnostic != call['diagnostic']:
+                    db.execute('UPDATE brief_cost_calls SET diagnostic=? WHERE reservation_id=?',
+                               (safe_diagnostic, call['reservation_id']))
+            if db.execute('PRAGMA user_version').fetchone()[0] == DELIVERY_SCHEMA_VERSION:
+                db.execute('UPDATE brief_deliveries SET intent_json=?,receipt_json=NULL '
+                           'WHERE job_id=?', (_RETIRED, job_id))
+                db.execute('DELETE FROM brief_delivery_observations WHERE delivery_id IN '
+                           '(SELECT delivery_id FROM brief_deliveries WHERE job_id=?)', (job_id,))
+            self._verify_retired(db, scope, job_id)
+
     def enable_manual(self) -> None:
         """Opt in to additive schema3; legacy construction still upgrades 1 -> 2.
 
@@ -831,6 +956,8 @@ class BriefStore:
         row = self._delivery_row(db, worker, scope, delivery_id)
         if row is None:
             return None
+        if row['intent_json'] == '{"retired":true}':
+            raise Conflict("brief content retired; historical send may persist")
         job = self._find(db, scope, row["job_id"])
         box = db.execute("SELECT * FROM brief_outbox WHERE delivery_id=?",
                          (delivery_id,)).fetchone()
@@ -1004,6 +1131,11 @@ class BriefStore:
         db.execute("UPDATE brief_deliveries SET state='unknown',updated_us=?,"
                    "first_failure_json=COALESCE(first_failure_json,?) WHERE delivery_id=? "
                    "AND state IN ('started','unknown')", (stamp, uncertainty, row["delivery_id"]))
+        # The original send token retains custody after retirement, including
+        # late egress denial/transport failure. Keep its bounded first failure
+        # and unknown outcome, but never recreate retired observation history.
+        if row['intent_json'] == '{"retired":true}':
+            return
         ordinal = db.execute("SELECT count(*) FROM brief_delivery_observations "
                              "WHERE delivery_id=?", (row["delivery_id"],)).fetchone()[0] + 1
         if ordinal <= 32:
@@ -1203,6 +1335,8 @@ class BriefStore:
                 return None
             revision = db.execute("SELECT * FROM brief_revisions WHERE revision_id=?",
                                   (row["revision_id"],)).fetchone()
+            if revision['payload_json'] == '{"retired":true}':
+                raise Conflict("brief content retired; historical send may persist")
             return OutboxSnapshot(row["delivery_id"], _job(job).destination,
                                   row["state"], _revision(revision))
 
@@ -1701,6 +1835,7 @@ class BriefStore:
     def _cost_evidence(self, worker: WorkerContext, reservation_id: str, *, action: str,
                        usage: Usage | None, diagnostic: str,
                        clock: Callable[[], str]) -> CostReservation:
+        from ostag.briefs.retention import _RETIRED
         _worker(worker)
         _identifier(diagnostic, "cost diagnostic")
         with self._transaction() as db:
@@ -1708,6 +1843,13 @@ class BriefStore:
             stamp = _clock_micros(clock)
             row = self._cost_row(db, reservation_id)
             self._forward(row, stamp)
+            # All reconciliation paths (unknown, settle, release) share this
+            # durable check under the same write lock as cleanup. Never trust a
+            # detached job/profile or an object's opt-in flag for late evidence.
+            job = db.execute('SELECT payload_json FROM brief_jobs WHERE job_id=?',
+                             (row['job_id'],)).fetchone()
+            if job['payload_json'] == _RETIRED:
+                diagnostic = _retired_cost_diagnostic(diagnostic)
             state, encoded = row["state"], row["usage_json"]
             if action == "released":
                 if state not in ("reserved", "released"):
@@ -1752,7 +1894,13 @@ class BriefStore:
 
     def mark_cost_unknown(self, worker: WorkerContext, reservation_id: str, diagnostic: str, *,
                           clock: Callable[[], str] = utc_now) -> CostReservation:
-        """Retain the maximum after timeout/cancel/missing usage; never auto-refund."""
+        """Retain maximum spend; never auto-refund or restore retired content.
+
+        Active legacy diagnostics accept identifiers. After local retirement,
+        only FAILURE_CAUSES and reserved/started/settled/precall_cancelled/crash/
+        retired survive; custom identifiers are redacted to retired, without
+        discarding numeric evidence or rejecting otherwise valid settlement.
+        """
         return self._cost_evidence(worker, reservation_id, action="unknown", usage=None,
                                    diagnostic=diagnostic, clock=clock)
 

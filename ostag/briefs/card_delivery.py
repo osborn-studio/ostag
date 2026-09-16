@@ -1,5 +1,12 @@
 """card-v1: owned permanent send tombstones and original-message navigation.
 
+Explicit retention= adds the typed A10 gate from retention.py. Its bounded local
+SQLite authority read is the documented exception to the no-I/O policy-callback
+contract; it never acquires this ledger from inside a retention transaction.
+Original current authorizers and final clocks remain required. Retirement is a
+sanctioned opt-in exception to append-only content, never to send/event identity.
+
+
 Explicit initialize and composition only. load(scope, job) MUST read the original
 stored revision (PrivatePreview.from_outbox); authorize(preview) MUST check every
 source/grant snapshot, original revision/outbox cancellation, private mapping and
@@ -37,9 +44,9 @@ import sqlite3
 from threading import Event, Lock
 import time
 
-from ostag.briefs.delivery import FeishuBinding
+from ostag.briefs.delivery import FeishuBinding, _TransportEgressGate
 from ostag.briefs.rendering import PrivatePreview, render_navigation
-from ostag.briefs.store import PrivateDestination, RequesterContext
+from ostag.briefs.store import _retirement_method, PrivateDestination, RequesterContext
 from ostag.core.identity import Principal
 from ostag.work_monitor.identity import Destination
 
@@ -249,6 +256,34 @@ class CardLedger:
             raise _fail()
         self.path, self.capacity = Path(path), capacity
 
+    @_retirement_method
+    def retire_local(self, scope, job_id):
+        """Keep original logical/send custody; retire every body and live token."""
+        from ostag.briefs.retention import _RETIRED, owned_retirement
+        with owned_retirement(self, compact=True) as db:
+            rows = db.execute('SELECT * FROM cards WHERE scope=?', (_scope(scope),)).fetchall()
+            for row in rows:
+                if json.loads(row['identity_json'])['job'] != job_id:
+                    continue
+                db.execute('UPDATE cards SET cancelled=1,preview_json=?,card_json=?,wire_body=?, '
+                           'response_card=NULL WHERE delivery_id=?',
+                           (_RETIRED, _RETIRED, b'', row['delivery_id']))
+                db.execute('DELETE FROM card_tokens WHERE delivery_id=?', (row['delivery_id'],))
+            self._verify_retired(db, scope, job_id)
+
+    def _verify_retired(self, db, scope, job_id):
+        """Verify all bodies/tokens; identity and numeric send facts stay inert."""
+        from ostag.briefs.retention import _RETIRED
+        for row in db.execute('SELECT * FROM cards WHERE scope=?', (_scope(scope),)).fetchall():
+            if json.loads(row['identity_json'])['job'] != job_id:
+                continue
+            if (row['preview_json'] != _RETIRED or row['card_json'] != _RETIRED
+                    or row['wire_body'] != b'' or row['response_card'] is not None
+                    or row['cancelled'] != 1 or db.execute(
+                        'SELECT 1 FROM card_tokens WHERE delivery_id=?',
+                        (row['delivery_id'],)).fetchone()):
+                raise _fail()
+
     @contextmanager
     def _connection(self, *, create=False, wait=0):
         if self.path.is_symlink():
@@ -357,6 +392,8 @@ class CardLedger:
 
     @staticmethod
     def _intent(row, scope):
+        if row['preview_json'] == '{"retired":true}':
+            raise _fail()
         result = CardIntent(scope, row['delivery_id'], row['identity_json'], row['card_json'],
                             row['wire_body'], row['digest'], row['issued'], row['expires'])
         if (_digest(result.wire_body) != result.digest
@@ -548,7 +585,7 @@ class _Operation:
 class CardDeliveryService:
     """Explicit first-delivery and callback lifecycle; no background polling."""
     def __init__(self, *, ledger, namespace, load, resolve_binding, authorize, transport,
-                 clock=time.time, timeout=5, max_concurrency=1):
+                 clock=time.time, timeout=5, max_concurrency=1, retention=None):
         if (type(ledger) is not CardLedger or not all(callable(v) for v in
                 (load, resolve_binding, authorize, clock, getattr(transport, 'send', None),
                  getattr(transport, 'check_ack', None)))
@@ -557,6 +594,9 @@ class CardDeliveryService:
                 or not 1 <= max_concurrency <= 8):
             raise _fail()
         _id(namespace)
+        from ostag.briefs.retention import configure_guard
+        self._retention_enabled = configure_guard(retention, ledger)
+        self.retention = retention
         self.ledger, self.namespace, self.transport = ledger, namespace, transport
         self._load, self._binding, self._authorize, self._clock = load, resolve_binding, authorize, clock
         self.timeout, self.max_concurrency = timeout, max_concurrency
@@ -588,7 +628,7 @@ class CardDeliveryService:
         self._active += 1
         return _Operation(self)
 
-    def _current(self, p, identity=None):
+    def _current(self, p, identity=None, *, check_ack=None):
         if not self._lock.acquire(False):
             raise _fail()
         try:
@@ -600,8 +640,15 @@ class CardDeliveryService:
             binding = self._binding()
             if type(binding) is not FeishuBinding or binding != p.binding:
                 raise _fail()
-            if self._authorize(p) is not None:
-                raise _fail()
+            def mirrors():
+                # All bounded/nonblocking mirrors follow retention IO. Token
+                # rotation with an unchanged binding must invalidate a stale ACK.
+                if self._binding() != p.binding or self._authorize(p) is not None:
+                    raise _fail()
+                if check_ack is not None and check_ack() is not None:
+                    raise _fail()
+            from ostag.briefs.retention import check_guard
+            check_guard(self, p.scope, p.job_id, p.revision_id, authorize=mirrors)
         finally:
             self._lock.release()
 
@@ -692,15 +739,11 @@ class CardDeliveryService:
                 # we may only refresh status; a failed read must not diagnose or
                 # mutate the winner, nor return the earlier pending observation.
                 return await self._db(op, self.ledger.status, scope, delivery_id)
-            used = 0
-            async def gate():
-                nonlocal used
-                if used >= 2:
-                    raise _fail()
-                used += 1
+            async def egress():
                 await self._db(op, self.ledger.egress, attempt, clock=op.clock, check=policy)
                 policy()
                 op.clock()
+            gate = _TransportEgressGate(egress)
             async def exchange():
                 return await self.transport.send(attempt, before_egress=gate)
             task = asyncio.create_task(exchange())
@@ -709,11 +752,12 @@ class CardDeliveryService:
                 await asyncio.wait({task}, timeout=min(0.01, max(0, op.deadline - time.monotonic())))
             op.clock()
             ack = task.result()
-            if not used:
+            if not gate.valid:
                 raise _fail()
             def acceptance_policy():
-                self.transport.check_ack(attempt, ack)
-                policy()
+                self._current(p, intent.identity_json,
+                              check_ack=lambda: self.transport.check_ack(attempt, ack))
+                op.clock()
             await self._db(op, self.ledger.acknowledge, attempt, ack,
                            clock=op.clock, check=acceptance_policy)
             result = await self._db(op, self.ledger.status, scope, delivery_id)

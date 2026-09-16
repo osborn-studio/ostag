@@ -5,9 +5,13 @@ Trusted zero-argument CredentialSnapshot resolver independently binds installed
 identity, actual sender id/id_type and private owner, rechecked after every await
 boundary before IO and acceptance. No token discovery, GET/search/retry/fallback.
 
-Owned HTTPX/httpcore HTTP/1.1 trace gates run after connection/pool waits before
-headers AND before body; cancellation/authority exceptions cannot be translated
-into retryable write errors. All outward failures are fixed and context-free.
+Owned HTTPX/httpcore HTTP/1.1 traces gate headers after connection/pool waits.
+A one-shot public AsyncByteStream uses the typed service gate's separate body
+recheck after header-write waits (plain trusted callbacks support both checks),
+without prefetch or HTTP/2 buffering. The bounded chunk then belongs to an in-flight
+network write, including backend scheduling and TLS/socket/OS buffers; this is a
+local handoff, not atomic remote recall. Cancellation/authority exceptions cannot
+be translated into retryable write errors. All outward failures are fixed and context-free.
 Only a bounded MockTransport seam is injectable. The service owns the total
 monotonic deadline, abandonment and active capacity until this coroutine exits.
 No full-card echo or human receipt is inferred from a create acknowledgement.
@@ -23,6 +27,7 @@ import re
 from typing import TYPE_CHECKING
 
 from ostag.briefs.card_delivery import CardIntent, CardAttempt, CardCreateAck
+from ostag.briefs.delivery import _TransportEgressGate
 from ostag.briefs.feishu_transport import CredentialSnapshot
 
 if TYPE_CHECKING:
@@ -133,36 +138,26 @@ class CardTransport:
                     raise asyncio.CancelledError()
                 if loop.time() >= deadline:
                     raise TimeoutError()
-            async def authority():
+            async def authority(*, body=False):
                 nonlocal gated, gate_error
                 check()
                 self._snapshot(intent, initial)
-                if gated:
+                if gated and not body:
                     raise _fail()
                 gated = True
                 try:
-                    await before_egress()
+                    if body and type(before_egress) is _TransportEgressGate:
+                        await before_egress.before_body()
+                    else:
+                        await before_egress()
                 except BaseException as exc:
                     gate_error = exc
                     raise _GateDenied() from None
                 self._snapshot(intent, initial)
                 check()
             async def trace(name, info):
-                nonlocal gate_error
                 if name == 'http11.send_request_headers.started':
                     await authority()
-                elif name == 'http11.send_request_body.started':
-                    check()
-                    self._snapshot(intent, initial)
-                    # A second durable/current gate covers cancellation during the
-                    # awaited header write before sending the private card body.
-                    try:
-                        await before_egress()
-                        self._snapshot(intent, initial)
-                        check()
-                    except BaseException as exc:
-                        gate_error = exc
-                        raise _GateDenied() from None
             inner = self._transport
             if inner is not None:
                 class MockBoundary(httpx.AsyncBaseTransport):
@@ -191,6 +186,19 @@ class CardTransport:
                 client.cookies.clear()
                 request = client.build_request('POST', _ORIGIN + '/im/v1/messages',
                     params={'receive_id_type': 'chat_id'}, content=intent.wire_body)
+                if inner is None:
+                    class Body(httpx.AsyncByteStream):
+                        consumed = False
+
+                        async def __aiter__(self):
+                            if self.consumed:
+                                raise _fail()
+                            self.consumed = True
+                            # After the awaited headers, immediately before the
+                            # sole bounded private chunk enters the network write.
+                            await authority(body=True)
+                            yield intent.wire_body
+                    request.stream = Body()
                 request.extensions['trace'] = trace
                 check()
                 response = await client.send(request, stream=True)

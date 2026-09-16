@@ -1,5 +1,12 @@
 """Opt-in read-only private previews with a separate owned SQLite capability ledger.
 
+Explicit retention= adds the typed A10 gate from retention.py. Its bounded local
+SQLite authority read is the documented exception to the no-I/O policy-callback
+contract; it never acquires this ledger from inside a retention transaction.
+Original current authorizers and final clocks remain required. Retirement is a
+sanctioned opt-in exception to append-only content, never to send/event identity.
+
+
 No constructor initializes a DB; call CallbackLedger.initialize explicitly. This
 is NOT MonitorStore callback storage and changes no brief/U01 schema. Capabilities
 bind installation/tenant/app/generation, namespace/platform/actor, original private
@@ -34,7 +41,7 @@ import time
 
 from ostag.briefs.delivery import FeishuBinding
 from ostag.briefs.rendering import PrivatePreview, render_private
-from ostag.briefs.store import RequesterContext
+from ostag.briefs.store import _retirement_method, RequesterContext
 from ostag.core.identity import Principal
 from ostag.work_monitor.identity import Destination
 
@@ -77,6 +84,35 @@ class CallbackLedger:
         self.path = Path(path)
         self.capacity = capacity
 
+    @_retirement_method
+    def retire_local(self, scope, job_id):
+        """Erase capability bindings; retain an inert scoped job tombstone."""
+        from ostag.briefs.retention import owned_retirement
+        with owned_retirement(self, compact=True) as db:
+            for row in db.execute('SELECT * FROM brief_callbacks').fetchall():
+                key = json.loads(row['binding'])
+                if (key.get('namespace') == scope.namespace
+                        and key.get('platform') == scope.principal.platform
+                        and key.get('actor') == scope.principal.actor_id and key.get('job') == job_id):
+                    safe = {name: key[name] for name in ('namespace', 'platform', 'actor', 'job')}
+                    safe['retired'] = True
+                    db.execute('UPDATE brief_callbacks SET binding=?,spent=1 WHERE digest=?',
+                               (json.dumps(safe, sort_keys=True, separators=(',', ':')), row['digest']))
+            self._verify_retired(db, scope, job_id)
+
+    def _verify_retired(self, db, scope, job_id):
+        """Spent capabilities still require complete binding redaction."""
+        for row in db.execute('SELECT * FROM brief_callbacks').fetchall():
+            key = json.loads(row['binding'])
+            if (key.get('namespace') == scope.namespace
+                    and key.get('platform') == scope.principal.platform
+                    and key.get('actor') == scope.principal.actor_id and key.get('job') == job_id):
+                safe = {name: key[name] for name in ('namespace', 'platform', 'actor', 'job')}
+                safe['retired'] = True
+                if (row['binding'] != json.dumps(safe, sort_keys=True, separators=(',', ':'))
+                        or row['spent'] != 1):
+                    raise _failure()
+
     def initialize(self):
         """Create only an empty owned database, or verify its exact version/capacity."""
         failed = False
@@ -86,7 +122,10 @@ class CallbackLedger:
                 app = db.execute('PRAGMA application_id').fetchone()[0]
                 tables = {r[0] for r in db.execute(
                     "SELECT name FROM sqlite_master WHERE type='table'")}
-                if app == 0 and not tables:
+                if (app == 0 and not tables
+                        and not db.execute('SELECT name FROM sqlite_master').fetchall()
+                        and db.execute('PRAGMA user_version').fetchone()[0] == 0
+                        and db.execute('PRAGMA journal_mode').fetchone()[0] == 'delete'):
                     db.execute(f'PRAGMA application_id={_APP_ID}')
                     db.execute('PRAGMA user_version=1')
                     db.execute('CREATE TABLE callback_meta '
@@ -120,9 +159,22 @@ class CallbackLedger:
             db.close()
 
     def _verify(self, db):
+        schema = (
+            'CREATE TABLE callback_meta (id INTEGER PRIMARY KEY CHECK(id=1), '
+            'highwater INTEGER NOT NULL, capacity INTEGER NOT NULL)',
+            'CREATE TABLE brief_callbacks (digest TEXT PRIMARY KEY, binding TEXT NOT NULL, '
+            'issued INTEGER NOT NULL, expires INTEGER NOT NULL, '
+            'spent INTEGER NOT NULL CHECK(spent IN(0,1)))',
+        )
+        actual = [tuple(r) for r in db.execute(
+            "SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_autoindex_%' "
+            'ORDER BY name')]
+        expected = sorted([('table', s.split()[2], s) for s in schema], key=lambda r: r[1])
+        if actual != expected or db.execute('PRAGMA journal_mode').fetchone()[0] != 'delete':
+            raise _failure()
         if (db.execute('PRAGMA application_id').fetchone()[0] != _APP_ID
                 or db.execute('PRAGMA user_version').fetchone()[0] != 1
-                or db.execute('SELECT capacity FROM callback_meta WHERE id=1').fetchone()
+                or tuple(db.execute('SELECT capacity FROM callback_meta WHERE id=1').fetchone() or ())
                 != (self.capacity,)):
             raise _failure()
 
@@ -135,12 +187,26 @@ class CallbackLedger:
         db.execute('UPDATE callback_meta SET highwater=? WHERE id=1', (now,))
         return now
 
-    def issue(self, key, *, ttl, clock, check):
+    def issue(self, key, *, ttl, clock, check, final_check=None):
         token = 'br_' + secrets.token_urlsafe(24)
         with self._connect() as db:
             db.execute('BEGIN IMMEDIATE')
             now = self._time(db, clock)
-            db.execute('DELETE FROM brief_callbacks WHERE expires<=?', (now,))
+            retired = db.execute('SELECT binding FROM brief_callbacks WHERE binding LIKE ?',
+                                 ('%"retired":true%',)).fetchall()
+            if retired:
+                try:
+                    frozen = json.loads(key)
+                except (TypeError, ValueError):
+                    frozen = None
+                for row in retired:
+                    old = json.loads(row[0])
+                    if (type(frozen) is dict and old.get('retired') and all(
+                            old.get(k) == frozen.get(k)
+                            for k in ('namespace', 'platform', 'actor', 'job'))):
+                        raise _failure()
+            db.execute("DELETE FROM brief_callbacks WHERE expires<=? AND binding NOT LIKE ?",
+                       (now, '%"retired":true%'))
             if db.execute('SELECT count(*) FROM brief_callbacks').fetchone()[0] >= self.capacity:
                 db.commit()
                 raise _failure()
@@ -148,6 +214,10 @@ class CallbackLedger:
             now = self._time(db, clock)
             db.execute('INSERT INTO brief_callbacks VALUES(?,?,?,?,0)',
                        (_hash(token), key, now, now + int(ttl * 1000000)))
+            if final_check is not None:
+                final_check()
+                if not now <= _stamp(clock()) < now + int(ttl * 1000000):
+                    raise _failure()
             db.commit()
         return token
 
@@ -162,7 +232,7 @@ class CallbackLedger:
             raise _failure()
         return _Capability(*row[:3])
 
-    def claim(self, token, cap, *, clock, check):
+    def claim(self, token, cap, *, clock, check, final_check=None):
         with self._connect() as db:
             db.execute('BEGIN IMMEDIATE')
             now = self._time(db, clock)
@@ -179,17 +249,24 @@ class CallbackLedger:
                 raise _failure()
             db.execute('UPDATE brief_callbacks SET spent=1 WHERE digest=? AND spent=0',
                        (_hash(token),))
+            if final_check is not None:
+                final_check()
+                if not now <= _stamp(clock()) < cap.expires:
+                    raise _failure()
             db.commit()
 
 
 class BriefCallbackController:
     """Explicit composition only; all public failures discard exception contexts."""
     def __init__(self, *, ledger: CallbackLedger, namespace: str, resolve_binding,
-                 load, authorize, clock=time.time):
+                 load, authorize, clock=time.time, retention=None):
         if (type(ledger) is not CallbackLedger or type(namespace) is not str
                 or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', namespace)
                 or not all(callable(c) for c in (resolve_binding, load, authorize, clock))):
             raise _failure()
+        from ostag.briefs.retention import configure_guard
+        self._retention_enabled = configure_guard(retention, ledger)
+        self.retention = retention
         self.ledger, self.namespace = ledger, namespace
         self._binding, self._load, self._authorize, self._clock = resolve_binding, load, authorize, clock
         self._lock = Lock()
@@ -224,10 +301,10 @@ class BriefCallbackController:
         binding = self._binding()
         if type(binding) is not FeishuBinding or binding != p.binding:
             raise _failure()
-        # Load and binding resolution may have waited. ALL-source authorization
-        # must be the final infrastructure call immediately before release.
-        if self._authorize(p) is not None:
-            raise _failure()
+        # Retention I/O precedes the final nonblocking ALL-source mirror.
+        from ostag.briefs.retention import check_guard
+        check_guard(self, p.scope, p.job_id, p.revision_id,
+                    authorize=lambda: self._authorize(p))
 
     @staticmethod
     def _key(p, action, page, message_id):
@@ -261,7 +338,9 @@ class BriefCallbackController:
             self._current(preview)
             render_private(preview, page=page)  # Validate page before consuming capacity.
             return self.ledger.issue(self._key(preview, action, page, message_id), ttl=ttl,
-                                     clock=self._now, check=lambda: self._current(preview))
+                                     clock=self._now, check=lambda: self._current(preview),
+                                     final_check=(lambda: self._current(preview))
+                                     if self._retention_enabled else None)
         return self._safe(operation)
 
     def handle_callback(self, callback_id, *, principal: Principal, destination: Destination,
@@ -284,7 +363,9 @@ class BriefCallbackController:
                     or self._key(p, key['action'], key['page'], message_id) != cap.key):
                 raise _failure()
             self._current(p)
-            self.ledger.claim(callback_id, cap, clock=self._now, check=lambda: self._current(p))
+            self.ledger.claim(callback_id, cap, clock=self._now, check=lambda: self._current(p),
+                              final_check=(lambda: self._current(p))
+                              if self._retention_enabled else None)
             # Durable claim precedes ANY private effect. Replays cannot render.
             card = render_private(p, page=key['page'])
             self._current(p)

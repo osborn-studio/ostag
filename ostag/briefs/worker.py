@@ -238,7 +238,7 @@ class BriefWorker:
                                             clock=self.service.clock)
                 return RecoveryValidity(False, False, False)
             self.service.authorize_current(request, job.scope, job.destination,
-                                           stopped=self._stop.is_set)
+                                           stopped=self._stop.is_set, job_id=job.job_id)
             return RecoveryValidity(True, True, True)
         except (StoreBusy, ClockError, Conflict):
             # Recovery validation did not complete; leave the detached candidate
@@ -320,7 +320,7 @@ class BriefWorker:
                         raise ConfigChanged()
                     try:
                         self.service.authorize_current(request, job.scope, job.destination,
-                                                       stopped=stopped)
+                                                       stopped=stopped, job_id=job.job_id)
                     except SchemaError:
                         cause = "authorization_denied"
                         raise

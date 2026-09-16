@@ -12,8 +12,13 @@ network refresh, environment discovery or user-supplied proof. It is re-read aft
 resource acquisition, at egress, after response/cleanup awaits and before proof.
 
 HTTP/1.1 only, owned clients/transports, no proxies/env/cookies/redirects/retries.
-The httpcore send_request_headers.started trace gate runs after connection/pool
-awaits, before HTTP headers; body tracing rechecks local rotation/cancellation.
+The httpcore send_request_headers.started trace gates headers after connection/pool
+awaits. A one-shot AsyncByteStream uses the typed service gate's separate body
+recheck after the header write, then submits the sole bounded private body chunk.
+Plain trusted callbacks must support both checks when using this adapter directly.
+There is no body prefetch or HTTP/2 flow-control buffering. This is a local
+write-handoff point: backend scheduling/backpressure and TLS/socket/OS buffering
+inside that write remain in flight, not atomically revocable socket operations.
 A private BaseException sentinel prevents HTTPX/httpcore swallowing or translating
 ANY final authority exception; the exact exception is restored after cleanup.
 MockTransport is the sole injected test seam and gates at handle_async_request.
@@ -37,6 +42,7 @@ from typing import TYPE_CHECKING
 
 from ostag.briefs.delivery import (
     DeliveryIntent, FeishuBinding, ProviderMessage, SendAttempt, SendResponse, wire_text,
+    _TransportEgressGate,
 )
 from ostag.core.identity import Principal
 
@@ -213,15 +219,19 @@ class FeishuTransport:
                     raise asyncio.CancelledError()
                 if loop.time() >= deadline:
                     raise TimeoutError()
-            def authority():
+            def authority(*, body=False):
                 nonlocal gated, gate_error
                 check()
                 self._snapshot(intent, initial)
-                if gated:
+                if gated and not body:
                     raise _fail()
                 gated = True
                 try:
-                    before_egress()
+                    if body and type(before_egress) is _TransportEgressGate:
+                        before_egress.before_body()
+                    else:
+                        before_egress()
+                    self._snapshot(intent, initial)
                 except BaseException as exc:
                     gate_error = exc
                     raise _GateDenied() from None
@@ -229,9 +239,6 @@ class FeishuTransport:
             async def trace(name, info):
                 if name == 'http11.send_request_headers.started':
                     authority()
-                elif name == 'http11.send_request_body.started':
-                    check()
-                    self._snapshot(intent, initial)
             inner = self._transport
             if inner is not None:
                 class MockBoundary(httpx.AsyncBaseTransport):
@@ -268,6 +275,17 @@ class FeishuTransport:
                         params={'receive_id_type': 'chat_id'}, content=body)
                 else:
                     request = client.build_request('GET', _ORIGIN + '/im/v1/messages/' + message_id)
+                if message_id is None and inner is None:
+                    class Body(httpx.AsyncByteStream):
+                        consumed = False
+
+                        async def __aiter__(self):
+                            if self.consumed:
+                                raise _fail()
+                            self.consumed = True
+                            authority(body=True)
+                            yield body
+                    request.stream = Body()
                 request.extensions['trace'] = trace
                 check()
                 response = await client.send(request, stream=True)

@@ -1,5 +1,12 @@
 """A06 trusted local HUMAN annotations and reversible CONTENT adoption.
 
+Explicit retention= adds the typed A10 gate from retention.py. Its bounded local
+SQLite authority read is the documented exception to the no-I/O policy-callback
+contract; it never acquires this ledger from inside a retention transaction.
+Original current authorizers and final clocks remain required. Retirement is a
+sanctioned opt-in exception to append-only content, never to send/event identity.
+
+
 Explicitly initialize a separate owned ledger; never pass a BriefStore database.
 The ONLY root supplier is load(authenticated RequesterContext, job_id), returning
 an original stored PrivatePreview (normally constructed from the A04 outbox).
@@ -51,7 +58,7 @@ import time
 from ostag.briefs.delivery import FeishuBinding
 from ostag.briefs.models import SourceSet
 from ostag.briefs.rendering import PrivatePreview, _bytes, _element, _parts, defang
-from ostag.briefs.store import PrivateDestination, RequesterContext
+from ostag.briefs.store import _retirement_method, PrivateDestination, RequesterContext
 from ostag.briefs.validation import (
     SECTIONS, Coverage, SourceLink, strict_json, validate_output,
 )
@@ -292,6 +299,28 @@ class RevisionLedger:
         self.chain_limit = _integer(chain_limit, MAX_CHAIN, 1)
         self.event_limit = _integer(event_limit, MAX_EVENTS, 1)
 
+    @_retirement_method
+    def retire_local(self, scope, job_id):
+        """Permanent root/event identity rows; denied hash-only history, never adoption."""
+        from ostag.briefs.retention import _RETIRED, owned_retirement
+        with owned_retirement(self, compact=True) as db:
+            key = _scope(scope)
+            db.execute('UPDATE revision_roots SET snapshot=? WHERE scope=? AND job=?',
+                       (_RETIRED, key, job_id))
+            db.execute('UPDATE revision_events SET record=? WHERE scope=? AND job=?',
+                       (_RETIRED, key, job_id))
+            self._verify_retired(db, scope, job_id)
+
+    def _verify_retired(self, db, scope, job_id):
+        """Both original snapshots and every event/history body must be gone."""
+        from ostag.briefs.retention import _RETIRED
+        key = _scope(scope)
+        if (db.execute('SELECT 1 FROM revision_roots WHERE scope=? AND job=? AND snapshot!=?',
+                       (key, job_id, _RETIRED)).fetchone()
+                or db.execute('SELECT 1 FROM revision_events WHERE scope=? AND job=? AND record!=?',
+                              (key, job_id, _RETIRED)).fetchone()):
+            raise RevisionStorageError()
+
     @contextmanager
     def _connection(self, *, create=False):
         db = sqlite3.connect(self.path.resolve().as_uri() +
@@ -419,11 +448,14 @@ def _history(db, p, ledger, highwater, registered):
 
 class RevisionService:
     @_public
-    def __init__(self, *, ledger, namespace, load, authorize, clock=time.time):
+    def __init__(self, *, ledger, namespace, load, authorize, clock=time.time, retention=None):
         if (type(ledger) is not RevisionLedger or type(namespace) is not str
                 or not namespace or len(namespace) > 256
                 or not all(callable(fn) for fn in (load, authorize, clock))):
             raise RevisionInvalid()
+        from ostag.briefs.retention import configure_guard
+        self._retention_enabled = configure_guard(retention, ledger)
+        self.retention = retention
         self.ledger, self.namespace = ledger, namespace
         self._load, self._authorize, self._clock = load, authorize, clock
 
@@ -434,8 +466,9 @@ class RevisionService:
             if (p.scope != scope or p.job_id != job or
                     (expected is not None and raw != expected)):
                 raise RevisionDenied()
-            if self._authorize(p) is not None:
-                raise RevisionDenied()
+            from ostag.briefs.retention import check_guard
+            check_guard(self, p.scope, p.job_id, p.revision_id,
+                        authorize=lambda: self._authorize(p))
             result = p, raw
         except Exception as exc:
             if type(exc) is RevisionLimit:
@@ -481,6 +514,8 @@ class RevisionService:
                 count += 1
                 registered = stamp
             else:
+                if row['snapshot'] == '{"retired":true}':
+                    raise RevisionDenied()
                 # Compare canonical bytes, not IDs or Python bool/int equality.
                 _decode(row['snapshot'], MAX_ROOT_BYTES)
                 if row['digest'] != _digest(row['snapshot']):
