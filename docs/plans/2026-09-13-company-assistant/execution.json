@@ -1026,8 +1026,8 @@
       ],
       "post_document_checks": {
         "plan_validation": "40 tasks / 120 AC / acyclic / links passed; frozen implementation_verified=false",
-        "secret_script_tests": "4 passed in 3.34s",
-        "secret_scan": "pass; 0 matches",
+        "hygiene_script_tests": "4 passed in 3.34s",
+        "hygiene_scan": "pass; 0 matches",
         "integrated_code_unchanged": true,
         "candidate_sha256_verified": true
       }
