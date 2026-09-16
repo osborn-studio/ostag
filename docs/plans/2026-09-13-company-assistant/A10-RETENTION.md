@@ -1,8 +1,8 @@
 # A10 撤权与保留：候选实施与恢复方案
 
-**状态：候选已通过本地测试，尚未完成 Fable 复审，也未集成。** 真实 Claude Fable5.1 返回 API429 额度耗尽；没有审查结论。最新候选摘要 `2732d4b2757aaf76dfb1f76939e14ce6f7cc2a9a23a66ef724e812013b890ca9`，完整代码保存在本机 [候选快照](/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability/snapshot-1789524132894943000)。集成分支仍保留原 A06 代码，本轮只归档待审实施记录。
+**状态：真实Opus5编码候选已保存，尚未集成。** 当前摘要 `5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360`。目标121项、macOS全量2619项、16组额外检查通过；Linux目标121项和与已批准监控修复组合的2636项通过。测试结果不是批准回执。
 
-[机器可读候选与测试证据](reviews/a10-candidate-pending.json) · [Fable实际不可用回执](reviews/a10-fable-unavailable.json) · [来源与平台约束](reviews/a10-sources-pending.json)
+Opus首个独立审查超时；第二次返回周额度429，明确没有审查结论。用户此前允许采用更强可用模型，本轮保留实际Opus编码，交独立Codex代理只读审查，仍待其结论。[实际额度错误](reviews/a10-opus-unavailable.json)。下文保留早期候选历史；最新状态以本段和execution.json为准。
 
 ## 使用和边界
 

@@ -1,11 +1,11 @@
 {
-  "scope": "Integrated verified slices through A06; A10 candidate preserved outside integration, canonical Fable review and Linux runtime validation pending; meeting product/deployment incomplete",
+  "scope": "Locally integrated A06 and monitor replay repair; A10 candidate still pending independent review; meeting runtime and deployment incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "8ef7aa72f75de24178ce922b10143df44a0a6708",
+  "code_commit": "7de75d4b2f2c0b7392abfca3b2942b14866a9563",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "800fd070b7457b8101d8ffda619ac905bc3e52af2db61c3db20b9f4f87cea2b0",
+  "code_content_sha256": "c711a434d9b61e1555b93c2dfb1817b8437c2591e34fe58b6001dcc6f1e4453b",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -47,7 +47,11 @@
     "tests/test_brief_card_navigation.py": "5b3f163cc9a898ddcd9e25bb54e84bd8c35ad1994f3013b570783ee3c4d428cb",
     "tests/test_brief_card_transport.py": "1ed742cd8de5ec40299ef948fb57a43240ceca710ce66179100dd3818a65a2a4",
     "ostag/briefs/revisions.py": "bdc83f8b7574b4da84dc2592d0df3e4f88a0b396afdd47ff4474a882bcb0a120",
-    "tests/test_brief_revisions.py": "6cb7ff712771d8d50e9b3b8791515789048a81e4da1ff744ea134444ccfd0a61"
+    "tests/test_brief_revisions.py": "6cb7ff712771d8d50e9b3b8791515789048a81e4da1ff744ea134444ccfd0a61",
+    "ostag/work_monitor/service.py": "3a189ab3f57d2926fa1e337e4d813ed89ebcf5ede208649157224b6dfe952ec8",
+    "tests/test_monitor_apply_replay.py": "688ec606ca78a62f16952d575f40d47dc72711f009866584486385fa466491fe",
+    "tests/test_work_monitor_controls.py": "5ce40b3cc8e7a740c283b40819ac400bfc9233d1b41dcc5ef21fe04aef086b4a",
+    "tests/test_work_monitor_scheduler.py": "e15f1b662499a2b20987f176f32f276345b0574c1f34a2669989e062c7be721f"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -64,7 +68,8 @@
     "A05-delivery": "verified_local first-card delivery and navigation; real platform/device and A11 runtime composition not_run",
     "A05": "local first-card and navigation implementation verified; real mobile/desktop acceptance pending",
     "A06": "verified_local domain/service API; signed correction/adoption buttons and A11 live composition not_run",
-    "A10": "candidate tests passed; canonical Fable5.1 quota exhausted; not integrated or deployed"
+    "A10": "candidate tests passed; canonical Fable5.1 quota exhausted; not integrated or deployed",
+    "MONITOR-REPLAY": "verified_local; production pending"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -89,17 +94,17 @@
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 103,
-    "full_passed": 2498,
+    "target_passed": 66,
+    "full_passed": 2515,
     "warnings": 11,
-    "full_seconds": 60.46,
+    "full_seconds": 58.31,
     "ruff": "passed",
-    "latest_slice": "A06"
+    "latest_slice": "MONITOR-REPLAY"
   },
   "review": {
-    "model": "claude-fable-5-1",
+    "model": "claude-opus-5",
     "mode": "static; tools disabled",
-    "successful_reviews": 11,
+    "successful_reviews": 12,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -142,9 +147,16 @@
       "tests/test_brief_card_navigation.py": "a05-delivery-fable-round-1.json",
       "tests/test_brief_card_transport.py": "a05-delivery-fable-round-1.json",
       "ostag/briefs/revisions.py": "a06-fable-round-1.json",
-      "tests/test_brief_revisions.py": "a06-fable-round-1.json"
+      "tests/test_brief_revisions.py": "a06-fable-round-1.json",
+      "ostag/work_monitor/service.py": "monitor-opus-round-1.json",
+      "tests/test_monitor_apply_replay.py": "monitor-opus-round-1.json",
+      "tests/test_work_monitor_controls.py": "monitor-opus-round-1.json",
+      "tests/test_work_monitor_scheduler.py": "monitor-opus-round-1.json"
     },
-    "unresolved_blockers": 0
+    "unresolved_blockers": 0,
+    "historical_models": [
+      "claude-fable-5-1"
+    ]
   },
   "osstack": {
     "version": "0.19.0",
@@ -170,7 +182,9 @@
       "loop_ea2dab70-2c78-4aa6-9877-2636fbe18a07",
       "loop_504bb09b-ed08-4dbf-be44-d340672ed613",
       "loop_78e2f729-446f-41c8-9ed3-1ae98a46f9e2",
-      "loop_66408a74-4178-435a-8ad7-2c11203ac17a"
+      "loop_66408a74-4178-435a-8ad7-2c11203ac17a",
+      "loop_7aca1ddf-6570-4417-98d4-1b9984fd0948",
+      "loop_07fb0f39-b4fd-405b-a267-3ec7dad519b4"
     ],
     "outcomes": [
       "success",
@@ -194,7 +208,9 @@
       "success",
       "success",
       "escalated",
-      "escalated"
+      "escalated",
+      "escalated",
+      "success"
     ],
     "replayed_candidate_unchanged": true,
     "legacy_task_hashes_unchanged": 13,
@@ -220,7 +236,9 @@
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05-delivery",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a06",
       "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10",
-      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability"
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay",
+      "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay-repair"
     ]
   },
   "not_run": [
@@ -953,22 +971,77 @@
         "Conservative withdrawal capacity reservation reduces usable capacity; no automatic pruning or ledger rotation",
         "DELETE/FULL is not a power-loss durability guarantee; production gate must verify synchronization/filesystem policy across all ledgers"
       ]
+    },
+    "MONITOR-REPLAY": {
+      "status": "verified_local; production pending",
+      "code_commit": "7de75d4b2f2c0b7392abfca3b2942b14866a9563",
+      "native_code_commit": "64b8c7c057183b9e0736b9945357fe9b8f0a2767",
+      "code_content_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
+      "files": [
+        "ostag/work_monitor/service.py",
+        "tests/test_monitor_apply_replay.py",
+        "tests/test_work_monitor_controls.py",
+        "tests/test_work_monitor_scheduler.py"
+      ],
+      "target_tests": {
+        "passed": 66,
+        "warnings": 0,
+        "seconds": 1.55
+      },
+      "full_tests": {
+        "passed": 2515,
+        "warnings": 11,
+        "seconds": 58.31
+      },
+      "full_test_scope": "Independent monitor branch before A10; combined tests recorded separately",
+      "parent_gates": "2 passed: lost-ACK command ownership and delayed terminal-state preservation",
+      "ruff": "passed",
+      "review_model": "claude-opus-5",
+      "builder_model": "claude-opus-5",
+      "review_mode": "static; tools disabled; fresh session",
+      "review_receipts": [
+        "monitor-opus-round-1.json"
+      ],
+      "unresolved_blockers": 0,
+      "loop_id": "loop_07fb0f39-b4fd-405b-a267-3ec7dad519b4",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay-repair",
+      "linux_target_tests": {
+        "candidate_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
+        "files_sha256": {
+          "ostag/work_monitor/service.py": "3a189ab3f57d2926fa1e337e4d813ed89ebcf5ede208649157224b6dfe952ec8",
+          "tests/test_monitor_apply_replay.py": "688ec606ca78a62f16952d575f40d47dc72711f009866584486385fa466491fe",
+          "tests/test_work_monitor_controls.py": "5ce40b3cc8e7a740c283b40819ac400bfc9233d1b41dcc5ef21fe04aef086b4a",
+          "tests/test_work_monitor_scheduler.py": "e15f1b662499a2b20987f176f32f276345b0574c1f34a2669989e062c7be721f"
+        },
+        "target_passed": 66,
+        "parent_gates_passed": 2,
+        "approval": "Independent Opus5 approved same candidate; receipt opus-1789535300328616000.receipt.json"
+      }
     }
   },
-  "latest_slice_content_sha256": "ec22aa74799ab1881b9ef4e0f7680631dfaa0eb1b4743bdbfc90e1f68dc83f7b",
+  "latest_slice_content_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
   "pending_findings": [
     {
-      "id": "A10-review-quota",
-      "status": "blocked_external",
-      "detail": "Actual Claude Fable5.1 API429 usage quota; no verdict, no approved receipt. Candidate not integrated."
+      "id": "A10-review-pending",
+      "reason": "Opus independent review hit weekly quota; no verdict. Read-only independent Codex reviewer working on exact actual Opus-built candidate."
     },
     {
-      "id": "A10-linux-runtime",
-      "status": "not_run",
-      "detail": "Portability implementation tested via local fixtures; actual Ubuntu/Python3.11 and target filesystem execution pending; Docker daemon unavailable."
+      "id": "monitor-ack-publication-lifecycle",
+      "status": "pre-existing follow-up; not a blocker for bounded replay fix",
+      "evidence": "Independent Opus static review: command reservation can be polled before ledger applying publication completes; ACK path may move ready_to_apply directly to a terminal state. User apply already authorized the durable command; assess explicit publication/audit semantics in follow-up rather than implying unauthorized command creation.",
+      "next_step": "During runtime readiness review, reproduce lost-publication/poll/ACK ordering and define authoritative state/receipt repair contract without duplicate execution.",
+      "source": "monitor-opus-round-1.json",
+      "parent_reproduction": {
+        "before_poll_receipt": "ready_to_apply",
+        "commands_returned": 1,
+        "after_ack_receipt": "applied",
+        "scope": "Synthetic local fixture; no network or real execution",
+        "interpretation": "Confirmed pre-existing publication/projection gap. Initial user apply was authorized; no unauthorized action or duplicate command demonstrated."
+      }
     }
   ],
-  "checkpoint": "A10 candidate retained after tests; resume canonical Fable5.1 review on exact snapshot before integration",
+  "checkpoint": "Opus5-coded monitor fix independently approved and integrated; Opus5 A10 candidate awaits Codex review after Claude429",
   "next_task_details": {
     "A10": "Restore exact preserved portability candidate in native osstack; verify final hash and run real canonical Fable5.1 after quota recovers. Resolve findings, validate Ubuntu/Python3.11 runtime and only then integrate. No substitute approval.",
     "A05-refresh": "Before A11, add explicit authorized re-preview of acknowledged expired cards without resending original delivery; account for retained capabilities and render-lock contention.",
@@ -978,6 +1051,32 @@
   "updated_at_utc": "2026-09-16T02:09:46.816758+00:00",
   "candidates": {
     "A10": {
+      "status": "Actual Opus5-built candidate; not integrated; independent Codex review pending after Opus weekly quota429",
+      "candidate_sha256": "5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360",
+      "snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/snapshot-1789532813789323000",
+      "builder_receipt": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-opus/builder-1789532813789323000.receipt.json",
+      "target_tests": {
+        "passed": 121
+      },
+      "mac_full_tests": {
+        "passed": 2619,
+        "warnings": 11
+      },
+      "parent_gates": 16,
+      "linux_target_tests": {
+        "passed": 121
+      },
+      "linux_combined_tests": {
+        "passed": 2636,
+        "warnings": 11,
+        "scope": "same candidate plus independently approved monitor replay repair; not evidence of A10 approval"
+      },
+      "failed_review_receipt": "reviews/a10-opus-unavailable.json",
+      "replacement_review": "independent Codex collaboration agent /root/a10_independent_review; read-only; actual Opus code unchanged"
+    }
+  },
+  "candidate_history": {
+    "A10-before-Opus": {
       "status": "candidate_tests_passed_review_pending_not_integrated",
       "candidate_sha256": "2732d4b2757aaf76dfb1f76939e14ce6f7cc2a9a23a66ef724e812013b890ca9",
       "snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability/snapshot-1789524132894943000",

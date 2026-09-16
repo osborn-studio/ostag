@@ -1,0 +1,86 @@
+[
+  {
+    "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-monitor-replay-c174b1a8",
+    "sha256": "afd8a2830c5a65bbf0c4caf37367ff36bdaabdc96e00bcaa4011339fea643c71",
+    "files": [
+      "ostag/work_monitor/service.py",
+      "tests/test_monitor_apply_replay.py",
+      "tests/test_work_monitor_controls.py",
+      "tests/test_work_monitor_scheduler.py"
+    ],
+    "requested_model": "claude-opus-5",
+    "model_basis": "explicit user instruction: use Claude Opus 5 to keep coding",
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 2706,
+        "outputTokens": 24,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.002826,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-opus-5": {
+        "inputTokens": 80,
+        "outputTokens": 35940,
+        "cacheReadInputTokens": 2932331,
+        "cacheCreationInputTokens": 102123,
+        "webSearchRequests": 0,
+        "costUSD": 3.386295499999999,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 15797,
+        "canonicalModel": "claude-opus-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  },
+  {
+    "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-monitor-replay-bc6c5b11",
+    "sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
+    "files": [
+      "ostag/work_monitor/service.py",
+      "tests/test_monitor_apply_replay.py",
+      "tests/test_work_monitor_controls.py",
+      "tests/test_work_monitor_scheduler.py"
+    ],
+    "requested_model": "claude-opus-5",
+    "model_basis": "explicit user instruction: use Claude Opus 5 to keep coding",
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 3787,
+        "outputTokens": 23,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.003902,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-opus-5": {
+        "inputTokens": 84,
+        "outputTokens": 37805,
+        "cacheReadInputTokens": 3232100,
+        "cacheCreationInputTokens": 107360,
+        "webSearchRequests": 0,
+        "costUSD": 3.6351949999999995,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 19321,
+        "canonicalModel": "claude-opus-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    }
+  }
+]

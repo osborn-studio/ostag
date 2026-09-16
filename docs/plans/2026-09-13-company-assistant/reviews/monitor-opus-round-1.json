@@ -1,0 +1,54 @@
+{
+  "candidate_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
+  "base": "233a17aef727d5e88ff1c84029c5087cd4bca329",
+  "files": [
+    "ostag/work_monitor/service.py",
+    "tests/test_monitor_apply_replay.py",
+    "tests/test_work_monitor_controls.py",
+    "tests/test_work_monitor_scheduler.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 55066,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.055145999999999994,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-opus-5": {
+      "inputTokens": 2,
+      "outputTokens": 32660,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 76233,
+      "webSearchRequests": 0,
+      "costUSD": 1.5791555,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 30442,
+      "canonicalModel": "claude-opus-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Residual (unavoidable) timing dependency in the lease test: scheduler.drain_once awaits the send with wait_for(timeout=lease_seconds*0.8)=0.12s, while the heartbeat interval is lease_seconds/3=0.05s. The barrier removes the old 10ms sleep margin and widens it to ~70ms, and it fails fast with a clear message via delivery.done()/result(), but full determinism is impossible without touching production scheduler code or raising lease_seconds, both of which are forbidden. Acceptable as written.",
+      "Unrelated pre-existing defect worth reporting (not fixed here, correctly out of scope): store.claim_pending_commands selects by command status only, so a command reserved by an apply whose ledger publication was lost is pollable while the receipt is still 'ready_to_apply'; acknowledge_control then does receipt.with_state('applied'/'failed') directly, driving the receipt from ready_to_apply to a terminal state without ever passing through 'applying'. The candidate's _owned_command correctly fails closed on the subsequent replay (command_replay), so it does not widen the hole, but the ack path itself does not assert the receipt is in 'applying'.",
+      "_owned_command validates the required bindings but ignores unknown extra keys in the stored command payload, so a tampered row carrying additional fields is still adopted on replay. No new exposure, since such a row is already pollable by the instance independently of replay, and every field the service relies on (command_id, instance/task, action, expected_version, expected_lifecycle, requested_by, issued_at, expires_at) is pinned.",
+      "Replay of an 'applying' receipt more than 5 minutes after the last state change raises stale_receipt from the preserved ensure_fresh_confirmation gate rather than returning the idempotent receipt. This is fail-closed and matches the instruction to preserve existing authority/freshness checks, and it never creates a second command; flagging only so the behavior is not mistaken for a regression.",
+      "Static-only risk I cannot rule out: adapter-level tests not supplied in this review (feishu/telegram route or copilot tests that call apply_control twice) could still assert the old sequential-replay invalid_transition. Only the parent's full-suite run can confirm; the parent already re-scoped the one known conflicting controls assertion.",
+      "Scope is clean: service.py, the new tests/test_monitor_apply_replay.py, the single re-scoped controls assertion, and the lease test plus one module-level async helper and the contextlib import. No scheduler/schema/production changes, no test removal or xfail, receipts.py transition table untouched."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-monitor-replay-bc6c5b11",
+  "source_metadata_sha256": "51fd4f0521fc24f575e890ac31baf2baddb860615e763b8da937dddd4a389221"
+}
