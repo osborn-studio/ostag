@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shlex
+import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -372,6 +373,78 @@ class WorkMonitorService:
         )
         return approved
 
+    def _owned_command(
+        self, db: sqlite3.Connection, receipt: ActionReceipt, actor_id: str
+    ) -> dict[str, Any]:
+        """The durable command this exact receipt owns, read under ``db``.
+
+        Every reuse path — a replayed ``applying`` apply and the
+        ``ready_to_apply`` recovery of a lost publication alike — must resolve
+        the one command whose stored row and frozen payload still agree with
+        the receipt binding: action, instance/task target, expected version and
+        lifecycle, and the requesting actor. A missing, corrupt, or rebound row
+        is never adopted, and a row the instance already acknowledged is no
+        longer reusable, so the caller fails closed instead of publishing.
+
+        The caller reads this inside the ``commands`` write transaction that
+        :meth:`acknowledge_control` also takes, so the decision cannot race an
+        acknowledgement.
+        """
+        row = db.execute(
+            "SELECT command_id,instance_id,task_id,status,payload FROM commands WHERE action_id=?",
+            (receipt.action_id,),
+        ).fetchone()
+        if row is None:
+            raise SchemaError(
+                "command_not_found",
+                f"Action {receipt.action_id} has no reserved command of its own",
+                "Propose the control again from the current task state.",
+            )
+        try:
+            stored = json.loads(str(row["payload"]))
+        except ValueError:
+            stored = None
+        command: dict[str, Any] = stored if isinstance(stored, dict) else {}
+        payload = receipt.apply_payload
+        bindings = {
+            "command_id": str(row["command_id"]),
+            "instance_id": str(payload.get("instance_id", "")),
+            "task_id": str(payload.get("task_id", "")),
+            "action": receipt.mutation_type,
+            "expected_version": payload.get("expected_version"),
+            "expected_lifecycle": payload.get("expected_lifecycle"),
+            "requested_by": actor_id,
+        }
+        owned = (
+            bool(command)
+            and (str(row["instance_id"]), str(row["task_id"]))
+            == (bindings["instance_id"], bindings["task_id"])
+            and all(command.get(key) == value for key, value in bindings.items())
+            and bool(command.get("issued_at"))
+            and bool(command.get("expires_at"))
+        )
+        if not owned:
+            raise SchemaError(
+                "command_not_found",
+                f"Reserved command for {receipt.action_id} is corrupt or bound elsewhere",
+                "Propose the control again from the current task state.",
+            )
+        if str(row["status"]) != "pending":
+            raise SchemaError(
+                "command_replay",
+                f"Command {row['command_id']} was already acknowledged",
+                "Read the acknowledged receipt instead of applying again.",
+            )
+        return command
+
+    @staticmethod
+    def _state_moved(receipt: ActionReceipt, state: str) -> SchemaError:
+        return SchemaError(
+            "invalid_transition",
+            f"Action {receipt.action_id} moved to state {state!r} before this apply",
+            f"Read the current receipt state with: status {receipt.run_id}",
+        )
+
     def apply_control(
         self, principal: Principal, destination: Destination, action_id: str
     ) -> ActionReceipt:
@@ -390,6 +463,18 @@ class WorkMonitorService:
                 "Task state changed after proposal",
                 "Propose the control again from the current task state.",
             )
+        actor_id = f"{principal.platform}:{principal.actor_id}"
+        if receipt.state == "applying":
+            # This exact apply was already published. Hand back durable ledger
+            # truth: no second command, no new ledger event, and no answer at
+            # all unless this receipt still owns its reserved command and the
+            # action has not moved on since it was read.
+            with self.store.transaction() as db:
+                self._owned_command(db, receipt, actor_id)
+                latest = self.ledger.get_receipt(receipt.action_id)
+                if latest.state != "applying":
+                    raise self._state_moved(receipt, latest.state)
+            return latest
         applying = transition_receipt(receipt, "apply")
         issued = self.clock()
         command_id = new_id("cmd")
@@ -400,15 +485,18 @@ class WorkMonitorService:
             "action": receipt.mutation_type,
             "expected_version": task.version,
             "expected_lifecycle": task.status,
-            "requested_by": f"{principal.platform}:{principal.actor_id}",
+            "requested_by": actor_id,
             "issued_at": issued.isoformat(),
             "expires_at": (issued + timedelta(minutes=5)).isoformat(),
         }
+        # Reserve first and commit: the reservation has to outlive a failed
+        # ledger publication so the retry recovers this command instead of
+        # issuing a second one.
         with self.store.transaction() as db:
-            existing = db.execute(
-                "SELECT command_id,payload FROM commands WHERE action_id=?", (receipt.action_id,)
+            reserved = db.execute(
+                "SELECT 1 FROM commands WHERE action_id=?", (receipt.action_id,)
             ).fetchone()
-            if existing is None:
+            if reserved is None:
                 db.execute(
                     "INSERT INTO commands(command_id,instance_id,task_id,status,payload,action_id) "
                     "VALUES (?,?,?,?,?,?)",
@@ -421,15 +509,25 @@ class WorkMonitorService:
                         receipt.action_id,
                     ),
                 )
-            else:
-                command_id = str(existing["command_id"])
-                command = json.loads(str(existing["payload"]))
-        self.ledger.record_receipt_state(
-            applying,
-            previous_state=receipt.state,
-            actor_id=command["requested_by"],
-            detail=json.dumps({"command_id": command_id}, sort_keys=True),
-        )
+        # Publish while holding the commands write lock, so the reservation is
+        # revalidated against acknowledgement state and a delayed caller can
+        # never append 'applying' after this action already reached a terminal
+        # state, nor publish a second event for an apply another caller landed.
+        with self.store.transaction() as db:
+            reserved_command = self._owned_command(db, receipt, actor_id)
+            latest = self.ledger.get_receipt(receipt.action_id)
+            if latest.state == applying.state:
+                return latest
+            if latest.state != receipt.state:
+                raise self._state_moved(receipt, latest.state)
+            self.ledger.record_receipt_state(
+                applying,
+                previous_state=receipt.state,
+                actor_id=str(reserved_command["requested_by"]),
+                detail=json.dumps(
+                    {"command_id": str(reserved_command["command_id"])}, sort_keys=True
+                ),
+            )
         return applying
 
     def acknowledge_control(

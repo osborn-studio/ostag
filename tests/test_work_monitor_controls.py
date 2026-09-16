@@ -106,9 +106,15 @@ def test_approval_does_not_enqueue_and_apply_enqueues_exactly_one_versioned_comm
     assert command["expected_version"] == 7
     assert command["expected_lifecycle"] == "running"
     assert command["requested_by"] == "feishu:owner"
-    with pytest.raises(SchemaError):
-        service.apply_control(owner, private, receipt.action_id)
-    assert len(_command_rows(service)) == 1
+    ledger_bytes = (tmp_path / "ledger.jsonl").read_bytes()
+    replayed = service.apply_control(owner, private, receipt.action_id)
+    assert replayed.state == "applying"
+    assert replayed.action_id == applying.action_id
+    assert replayed.apply_payload == applying.apply_payload
+    replay_rows = _command_rows(service)
+    assert len(replay_rows) == 1
+    assert json.loads(replay_rows[0]["payload"]) == command
+    assert (tmp_path / "ledger.jsonl").read_bytes() == ledger_bytes
 
 
 def test_controls_require_write_and_group_cancel_is_rejected(tmp_path: Path) -> None:
