@@ -15,6 +15,7 @@ from typing import Literal, Protocol
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 
+from ostag.briefs.runtime import BriefStatusOwner
 from ostag.config import Settings, load_settings
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
@@ -359,17 +360,23 @@ def create_app(
         tasks = [
             asyncio.create_task(_supervise(owner, stop, supervisor_backoff)) for owner in owners
         ]
+        brief_owner = BriefStatusOwner(configured.brief_status_dir, configured.brief_control_path)
+        app.state.brief_status_owner = brief_owner
         try:
+            await brief_owner.start()
             yield
         finally:
             stop.set()
-            if tasks:
-                try:
-                    await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
-                except TimeoutError:
-                    for task in tasks:
-                        task.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await brief_owner.stop()
+            finally:
+                if tasks:
+                    try:
+                        await asyncio.wait_for(asyncio.gather(*tasks), timeout=10)
+                    except TimeoutError:
+                        for task in tasks:
+                            task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan)
 
@@ -603,8 +610,10 @@ def create_app(
             raise translate(exc) from exc
 
     @app.get("/healthz")
-    async def health() -> dict[str, str]:
+    async def health(response: Response) -> dict[str, str]:
         dependencies()
+        owner = getattr(app.state, "brief_status_owner", None)
+        response.headers["X-OStag-Brief-Status"] = owner.health if owner else "stopped"
         return {"status": "ok"}
 
     from ostag.copilot_relay.routes import create_copilot_router

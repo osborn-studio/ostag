@@ -17,6 +17,23 @@ except ImportError:  # pragma: no cover
 Platform = Literal["slack", "feishu", "lark", "dingtalk", "telegram"]
 BackendName = Literal["mock", "codex_cli", "claude_cli", "kimi_cli", "openai_api"]
 
+# Canonical registry: these flags have stricter parsing than legacy settings.
+BRIEF_FLAGS = (
+    ("brief_enabled", "OSTAG_BRIEF_ENABLED"),
+    ("brief_meetings_enabled", "OSTAG_BRIEF_MEETINGS_ENABLED"),
+    ("brief_history_enabled", "OSTAG_BRIEF_HISTORY_ENABLED"),
+    ("brief_actions_enabled", "OSTAG_BRIEF_ACTIONS_ENABLED"),
+    ("brief_routines_enabled", "OSTAG_BRIEF_ROUTINES_ENABLED"),
+    ("brief_sales_enabled", "OSTAG_BRIEF_SALES_ENABLED"),
+)
+
+
+def _brief_bool(name: str) -> bool:
+    value = os.getenv(name, "false").strip().lower()
+    if value not in {"true", "1", "yes", "on", "false", "0", "no", "off"}:
+        raise ValueError(f"{name} must be a boolean")
+    return value in {"true", "1", "yes", "on"}
+
 
 def _bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
@@ -251,7 +268,26 @@ class Settings:
     daily_task_board_dingtalk_table_url: str = ""
     daily_task_board_dingtalk_manager_ids: tuple[str, ...] = ()
 
+    brief_enabled: bool = False
+    brief_meetings_enabled: bool = False
+    brief_history_enabled: bool = False
+    brief_actions_enabled: bool = False
+    brief_routines_enabled: bool = False
+    brief_sales_enabled: bool = False
+    brief_status_dir: Path = Path("/run/ostag-brief-status")
+    brief_control_path: Path = Path("/run/ostag-brief-control/control.json")
+
     def validate(self) -> Settings:
+        for field, env in BRIEF_FLAGS:
+            value = getattr(self, field)
+            if type(value) is not bool:
+                raise ValueError(f"{env} must be a boolean")
+            if value:
+                raise ValueError(f"{env} is not ready: trusted Brief runtime is unsupported")
+        if not isinstance(self.brief_status_dir, Path) or not isinstance(
+            self.brief_control_path, Path
+        ):
+            raise ValueError("Brief status and control paths must be Path values")
         if not 1 <= self.agent_timeout_seconds <= 3600:
             raise ValueError("OSTAG_AGENT_TIMEOUT_SECONDS must be in 1..3600")
         if self.query_lane_max_concurrency < 1:
@@ -460,6 +496,11 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         if scope.strip()
     )
     settings = Settings(
+        **{field: _brief_bool(env) for field, env in BRIEF_FLAGS},
+        brief_status_dir=Path(os.getenv("OSTAG_BRIEF_STATUS_DIR", "/run/ostag-brief-status")),
+        brief_control_path=Path(
+            os.getenv("OSTAG_BRIEF_CONTROL_PATH", "/run/ostag-brief-control/control.json")
+        ),
         env=os.getenv("OSTAG_ENV", "dev"),
         log_level=os.getenv("OSTAG_LOG_LEVEL", "INFO"),
         dry_run=_bool("OSTAG_DRY_RUN", True),
