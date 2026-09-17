@@ -1,0 +1,40 @@
+{
+  "candidate_sha256": "52a8595cf15540df079dbba9da5398034b1474d287eba1463b976e75fcba2611",
+  "baseline_commit": "fb7cb04cf9acabb7fae6e815946d607b45465d35",
+  "code_commit": "1e58f4fb98ad57e5cefee2e2f68557f64dfdc828",
+  "mac_full": {
+    "passed": 3103,
+    "warnings": 11,
+    "seconds": 107.19
+  },
+  "linux_full": {
+    "passed": 3103,
+    "warnings": 11,
+    "seconds": 126.38
+  },
+  "target_tests": {
+    "passed": 215,
+    "warnings": 1,
+    "seconds": 4.68
+  },
+  "linux_target_tests": {
+    "passed": 215,
+    "warnings": 1,
+    "seconds": 5.49
+  },
+  "parent_gates": 23,
+  "linux_parent_gates": 23,
+  "ruff": "passed",
+  "lock_check": "passed",
+  "review_model": "kimi-code/k3",
+  "review_receipt": "a11-status-kimi-k3.json",
+  "scope": "A11a default-off flags/status/control only; no enabled business composition or installed deployment preflight",
+  "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+  "clock_validation": {
+    "samples": 109,
+    "first": 1789686362.8599474,
+    "last": 1789686384.7965388,
+    "backward_steps": []
+  },
+  "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-status"
+}

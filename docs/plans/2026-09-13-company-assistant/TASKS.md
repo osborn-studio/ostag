@@ -212,6 +212,8 @@ uv run --locked pytest -q tests/test_brief_revocation.py tests/test_brief_retent
 
 ## A11 单服务接线与回归隔离
 
+当前部分完成：A11a 默认关闭的开关、状态 owner、控制代次和排空验证基础已本地验证；其余 A11 验收未完成。见 [具体范围与A11b](A11-STATUS.md)。
+
 阶段：A；规模：M；依赖：A05、A06、A10；检查点：运行。
 
 候选文件：`ostag/config.py`（existing）、`ostag/work_monitor/server.py`（existing）、`tests/test_brief_lifespan.py`（new）、`tests/test_brief_flags.py`（new）、`deploy/work-monitor/docker-compose.yml`（existing）。

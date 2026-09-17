@@ -1,5 +1,7 @@
 # 部署、激活、运营与恢复
 
+最新：A11a 默认关闭的配置、控制文件和独立状态生命周期已本地集成；Codex 编码、Kimi K3 审计批准，macOS/Linux 全量各 3103 项通过。见 [A11状态基础与下一步](A11-STATUS.md)。A11业务接线、完整会议功能与生产部署尚未完成。
+
 本文件是未来操作方案，本轮没有执行其中的服务器或GitHub写动作。OStag自身部署是GitHub Actions→腾讯Lighthouse；业务GitHub→Vercel流程是另一件事。Merge main会在OS Tag CI成功后自动触发生产部署，因此发布意图在merge之前核对。
 
 ## 拓扑与最小资源
@@ -10,9 +12,11 @@
 
 API模型执行由批准provider配置驱动，优先复用已有backend；不把开发用Claude/Codex OAuth拷到生产，也不默认服务器已有可用模型身份。镜像内所需SDK、TLS/代理、DNS、超时、模型ID必须在stage实际调用证明。
 
-## 开关与配置（拟新增，不是当前已有环境变量）
+## 开关与配置（A11a 已注册前八项，其余待接线）
 
-| 计划配置 | 默认/作用 |
+六个功能开关及 STATUS_DIR、CONTROL_PATH 已由 A11a 注册，任何功能开启仍明确拒绝。STORE_PATH、ARTIFACT_DIR、GRANTS_FILE、MODEL_CONFIG 仍为后续接线方案。现有 Compose 尚未新增受保护目录挂载；配置文件校验函数也尚未安装为部署 preflight。
+
+| 配置 | 默认/作用 |
 |---|---|
 | OSTAG_BRIEF_ENABLED | false；开启整个简报领域 |
 | OSTAG_BRIEF_MEETINGS_ENABLED | false；M会议准备，M05实现并在D07单独放行 |
