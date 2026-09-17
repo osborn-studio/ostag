@@ -1,0 +1,24 @@
+[
+  {
+    "verification_stamp": "1789612000268925000",
+    "candidate_sha256": "4bf26079d198844b8d7a2f5adc39b9f08af38a52e0a535becacd8fbf1eb50ea6",
+    "target_summary": [
+      "1 failed, 434 passed, 1 warning in 43.28s"
+    ],
+    "failures": [
+      "FAILED tests/test_brief_card_delivery.py::test_two_processes_prepare_send_exactly_one"
+    ],
+    "source_log": "target-tests-1789612000268925000.stdout",
+    "sha256": "7382faf017e0e139a9d2720444e4e86ad5b27857b7e004a16a9880880b38021c"
+  },
+  {
+    "verification_stamp": "1789612162267727000",
+    "candidate_sha256": "6d2fb2d982c7ea2ed04dcf6148ce95fcaf05be2e06f9278584f450c0a51585cc",
+    "target_summary": [
+      "438 passed, 1 warning in 37.23s"
+    ],
+    "failures": [],
+    "source_log": "target-tests-1789612162267727000.stdout",
+    "sha256": "f11321a0a4f53ebba8e489290e48f4d9aa2db699066ee1f79fe3b2103dcc9a9e"
+  }
+]
