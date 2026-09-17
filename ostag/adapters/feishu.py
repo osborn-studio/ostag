@@ -53,6 +53,21 @@ class FeishuAdapter:
             raise CardDeliveryError('brief card unavailable')
         return await self._brief_card_service.deliver(scope, job_id, revision_id)
 
+    async def recover_brief_card(self, scope, delivery_id, *, expected_epoch, message_id,
+                                 destination, tenant_id, app_id, page=0, ttl=300):
+        """Opt-in local recovery; all identity arguments require trusted infrastructure.
+
+        Never obtain them from button values. This returns a prepared replacement
+        for the original ACK message without sending or claiming a client update.
+        """
+        from ostag.briefs.card_delivery import CardDeliveryService, CardDeliveryError
+
+        if type(self._brief_card_service) is not CardDeliveryService:
+            raise CardDeliveryError('brief card unavailable')
+        return await self._brief_card_service.recover_preview(
+            scope, delivery_id, expected_epoch=expected_epoch, message_id=message_id,
+            destination=destination, tenant_id=tenant_id, app_id=app_id, page=page, ttl=ttl)
+
     async def dry_run(self, event_path: Path, runner: Any) -> str:
         raw = json.loads(event_path.read_text(encoding="utf-8"))
         event = await self.normalize_event(raw)

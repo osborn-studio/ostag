@@ -184,7 +184,7 @@ def test_reject_unknown_owned_schema_without_modifying(tmp_path, foreign):
         elif foreign == 'view':
             db.execute('CREATE VIEW surprise AS SELECT * FROM cards')
         else:
-            db.execute('PRAGMA user_version=2')
+            db.execute('PRAGMA user_version=3')
     before = path.read_bytes()
     with pytest.raises(CardDeliveryError):
         ledger.initialize()
@@ -400,7 +400,7 @@ async def test_permanent_capacity_status_scope_and_strict_integer_columns(tmp_pa
             with pytest.raises(sqlite3.IntegrityError):
                 db.execute(f'UPDATE cards SET {column}=?', (1.5,))
         assert db.execute('PRAGMA journal_mode').fetchone()[0] == 'delete'
-        assert db.execute('PRAGMA user_version').fetchone()[0] == 1
+        assert db.execute('PRAGMA user_version').fetchone()[0] == 2
     frozen = c.ledger.frozen(SCOPE, first.delivery_id)
     for field in ('issued', 'expires'):
         with pytest.raises(CardDeliveryError):

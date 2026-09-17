@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import secrets
@@ -80,6 +81,12 @@ _SCHEMA = (
     "epoch INTEGER NOT NULL CHECK(typeof(epoch)='integer' AND epoch BETWEEN 0 AND 1024), "
     "action TEXT NOT NULL CHECK(action IN('Next','Previous','Refresh')), "
     "page INTEGER NOT NULL CHECK(typeof(page)='integer' AND page BETWEEN 0 AND 65535))",
+)
+_WINDOW_SCHEMA = (
+    'CREATE TABLE card_windows (delivery_id TEXT PRIMARY KEY, '
+    "issued INTEGER NOT NULL CHECK(typeof(issued)='integer' AND issued>=0), "
+    "expires INTEGER NOT NULL CHECK(typeof(expires)='integer' AND expires<100000000000000000), "
+    'CHECK(expires>issued AND expires-issued<=300000000))',
 )
 
 
@@ -167,6 +174,7 @@ class CardStatus:
     cancelled: bool
     content_verified: bool = False
     human_received: bool = False
+    epoch: int = 0
 
 
 @dataclass(frozen=True)
@@ -288,7 +296,16 @@ class CardLedger:
     def _connection(self, *, create=False, wait=0):
         if self.path.is_symlink():
             raise _fail()
-        db = sqlite3.connect(self.path.resolve().as_uri() + ('?mode=rwc' if create else '?mode=rw'),
+        if create:
+            # O_EXCL sets owner-only permissions before any private SQLite data;
+            # reopening never changes an existing file's permissions.
+            try:
+                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                pass
+            else:
+                os.close(fd)
+        db = sqlite3.connect(self.path.resolve().as_uri() + '?mode=rw',
                              uri=True, timeout=wait, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
@@ -300,13 +317,14 @@ class CardLedger:
         finally:
             db.close()
 
-    def _verify(self, db):
+    def _verify(self, db, *, version=2):
         actual = [tuple(r) for r in db.execute(
             "SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_autoindex_%' "
             'ORDER BY name')]
-        expected = sorted([('table', sql.split()[2], sql) for sql in _SCHEMA], key=lambda r: r[1])
+        schema = _SCHEMA if version == 1 else _SCHEMA + _WINDOW_SCHEMA
+        expected = sorted([('table', sql.split()[2], sql) for sql in schema], key=lambda r: r[1])
         if (actual != expected or db.execute('PRAGMA application_id').fetchone()[0] != _APP
-                or db.execute('PRAGMA user_version').fetchone()[0] != 1
+                or db.execute('PRAGMA user_version').fetchone()[0] != version
                 or db.execute('PRAGMA journal_mode').fetchone()[0] != 'delete'):
             raise _fail()
         meta = db.execute('SELECT id,highwater,capacity FROM card_meta').fetchall()
@@ -334,11 +352,34 @@ class CardLedger:
                 if not objects and app == version == 0:
                     # Recheck under lock; another initializer may have won.
                     if not db.execute('SELECT name FROM sqlite_master').fetchall():
-                        for sql in _SCHEMA:
+                        for sql in _SCHEMA + _WINDOW_SCHEMA:
                             db.execute(sql)
                         db.execute('INSERT INTO card_meta VALUES(1,0,?)', (self.capacity,))
                         db.execute(f'PRAGMA application_id={_APP}')
-                        db.execute('PRAGMA user_version=1')
+                        db.execute('PRAGMA user_version=2')
+                self._verify(db)
+                db.commit()
+        except Exception:
+            failed = True
+        if failed:
+            raise _fail()
+
+    def migrate_v1(self):
+        """Explicit atomic owned v1→v2 upgrade; all historical values stay exact.
+
+        No automatic migration, downgrade, or adoption of an unknown layout.
+        An absent window uses the frozen original TTL, including migrated rows.
+        """
+        failed = False
+        try:
+            with self._connection(wait=0.05) as db:
+                self._verify(db, version=1)
+                db.execute('PRAGMA synchronous=FULL')
+                db.execute('BEGIN IMMEDIATE')
+                self._verify(db, version=1)
+                for sql in _WINDOW_SCHEMA:
+                    db.execute(sql)
+                db.execute('PRAGMA user_version=2')
                 self._verify(db)
                 db.commit()
         except Exception:
@@ -388,7 +429,8 @@ class CardLedger:
 
     @staticmethod
     def _status(row):
-        return CardStatus(row['delivery_id'], row['state'], bool(row['cancelled']))
+        return CardStatus(row['delivery_id'], row['state'], bool(row['cancelled']),
+                          epoch=row['epoch'])
 
     @staticmethod
     def _intent(row, scope):
@@ -420,11 +462,17 @@ class CardLedger:
         return result
 
     def status(self, scope, delivery_id):
+        """Trusted metadata; lock contention uses the service's bounded retry loop."""
         result = None
+        busy = False
         try:
             result = self._read(scope, delivery_id)
+        except _Busy:
+            busy = True
         except Exception:
             pass
+        if busy:
+            raise _Busy()
         if result is None:
             raise _fail()
         return result
@@ -510,6 +558,77 @@ class CardLedger:
         now = _stamp(clock())
         if not row['issued'] <= now < row['expires']:
             raise _fail()
+
+    @staticmethod
+    def _window(db, row):
+        """Navigation alone uses the explicit window; send TTL is immutable."""
+        return db.execute('SELECT issued,expires FROM card_windows WHERE delivery_id=?',
+                          (row['delivery_id'],)).fetchone() or row
+
+    @staticmethod
+    def _spend_only(db, delivery_id):
+        db.execute('DELETE FROM card_tokens WHERE delivery_id=?', (delivery_id,))
+        db.execute('UPDATE cards SET response_card=NULL WHERE delivery_id=?', (delivery_id,))
+
+    def recovery_step(self, intent, expected_epoch, *, clock, check, ttl=None,
+                      page=0, rendered=None):
+        """Reserve once, publish, or validate release under current authority.
+
+        Reservation spends the CAS epoch before unlocked rendering. Later failure
+        never rolls that epoch back. Publish/release denial commits only a spend,
+        and late commit waits are followed by another authority check by caller.
+        """
+        accepted = False
+        with self.transaction(clock) as (db, now):
+            row = self._row(db, intent.scope, intent.delivery_id)
+            if (row['cancelled'] or row['state'] != 'create_acknowledged'
+                    or row['epoch'] != expected_epoch):
+                return False
+            if self._intent(row, intent.scope) != intent:
+                raise _fail()
+            if ttl is not None:
+                if expected_epoch >= MAX_EPOCH:
+                    return False
+                check(row)
+                self._spend_only(db, intent.delivery_id)
+                db.execute('UPDATE cards SET epoch=?,page=? WHERE delivery_id=?',
+                           (expected_epoch + 1, page, intent.delivery_id))
+                duration = int(ttl * 1000000)
+                if not duration:
+                    # A sub-microsecond TTL has no live representable interval;
+                    # spend without rounding up or issuing any capabilities.
+                    return False
+                db.execute('INSERT OR REPLACE INTO card_windows VALUES(?,?,?)',
+                           (intent.delivery_id, now, now + duration))
+            elif rendered is not None:
+                card, tokens = rendered
+                self._tokens(db, intent.delivery_id, expected_epoch, tokens)
+                db.execute('UPDATE cards SET response_card=? WHERE delivery_id=?',
+                           (card, intent.delivery_id))
+            window = self._window(db, row)
+            try:
+                self._water(db, clock)
+                check(row)
+                self._clock_live(clock, window)
+                accepted = True
+            except (Exception, asyncio.CancelledError):
+                self._spend_only(db, intent.delivery_id)
+        return accepted
+
+    def discard_recovery(self, scope, delivery_id, epoch):
+        """Best-effort spend after a failed release, even after stop/clock failure.
+
+        No authority is created, and a competing later epoch is never touched.
+        The reserved epoch itself was already committed before rendering.
+        """
+        with self._connection(wait=0.05) as db:
+            self._verify(db)
+            db.execute('BEGIN IMMEDIATE')
+            self._verify(db)
+            row = self._row(db, scope, delivery_id)
+            if row['epoch'] == epoch:
+                self._spend_only(db, delivery_id)
+            db.commit()
 
     @staticmethod
     def _owned(row, attempt):
@@ -643,7 +762,8 @@ class CardDeliveryService:
             def mirrors():
                 # All bounded/nonblocking mirrors follow retention IO. Token
                 # rotation with an unchanged binding must invalidate a stale ACK.
-                if self._binding() != p.binding or self._authorize(p) is not None:
+                if (self._load(p.scope, p.job_id) != p or self._binding() != p.binding
+                        or self._authorize(p) is not None):
                     raise _fail()
                 if check_ack is not None and check_ack() is not None:
                     raise _fail()
@@ -713,6 +833,93 @@ class CardDeliveryService:
 
     async def send(self, scope, delivery_id):
         return await self._execute(scope, delivery_id, None, None, 300)
+
+    async def recover_preview(self, scope, delivery_id, *, expected_epoch, message_id,
+                              destination, tenant_id, app_id, page=0, ttl=300):
+        """Trusted explicit local recovery of an ACK's exact original message.
+
+        Infrastructure authenticates scope/destination/tenant/app/message; never
+        derive these arguments or expected_epoch from existing button payloads.
+        Scope-bound status exposes the CAS epoch. Each authorized reservation
+        consumes it even when rendering, release, or response delivery fails.
+        Only navigation gets a fresh bounded window: original send bytes/TTL,
+        receipt, and lifetime source/grant/retention authority never renew.
+        Returning a card proves neither client update nor full-content receipt.
+        """
+        op = self._enter()
+        result = None
+        epoch = None
+        try:
+            _scope(scope)
+            if (scope.namespace != self.namespace
+                    or type(expected_epoch) is not int or not 0 <= expected_epoch < MAX_EPOCH
+                    or type(page) is not int or not 0 <= page < 65536
+                    or type(ttl) not in (int, float) or not 0 < ttl <= 300
+                    or not math.isfinite(ttl)
+                    or type(destination) is not Destination or destination.platform != 'feishu'
+                    or destination.chat_type != 'private' or type(message_id) is not str
+                    or not _MESSAGE.fullmatch(message_id)):
+                raise _fail()
+            _id(tenant_id)
+            _id(app_id)
+            intent = await self._db(op, self.ledger._read, scope, delivery_id, body=True)
+            key = json.loads(intent.identity_json)
+            if (key['destination'] != destination.destination_id
+                    or key['binding']['tenant_id'] != tenant_id
+                    or key['binding']['app_id'] != app_id):
+                raise _fail()
+            p = self._loaded(scope, key['job'], key['revision'])
+
+            def policy(row):
+                if row['message_id'] != message_id:
+                    raise _fail()
+                self._current(p, intent.identity_json)
+
+            if not await self._db(op, self.ledger.recovery_step, intent, expected_epoch,
+                                  clock=op.clock, check=policy, ttl=ttl, page=page):
+                raise _fail()
+            epoch = expected_epoch + 1
+            # No SQLite connection/write lock spans rendering. Reservation has
+            # already pruned all older capabilities, including lost responses.
+            rendered = _controls(p, page)
+            await asyncio.sleep(0)
+            if not await self._db(op, self.ledger.recovery_step, intent, epoch,
+                                  clock=op.clock, check=policy, rendered=rendered):
+                raise _fail()
+            if not await self._db(op, self.ledger.recovery_step, intent, epoch,
+                                  clock=op.clock, check=policy):
+                raise _fail()
+            # A final read snapshot follows commit waits and prevents another
+            # card writer committing during the last retention/mirror gate.
+            # Closing this read-only transaction needs no fsync/commit wait.
+            with self.ledger._connection() as db:
+                db.execute('BEGIN')
+                self.ledger._verify(db)
+                row = self.ledger._row(db, scope, delivery_id)
+                if (row['cancelled'] or row['epoch'] != epoch
+                        or row['state'] != 'create_acknowledged'
+                        or row['message_id'] != message_id
+                        or self.ledger._intent(row, scope) != intent):
+                    raise _fail()
+                window = self.ledger._window(db, row)
+                if _stamp(op.clock()) < db.execute('SELECT highwater FROM card_meta').fetchone()[0]:
+                    raise _fail()
+                self._current(p, intent.identity_json)
+                self.ledger._clock_live(op.clock, window)
+            result = json.loads(rendered[0])
+        except Exception:
+            pass
+        finally:
+            if result is None and epoch is not None:
+                try:
+                    self.ledger.discard_recovery(scope, delivery_id, epoch)
+                except Exception:
+                    pass
+            op.abandoned = True
+            self._active -= 1
+        if result is None:
+            raise _fail()
+        return result
 
     async def _execute(self, scope, delivery_id, job, revision, ttl):
         op = self._enter()
@@ -834,7 +1041,8 @@ class CardDeliveryService:
             if (row['state'] != 'create_acknowledged' or row['message_id'] != message
                     or row['epoch'] != cap['epoch'] or row['epoch'] >= MAX_EPOCH):
                 return None
-            if row['cancelled'] or not row['issued'] <= now < row['expires']:
+            window = self.ledger._window(db, row)
+            if row['cancelled'] or not window['issued'] <= now < window['expires']:
                 return None
             key = json.loads(row['identity_json'])
             if (key['destination'] != destination.destination_id
@@ -850,7 +1058,7 @@ class CardDeliveryService:
             try:
                 self.ledger._water(db, self._now)
                 self._current(p, row['identity_json'])
-                self.ledger._clock_live(self._now, row)
+                self.ledger._clock_live(self._now, window)
             except (Exception, asyncio.CancelledError):
                 # Conservative spend-only commit on final denial: never restore
                 # the old epoch; do not retain releasable fresh capabilities.
@@ -864,12 +1072,14 @@ class CardDeliveryService:
         # then all current authority before returning any private response.
         with self.ledger.transaction(self._now, wait=0.05) as (db, now):
             current = self.ledger._row(db, scope, row['delivery_id'])
-            self.ledger._live(current, now)
-            if current['epoch'] != epoch:
+            window = self.ledger._window(db, current)
+            if current['cancelled'] or current['epoch'] != epoch:
+                raise _fail()
+            if not window['issued'] <= now < window['expires']:
                 raise _fail()
             self.ledger._water(db, self._now)
             self._current(p, row['identity_json'])
-            self.ledger._clock_live(self._now, row)
+            self.ledger._clock_live(self._now, window)
         self._current(p, row['identity_json'])
-        self.ledger._clock_live(self._now, row)
+        self.ledger._clock_live(self._now, window)
         return json.loads(card)
