@@ -1,0 +1,7 @@
+{
+  "task_id": "task_2e2b6631",
+  "capability": "ostag.a05.recovery",
+  "prompt": "Implement explicit authorized card preview recovery with immutable send history and Kimi audit",
+  "priority": 80,
+  "source": "task_queue"
+}
