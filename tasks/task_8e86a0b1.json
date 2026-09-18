@@ -1,0 +1,7 @@
+{
+  "task_id": "task_8e86a0b1",
+  "capability": "ostag.a11.controlbridge",
+  "prompt": "A11d: bind protected file control/status to shared Brief lifecycle with freshness, sealed local drain and truthful restart limits; Codex implementation and Kimi K3 audit",
+  "priority": 80,
+  "source": "task_queue"
+}
