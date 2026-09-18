@@ -1,0 +1,35 @@
+{
+  "candidate_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
+  "requested_model": "kimi-code/k3",
+  "configured_model": "k3",
+  "configured_provider": "managed:kimi-code",
+  "base": "8ae2e720d3040d7264eac8be3acf812408a8afa0",
+  "files": [
+    "ostag/briefs/authority.py",
+    "ostag/briefs/service.py",
+    "tests/test_brief_authority.py",
+    "tests/test_brief_authority_integration.py"
+  ],
+  "events_file": "kimi-review-1789689186043324000.stdout",
+  "events_sha256": "ac3c2c03b477c23e2a5d75ee85882b4194a76c98042868c9e43394672883bece",
+  "verdict": {
+    "candidate_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Static read-only audit only: I did not execute tests, compute hashes, or access the repository; approval rests on static review of the supplied source plus internally consistent supplied evidence (manifest/tests-passed.json/parent-gates.json hash agreement; 3219 passed macOS + 3219 passed Linux aarch64; 539 targeted passed; lint clean; all parent probes exit 0).",
+      "Trust boundary: exact-type validation, content-hash and grant/source/destination cross-binding, deepcopy-on-read defenses, and no request/event.raw/model-derived authority are all present; no loader, route, env switch, or background refresh exists and none is claimed.",
+      "Coherent-check design correctly denies mixed views (state identity + epoch fence), concurrent refresh/invalidate during a pass (including during the final stopped()/clock callbacks), reentrant/cross-thread pin borrowing, and stale/future/rollback clock cases with permanent per-instance latch.",
+      "Retention source/grant/snapshot deadlines are unaffected by authority refresh (separate ledger; test_completed_job_retention_and_budgets_never_renew_on_refresh); A10 ordering (retention SQL before the entire mirror, no authority mutex across SQL) is preserved and probed.",
+      "Minor hardening gap (fail-closed, non-blocking): AuthoritySnapshot._freeze rejects ':' in principal.actor_id but not in principal.platform; a colon in platform yields a 4-field permission string that grants._permission_levels rejects as malformed, so no privilege escalation path, but an explicit symmetric check would be tidier.",
+      "create_service intentionally requires exact BriefStore and non-None GenerationConfig (stricter than the legacy BriefService constructor); retention wiring is validated via configure_guard with concrete RetentionGuard target identity.",
+      "No production source loader, model deployment, or enabled lifecycle claims are made in code or docs; module docstrings explicitly disclaim them, consistent with the slice's stated limits."
+    ]
+  },
+  "read_coverage": {
+    "expected": 27,
+    "read": 27,
+    "missing": []
+  },
+  "scope": "actual independent static audit and supplied deterministic test evidence; Kimi did not run tests"
+}

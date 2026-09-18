@@ -1,0 +1,40 @@
+{
+  "candidate_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
+  "baseline_commit": "8ae2e720d3040d7264eac8be3acf812408a8afa0",
+  "code_commit": "259fe180634c90fe8f61f42feba44750d6456066",
+  "mac_full": {
+    "passed": 3219,
+    "warnings": 11,
+    "seconds": 108.09
+  },
+  "linux_full": {
+    "passed": 3219,
+    "warnings": 11,
+    "seconds": 116.0
+  },
+  "target_tests": {
+    "passed": 539,
+    "warnings": 1,
+    "seconds": 52.33
+  },
+  "linux_target_tests": {
+    "passed": 539,
+    "warnings": 1,
+    "seconds": 61.34
+  },
+  "parent_gates": 24,
+  "linux_parent_gates": 24,
+  "ruff": "passed",
+  "lock_check": "passed",
+  "review_model": "kimi-code/k3",
+  "review_receipt": "a11-authority-kimi-k3.json",
+  "scope": "A11b trusted local authority and coherent BriefService authorization only; enabled server lifecycle and production updater still pending",
+  "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+  "clock_validation": {
+    "samples": 148,
+    "first": 1789688223.757868,
+    "last": 1789688253.6399343,
+    "backward_steps": []
+  },
+  "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-authority"
+}

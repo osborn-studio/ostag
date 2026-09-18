@@ -1,11 +1,11 @@
 {
-  "scope": "Local slices through A10, A05 recovery and A11a default-off status foundation verified; enabled runtime, meeting collectors, real platform and deployment incomplete",
+  "scope": "Local slices through A11b trusted authority integration verified; enabled lifecycle, production authority updater, meeting collectors, real platform and deployment incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "1e58f4fb98ad57e5cefee2e2f68557f64dfdc828",
+  "code_commit": "259fe180634c90fe8f61f42feba44750d6456066",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "c2dd5468d20ed9cd9e029870759943ca7d6278f3352a0a00797c9db75ed1af6b",
+  "code_content_sha256": "572183b70abbda74936d3277cc6dc2a65a5bde777caff2e60f4e6169f531b2e0",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -23,7 +23,7 @@
     "ostag/briefs/validation.py": "ace890a6d8ec5ad01f62d3d42d3f1c2fae7c5da9fb43cb17a8d1ac583417a53e",
     "tests/test_brief_generation.py": "fe78132f0cb458df1c0a7706029dc3ba93076a8af2514b8966ba6b4fe44c6b7c",
     "tests/test_brief_validation.py": "618b5b17ebb8a03afa891e556a723cc50592edef1f31cf554d23706eb7a08367",
-    "ostag/briefs/service.py": "d19682dd87e3951a556398e87d33a098bfccfc3df566e112b042d8c9e77cb493",
+    "ostag/briefs/service.py": "0c8b09709863162629780919a616683e2e28bb3848ba1f03c477bcd45536c332",
     "ostag/briefs/worker.py": "e38495773e084fd203d87d2f3452ddb2fb269b1b8c24735eece615c0df5c2aed",
     "ostag/core/runner.py": "71b0897fe5cfcb6d1d827bc2bf30cc583eabeedaf1d582eaf60bfe0a25889f7d",
     "tests/test_brief_service.py": "3ff61eb5f814fbf8483ae51684155e2653c3c4f86a82b02b99a284fad48caff3",
@@ -60,7 +60,10 @@
     "ostag/config.py": "2254343bc2cc0a0a3b735fb3cf8d47391892b040a9a6c449e021854e6737937e",
     "ostag/work_monitor/server.py": "52ec175dbf4c49d98b8d27b5366249601139714c832712e676279476129edcb3",
     "tests/test_brief_flags.py": "c95fdb255673ec0471a575db61a7ad6e5c270d2066ea9a6aa3423e50dfd12fe3",
-    "tests/test_brief_lifespan.py": "0bd77b18a88d8b6bdffc992ca18de00b3b2add6a23a5af5dcbe0628f76bb0469"
+    "tests/test_brief_lifespan.py": "0bd77b18a88d8b6bdffc992ca18de00b3b2add6a23a5af5dcbe0628f76bb0469",
+    "ostag/briefs/authority.py": "edd1981d12882406715cd83ad3518afc5b0ef0ab43bf97bc50778ad1ebd35f12",
+    "tests/test_brief_authority.py": "9810eb217f3518d66bb051add23d8952d66b4f9430c53a404a0f97b7291a98e5",
+    "tests/test_brief_authority_integration.py": "a33da00144f3505fe8cdf16f58c0edd12e197dd33c3a6d2703f4bfdfce3ec626"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -80,7 +83,7 @@
     "A10": "verified_local; A11 runtime and production pending",
     "MONITOR-REPLAY": "verified_local; production pending",
     "A05-refresh": "verified_local; authenticated production command and client update remain A11/D01",
-    "A11": "partial: A11a default-off flags/status/control verified locally; enabled business composition and deployment wiring pending"
+    "A11": "partial: A11a status/control plus A11b trusted local authority/service integration verified; enabled runtime and production updater pending"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -103,24 +106,24 @@
     "A06-AC3": "Human corrections and original draft visible separately across bounded pages; adoption retractable with reserved event/global capacity; revoked access fails closed",
     "A05-recovery": "Explicit scoped original-message recovery, epoch CAS, immutable send facts, forward-only schema1 migration, retention/expiry/cancel and no resend verified locally; no actual client update certified",
     "A11-AC1": "partial: strict registry, all flags default off/rejected on, no business DB/worker, independent status owner verified; Compose environment/mount verification and enabled runtime pending",
-    "A11-AC2": "partial: status writer ownership, boot/generation, zero business counters and fresh drain helper verified; actual business operation gates and in-flight accounting pending",
+    "A11-AC2": "partial: status writer ownership, boot/generation, zero business counters and fresh drain helper verified; actual business operation gates and in-flight accounting pending; A11b adds atomic local authority snapshots and final coherent mutation fence, not operation admission or IO counters",
     "A11-AC3": "partial: status failure/delay isolation and maintenance no-business-IO verified; enabled schema degradation and same-image business read-only maintenance pending"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 215,
-    "full_passed": 3103,
+    "target_passed": 539,
+    "full_passed": 3219,
     "warnings": 11,
-    "full_seconds": 107.19,
+    "full_seconds": 108.09,
     "ruff": "passed",
-    "latest_slice": "A11a-status",
-    "linux_full_passed": 3103
+    "latest_slice": "A11b-authority",
+    "linux_full_passed": 3219
   },
   "review": {
     "model": "Kimi Code CLI requested kimi-code/k3",
     "mode": "Actual independent Kimi K3 read-only source and deterministic evidence audit",
-    "successful_reviews": 15,
+    "successful_reviews": 16,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -139,7 +142,7 @@
       "ostag/briefs/validation.py": "a03-fable-round-2.json",
       "tests/test_brief_generation.py": "a03-fable-round-2.json",
       "tests/test_brief_validation.py": "a03-fable-round-2.json",
-      "ostag/briefs/service.py": "a10-kimi-k3-round-1.json",
+      "ostag/briefs/service.py": "a11-authority-kimi-k3.json",
       "ostag/briefs/worker.py": "a10-kimi-k3-round-1.json",
       "ostag/core/runner.py": "a04-fable-round-2.json",
       "tests/test_brief_service.py": "a04-fable-round-2.json",
@@ -176,7 +179,10 @@
       "ostag/config.py": "a11-status-kimi-k3.json",
       "ostag/work_monitor/server.py": "a11-status-kimi-k3.json",
       "tests/test_brief_flags.py": "a11-status-kimi-k3.json",
-      "tests/test_brief_lifespan.py": "a11-status-kimi-k3.json"
+      "tests/test_brief_lifespan.py": "a11-status-kimi-k3.json",
+      "ostag/briefs/authority.py": "a11-authority-kimi-k3.json",
+      "tests/test_brief_authority.py": "a11-authority-kimi-k3.json",
+      "tests/test_brief_authority_integration.py": "a11-authority-kimi-k3.json"
     },
     "unresolved_blockers": 0,
     "historical_models": [
@@ -186,7 +192,7 @@
     ],
     "pending_candidate_blockers": 0,
     "model_scope": "A10 final repair/review; previous per-file Fable/Opus receipts retain their recorded scopes",
-    "latest_receipt": "a11-status-kimi-k3.json"
+    "latest_receipt": "a11-authority-kimi-k3.json"
   },
   "osstack": {
     "version": "0.19.0",
@@ -224,7 +230,8 @@
       "loop_bc54c140-85f5-4060-af26-0a67c52f39ea",
       "loop_ed7b7bab-7d18-4b75-b3c8-ca6c80a2505d",
       "loop_6c37074a-3b0c-461d-86e4-31c3c08bbd1b",
-      "loop_f1c264cb-5a83-415d-9111-47ad654abca1"
+      "loop_f1c264cb-5a83-415d-9111-47ad654abca1",
+      "loop_d31415e5-e40b-4282-9b62-1dc10090cf74"
     ],
     "outcomes": [
       "success",
@@ -258,6 +265,7 @@
       "escalated",
       "escalated",
       "escalated",
+      "success",
       "success",
       "success"
     ],
@@ -1200,9 +1208,62 @@
         "historical_queues": 13,
         "frozen_meeting_evaluation_unchanged": true
       }
+    },
+    "A11b-authority": {
+      "candidate_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
+      "baseline_commit": "8ae2e720d3040d7264eac8be3acf812408a8afa0",
+      "code_commit": "259fe180634c90fe8f61f42feba44750d6456066",
+      "mac_full": {
+        "passed": 3219,
+        "warnings": 11,
+        "seconds": 108.09
+      },
+      "linux_full": {
+        "passed": 3219,
+        "warnings": 11,
+        "seconds": 116.0
+      },
+      "target_tests": {
+        "passed": 539,
+        "warnings": 1,
+        "seconds": 52.33
+      },
+      "linux_target_tests": {
+        "passed": 539,
+        "warnings": 1,
+        "seconds": 61.34
+      },
+      "parent_gates": 24,
+      "linux_parent_gates": 24,
+      "ruff": "passed",
+      "lock_check": "passed",
+      "review_model": "kimi-code/k3",
+      "review_receipt": "a11-authority-kimi-k3.json",
+      "scope": "A11b trusted local authority and coherent BriefService authorization only; enabled server lifecycle and production updater still pending",
+      "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+      "clock_validation": {
+        "samples": 148,
+        "first": 1789688223.757868,
+        "last": 1789688253.6399343,
+        "backward_steps": []
+      },
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-authority",
+      "status": "verified_local_partial_A11",
+      "review_note_disposition": "reviews/a11-authority-review-note.json: platform colon already rejected; no code change",
+      "post_document_checks": {
+        "plan_validation": "40 tasks /120 AC /acyclic /local links passed; implementation_verified=false",
+        "mac_hygiene_tests": 4,
+        "linux_hygiene_tests": 4,
+        "docs_hygiene_matches": 0,
+        "all_code_file_hashes_unchanged": 57,
+        "actual_review_event_hash_verified": true,
+        "original_checkout": "5098f9141864d413718d776c9ae783951ea4b5c1 clean unchanged",
+        "historical_queues": 13,
+        "frozen_meeting_evaluation_unchanged": true
+      }
     }
   },
-  "latest_slice_content_sha256": "52a8595cf15540df079dbba9da5398034b1474d287eba1463b976e75fcba2611",
+  "latest_slice_content_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
   "pending_findings": [
     {
       "id": "monitor-ack-publication-lifecycle",
@@ -1219,12 +1280,12 @@
       }
     }
   ],
-  "checkpoint": "A11a status/control foundation locally integrated after actual Codex implementation, macOS/Linux deterministic verification and actual Kimi K3 approval; continue A11b enabled composition",
+  "checkpoint": "A11b trusted local authority integrated with BriefService after Codex implementation, macOS/Linux deterministic tests and actual Kimi K3 approval; full A11 still partial",
   "next_task_details": {
-    "A11": "A11b: trusted current identity/source/grant/private destination mirrors, single owned BriefService/worker/retention composition, operation-level admission/claim/IO gates and counters; authenticated recovery/revision routes; protected mounts/deployment control/preflight and business maintenance mode remain pending.",
+    "A11": "Continue trusted production authority updater and single owned BriefService/worker/retention lifecycle; integrate real operation admission/claim/IO gates and counters, authenticated recovery/revision routes, protected mounts and deployment preflight.",
     "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct."
   },
-  "updated_at_utc": "2026-09-17T23:30:17.425289+00:00",
+  "updated_at_utc": "2026-09-18T00:07:52.026643+00:00",
   "candidates": {},
   "candidate_history": {
     "A10-before-Opus": {
@@ -1328,44 +1389,44 @@
     }
   ],
   "combined_validation": {
-    "candidate_sha256": "52a8595cf15540df079dbba9da5398034b1474d287eba1463b976e75fcba2611",
-    "baseline_commit": "fb7cb04cf9acabb7fae6e815946d607b45465d35",
-    "code_commit": "1e58f4fb98ad57e5cefee2e2f68557f64dfdc828",
+    "candidate_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
+    "baseline_commit": "8ae2e720d3040d7264eac8be3acf812408a8afa0",
+    "code_commit": "259fe180634c90fe8f61f42feba44750d6456066",
     "mac_full": {
-      "passed": 3103,
+      "passed": 3219,
       "warnings": 11,
-      "seconds": 107.19
+      "seconds": 108.09
     },
     "linux_full": {
-      "passed": 3103,
+      "passed": 3219,
       "warnings": 11,
-      "seconds": 126.38
+      "seconds": 116.0
     },
     "target_tests": {
-      "passed": 215,
+      "passed": 539,
       "warnings": 1,
-      "seconds": 4.68
+      "seconds": 52.33
     },
     "linux_target_tests": {
-      "passed": 215,
+      "passed": 539,
       "warnings": 1,
-      "seconds": 5.49
+      "seconds": 61.34
     },
-    "parent_gates": 23,
-    "linux_parent_gates": 23,
+    "parent_gates": 24,
+    "linux_parent_gates": 24,
     "ruff": "passed",
     "lock_check": "passed",
     "review_model": "kimi-code/k3",
-    "review_receipt": "a11-status-kimi-k3.json",
-    "scope": "A11a default-off flags/status/control only; no enabled business composition or installed deployment preflight",
+    "review_receipt": "a11-authority-kimi-k3.json",
+    "scope": "A11b trusted local authority and coherent BriefService authorization only; enabled server lifecycle and production updater still pending",
     "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
     "clock_validation": {
-      "samples": 109,
-      "first": 1789686362.8599474,
-      "last": 1789686384.7965388,
+      "samples": 148,
+      "first": 1789688223.757868,
+      "last": 1789688253.6399343,
       "backward_steps": []
     },
-    "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-status"
+    "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-authority"
   },
   "superseded_requirements": [
     {
@@ -1471,6 +1532,46 @@
       "review_model": "kimi-code/k3",
       "review_receipt": "a05-recovery-kimi-k3.json",
       "scope": "Local library/adapter only; no live client, runtime wiring or deployment acceptance"
+    },
+    {
+      "candidate_sha256": "52a8595cf15540df079dbba9da5398034b1474d287eba1463b976e75fcba2611",
+      "baseline_commit": "fb7cb04cf9acabb7fae6e815946d607b45465d35",
+      "code_commit": "1e58f4fb98ad57e5cefee2e2f68557f64dfdc828",
+      "mac_full": {
+        "passed": 3103,
+        "warnings": 11,
+        "seconds": 107.19
+      },
+      "linux_full": {
+        "passed": 3103,
+        "warnings": 11,
+        "seconds": 126.38
+      },
+      "target_tests": {
+        "passed": 215,
+        "warnings": 1,
+        "seconds": 4.68
+      },
+      "linux_target_tests": {
+        "passed": 215,
+        "warnings": 1,
+        "seconds": 5.49
+      },
+      "parent_gates": 23,
+      "linux_parent_gates": 23,
+      "ruff": "passed",
+      "lock_check": "passed",
+      "review_model": "kimi-code/k3",
+      "review_receipt": "a11-status-kimi-k3.json",
+      "scope": "A11a default-off flags/status/control only; no enabled business composition or installed deployment preflight",
+      "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+      "clock_validation": {
+        "samples": 109,
+        "first": 1789686362.8599474,
+        "last": 1789686384.7965388,
+        "backward_steps": []
+      },
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-status"
     }
   ]
 }

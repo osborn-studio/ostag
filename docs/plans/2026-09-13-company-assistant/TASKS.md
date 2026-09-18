@@ -4,7 +4,7 @@
 
 本版40任务、120条验收，全部planned。旧任务ID保留，新增M01—M07/D07和U01—U04/D08；P00已有部分历史基线证据，不等于完整完成。文件≤5是候选范围，独立子系统继续拆小；tests不可因文件合并缩水。新命令均为实施后入口，缺文件须失败，不能跳过假通过。
 
-通用完成：三个AC逐项有证据；目标测试非空通过；受影响回归/lint/严格输入负例通过；Fable审同一最终diff无未处理阻断；原工作区不变。真实读取、写入和发布任务还须执行VALIDATION/MEETING-PREP/DEPLOYMENT对应平台门槛，单元命令不能替代真人记录。
+通用完成：三个AC逐项有证据；目标测试非空通过；受影响回归/lint/严格输入负例通过；当前指定独立审计模型（Kimi K3）审同一最终diff无未处理阻断；原工作区不变。真实读取、写入和发布任务还须执行VALIDATION/MEETING-PREP/DEPLOYMENT对应平台门槛，单元命令不能替代真人记录。
 
 开发PR目标为拟建`codex/ostag-company-integration`，沿用当前不限制base的pull_request CI；main每个窗口只接收一个release PR，D02可信锁/preflight先安装。发布后main正常合回integration保留未发布工作，不reset/force-push。共享config/store/renderer同一时间单writer。每2—3任务检查一次可演示行为与依赖回执。
 
@@ -211,6 +211,8 @@ uv run --locked pytest -q tests/test_brief_revocation.py tests/test_brief_retent
 ```
 
 ## A11 单服务接线与回归隔离
+
+新增部分完成：A11b 可信本地权限状态与 BriefService 一致授权检查已验证；完整业务生命周期仍待接线。见 [范围与后续实施](A11-AUTHORITY.md)。
 
 当前部分完成：A11a 默认关闭的开关、状态 owner、控制代次和排空验证基础已本地验证；其余 A11 验收未完成。见 [具体范围与A11b](A11-STATUS.md)。
 
