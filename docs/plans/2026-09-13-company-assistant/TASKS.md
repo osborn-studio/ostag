@@ -212,6 +212,8 @@ uv run --locked pytest -q tests/test_brief_revocation.py tests/test_brief_retent
 
 ## A11 单服务接线与回归隔离
 
+新增部分完成：A11c 显式本地生命周期与受理/认领/IO 代次检查、真实在途记录已验证；生产 owner 与控制状态桥接仍待完成。见 [范围与后续实施](A11-LIFECYCLE.md)。
+
 新增部分完成：A11b 可信本地权限状态与 BriefService 一致授权检查已验证；完整业务生命周期仍待接线。见 [范围与后续实施](A11-AUTHORITY.md)。
 
 当前部分完成：A11a 默认关闭的开关、状态 owner、控制代次和排空验证基础已本地验证；其余 A11 验收未完成。见 [具体范围与A11b](A11-STATUS.md)。
