@@ -1,11 +1,11 @@
 {
-  "scope": "Local slices through A11c operation lifecycle verified; production composition/status bridge, trusted authority updater, meeting collectors, real platform and deployment incomplete",
+  "scope": "Local slices through A11d concrete control/status bridge verified; durable startup reconciliation, production composition, trusted authority updater, meeting collectors, real platform and deployment incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "3a7e85dd9ce179c93aaf1f9d492616d265b64af1",
+  "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "7742815926721604fb83bcd7183b054912685b1a214c7c594bf2b3e031adda70",
+  "code_content_sha256": "5a96f83af59f6fd5ea3bcc67a02048ba9311b9933bd75264d2ccf9b772707c5d",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -56,7 +56,7 @@
     "tests/test_brief_retention.py": "299703e521a8b96930c7ebc56b5359fb24f3fc8c6fb78626897f93bd44920c9f",
     "tests/test_brief_revocation.py": "b6f29a0465b926649d7096afa3b6c07008086f64a1d0d432c8005fd169448389",
     "tests/test_brief_card_recovery.py": "b078e8bced687332c97a9c3e65c1d48f5dc265d2e0e7f265bfd7a79baba1db39",
-    "ostag/briefs/runtime.py": "1c0d75630e39e835741541a62618aac42e0f949d34dcac8a93f33222d5c72c39",
+    "ostag/briefs/runtime.py": "260e784f8df06dbea10da41893759b97c503b296657b8b038c45941f07dc0176",
     "ostag/config.py": "2254343bc2cc0a0a3b735fb3cf8d47391892b040a9a6c449e021854e6737937e",
     "ostag/work_monitor/server.py": "52ec175dbf4c49d98b8d27b5366249601139714c832712e676279476129edcb3",
     "tests/test_brief_flags.py": "c95fdb255673ec0471a575db61a7ad6e5c270d2066ea9a6aa3423e50dfd12fe3",
@@ -64,9 +64,11 @@
     "ostag/briefs/authority.py": "edd1981d12882406715cd83ad3518afc5b0ef0ab43bf97bc50778ad1ebd35f12",
     "tests/test_brief_authority.py": "9810eb217f3518d66bb051add23d8952d66b4f9430c53a404a0f97b7291a98e5",
     "tests/test_brief_authority_integration.py": "a33da00144f3505fe8cdf16f58c0edd12e197dd33c3a6d2703f4bfdfce3ec626",
-    "ostag/briefs/lifecycle.py": "c70d89544334045c6989c77183c4d3b3743fa18d07f86aa697f32af20de33f19",
+    "ostag/briefs/lifecycle.py": "ff2eefbbd1cbebad6f4fc598550cccdaf847fcaaf56dbe0340479ca1f3fcd6ae",
     "tests/test_brief_lifecycle.py": "9bace2023b092fe46e597609245c9e73f684c9cf6414d69583f8070923f4c8f5",
-    "tests/test_brief_lifecycle_integration.py": "f15757179d0c02395f51fc0b1caf0722dce76769a5f92a5fec4627f2ee684950"
+    "tests/test_brief_lifecycle_integration.py": "f15757179d0c02395f51fc0b1caf0722dce76769a5f92a5fec4627f2ee684950",
+    "tests/test_brief_control_bridge.py": "9924a59c58cb5351d8440fe0cd1baa4cd36147858e134cc798a37892d6b83021",
+    "tests/test_brief_control_bridge_integration.py": "ba91fdccc2df827031b28e068bcc4800a776cfd34c39c9c5b05c3cd601703158"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
@@ -86,7 +88,7 @@
     "A10": "verified_local; A11 runtime and production pending",
     "MONITOR-REPLAY": "verified_local; production pending",
     "A05-refresh": "verified_local; authenticated production command and client update remain A11/D01",
-    "A11": "partial: A11a disabled status, A11b authority and A11c local operation control/custody verified; shared production owner/status bridge and authority updater pending"
+    "A11": "partial: A11a disabled status, A11b authority, A11c operation custody, A11d concrete file-control/status bridge verified; durable startup reconciliation, production owner and authority updater pending"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -109,24 +111,24 @@
     "A06-AC3": "Human corrections and original draft visible separately across bounded pages; adoption retractable with reserved event/global capacity; revoked access fails closed",
     "A05-recovery": "Explicit scoped original-message recovery, epoch CAS, immutable send facts, forward-only schema1 migration, retention/expiry/cancel and no resend verified locally; no actual client update certified",
     "A11-AC1": "partial: strict registry, all flags default off/rejected on, no business DB/worker, independent status owner verified; Compose environment/mount verification and enabled runtime pending",
-    "A11-AC2": "partial: A11a boot/generation status owner and A11b coherent authority retained; A11c explicit local admission/claim/IO epoch fences and conservative custody verified. Production status/control bridge and full lifecycle ownership still pending; disabled status zero counters are not proof of business drain.",
+    "A11-AC2": "partial: A11d binds real local custody to file control and v2 status with short-lived authority and sealed off; v2 drain_ack always false. Durable startup/prior orphan reconciliation and full production owner still pending; local zeros do not prove production drain.",
     "A11-AC3": "partial: status failure/delay isolation and maintenance no-business-IO verified; enabled schema degradation and same-image business read-only maintenance pending"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 469,
-    "full_passed": 3240,
+    "target_passed": 258,
+    "full_passed": 3262,
     "warnings": 11,
-    "full_seconds": 108.46,
+    "full_seconds": 128.29,
     "ruff": "passed",
-    "latest_slice": "A11c-lifecycle",
-    "linux_full_passed": 3240
+    "latest_slice": "A11d-controlbridge",
+    "linux_full_passed": 3262
   },
   "review": {
     "model": "Kimi Code CLI requested kimi-code/k3",
     "mode": "Actual independent Kimi K3 read-only source and deterministic evidence audit",
-    "successful_reviews": 17,
+    "successful_reviews": 18,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -178,7 +180,7 @@
       "tests/test_brief_retention.py": "a10-kimi-k3-round-1.json",
       "tests/test_brief_revocation.py": "a10-kimi-k3-round-1.json",
       "tests/test_brief_card_recovery.py": "a05-recovery-kimi-k3.json",
-      "ostag/briefs/runtime.py": "a11-status-kimi-k3.json",
+      "ostag/briefs/runtime.py": "a11-controlbridge-kimi-k3.json",
       "ostag/config.py": "a11-status-kimi-k3.json",
       "ostag/work_monitor/server.py": "a11-status-kimi-k3.json",
       "tests/test_brief_flags.py": "a11-status-kimi-k3.json",
@@ -186,9 +188,11 @@
       "ostag/briefs/authority.py": "a11-authority-kimi-k3.json",
       "tests/test_brief_authority.py": "a11-authority-kimi-k3.json",
       "tests/test_brief_authority_integration.py": "a11-authority-kimi-k3.json",
-      "ostag/briefs/lifecycle.py": "a11-lifecycle-kimi-k3.json",
+      "ostag/briefs/lifecycle.py": "a11-controlbridge-kimi-k3.json",
       "tests/test_brief_lifecycle.py": "a11-lifecycle-kimi-k3.json",
-      "tests/test_brief_lifecycle_integration.py": "a11-lifecycle-kimi-k3.json"
+      "tests/test_brief_lifecycle_integration.py": "a11-lifecycle-kimi-k3.json",
+      "tests/test_brief_control_bridge.py": "a11-controlbridge-kimi-k3.json",
+      "tests/test_brief_control_bridge_integration.py": "a11-controlbridge-kimi-k3.json"
     },
     "unresolved_blockers": 0,
     "historical_models": [
@@ -198,7 +202,7 @@
     ],
     "pending_candidate_blockers": 0,
     "model_scope": "A10 final repair/review; previous per-file Fable/Opus receipts retain their recorded scopes",
-    "latest_receipt": "a11-lifecycle-kimi-k3.json"
+    "latest_receipt": "a11-controlbridge-kimi-k3.json"
   },
   "osstack": {
     "version": "0.19.0",
@@ -238,7 +242,8 @@
       "loop_6c37074a-3b0c-461d-86e4-31c3c08bbd1b",
       "loop_f1c264cb-5a83-415d-9111-47ad654abca1",
       "loop_d31415e5-e40b-4282-9b62-1dc10090cf74",
-      "loop_4f3329f3-7ee3-4844-817f-ba114db617b9"
+      "loop_4f3329f3-7ee3-4844-817f-ba114db617b9",
+      "loop_9d90848b-8a4c-4f70-8061-ef0962899887"
     ],
     "outcomes": [
       "success",
@@ -272,6 +277,7 @@
       "escalated",
       "escalated",
       "escalated",
+      "success",
       "success",
       "success",
       "success",
@@ -1333,9 +1339,64 @@
         "historical_queues": 13,
         "frozen_meeting_evaluation_unchanged": true
       }
+    },
+    "A11d-controlbridge": {
+      "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+      "baseline_commit": "b42a1b2f335c2263eec5b33e9162f71dc879dd62",
+      "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
+      "mac_full": {
+        "passed": 3262,
+        "warnings": 11,
+        "seconds": 128.29
+      },
+      "linux_full": {
+        "passed": 3262,
+        "warnings": 11,
+        "seconds": 138.03
+      },
+      "target_tests": {
+        "passed": 258,
+        "warnings": 1,
+        "seconds": 23.6
+      },
+      "linux_target_tests": {
+        "passed": 258,
+        "warnings": 1,
+        "seconds": 23.23
+      },
+      "parent_gates": 26,
+      "linux_parent_gates": 26,
+      "ruff": "passed",
+      "lock_check": "passed",
+      "review_model": "kimi-code/k3",
+      "review_receipt": "a11-controlbridge-kimi-k3.json",
+      "scope": "A11d explicit file-control/status bridge to concrete local lifecycle; attached v2 never grants production drain ACK; durable startup reconciliation, production owner and trusted authority updater pending",
+      "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+      "clock_validation": {
+        "samples": 148,
+        "minimum_wall_step": 0.20012688636779785,
+        "backward_steps": [],
+        "guest_ntp": "paused after startup",
+        "raw_artifact": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge/linux-clock-after-fix.json",
+        "raw_sha256": "5d65b0f16c2d6204fcab1ea19ff841193d6ad112f76728f2e99f1abd6d2d2302"
+      },
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge",
+      "status": "verified_local_partial_A11",
+      "review_note_correction": "Kimi prose says 41 materials; exact returned-line validation proves 38/38. Raw verdict preserved.",
+      "post_document_checks": {
+        "plan_validation": "40 tasks /120 AC /acyclic /local links passed; implementation_verified=false",
+        "mac_hygiene_tests": 4,
+        "linux_hygiene_tests": 4,
+        "docs_hygiene_matches": 0,
+        "all_code_file_hashes_unchanged": 62,
+        "actual_review_event_hash_verified": true,
+        "original_checkout": "5098f9141864d413718d776c9ae783951ea4b5c1 clean unchanged",
+        "historical_queues": 13,
+        "frozen_meeting_evaluation_unchanged": true
+      }
     }
   },
-  "latest_slice_content_sha256": "2eae0337946e9a810e5dfe3ece556eb97f0d9e360d7612e6e8a4559a822f1429",
+  "latest_slice_content_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
   "pending_findings": [
     {
       "id": "monitor-ack-publication-lifecycle",
@@ -1352,12 +1413,12 @@
       }
     }
   ],
-  "checkpoint": "A11c local operation lifecycle integrated after Codex implementation, macOS/Linux deterministic tests and actual Kimi K3 approval; full A11 still partial",
+  "checkpoint": "A11d file-control/status bridge integrated after Codex implementation, macOS/Linux deterministic tests and actual Kimi K3 approval; full A11 still partial",
   "next_task_details": {
-    "A11": "Wire trusted authority acquisition, retention registration and local lifecycle into one production owner; bridge control/status with real custody, startup/restart uncertainty, authenticated recovery/revision routes, protected mounts and deployment preflight.",
+    "A11": "Reconcile durable startup/prior-process work before defining production drain ACK; wire trusted authority acquisition, retention registration and shared lifecycle into one production owner, authenticated recovery/revision routes, protected mounts and deployment preflight.",
     "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct."
   },
-  "updated_at_utc": "2026-09-18T01:09:04.105411+00:00",
+  "updated_at_utc": "2026-09-18T13:01:42.467291+00:00",
   "candidates": {},
   "candidate_history": {
     "A10-before-Opus": {
@@ -1461,44 +1522,46 @@
     }
   ],
   "combined_validation": {
-    "candidate_sha256": "2eae0337946e9a810e5dfe3ece556eb97f0d9e360d7612e6e8a4559a822f1429",
-    "baseline_commit": "2cb0e95e0116d0eec48103c4ad28767d77fe660d",
-    "code_commit": "3a7e85dd9ce179c93aaf1f9d492616d265b64af1",
+    "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+    "baseline_commit": "b42a1b2f335c2263eec5b33e9162f71dc879dd62",
+    "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
     "mac_full": {
-      "passed": 3240,
+      "passed": 3262,
       "warnings": 11,
-      "seconds": 108.46
+      "seconds": 128.29
     },
     "linux_full": {
-      "passed": 3240,
+      "passed": 3262,
       "warnings": 11,
-      "seconds": 118.37
+      "seconds": 138.03
     },
     "target_tests": {
-      "passed": 469,
+      "passed": 258,
       "warnings": 1,
-      "seconds": 48.71
+      "seconds": 23.6
     },
     "linux_target_tests": {
-      "passed": 469,
+      "passed": 258,
       "warnings": 1,
-      "seconds": 58.57
+      "seconds": 23.23
     },
-    "parent_gates": 25,
-    "linux_parent_gates": 25,
+    "parent_gates": 26,
+    "linux_parent_gates": 26,
     "ruff": "passed",
     "lock_check": "passed",
     "review_model": "kimi-code/k3",
-    "review_receipt": "a11-lifecycle-kimi-k3.json",
-    "scope": "A11c explicit local lifecycle, operation epoch fences and honest custody only; production owner/status bridge and trusted authority updater pending",
+    "review_receipt": "a11-controlbridge-kimi-k3.json",
+    "scope": "A11d explicit file-control/status bridge to concrete local lifecycle; attached v2 never grants production drain ACK; durable startup reconciliation, production owner and trusted authority updater pending",
     "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
     "clock_validation": {
       "samples": 148,
-      "first": 1789691229.6219761,
-      "last": 1789691259.4792664,
-      "backward_steps": []
+      "minimum_wall_step": 0.20012688636779785,
+      "backward_steps": [],
+      "guest_ntp": "paused after startup",
+      "raw_artifact": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge/linux-clock-after-fix.json",
+      "raw_sha256": "5d65b0f16c2d6204fcab1ea19ff841193d6ad112f76728f2e99f1abd6d2d2302"
     },
-    "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-lifecycle"
+    "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge"
   },
   "superseded_requirements": [
     {
@@ -1684,6 +1747,46 @@
         "backward_steps": []
       },
       "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-authority"
+    },
+    {
+      "candidate_sha256": "2eae0337946e9a810e5dfe3ece556eb97f0d9e360d7612e6e8a4559a822f1429",
+      "baseline_commit": "2cb0e95e0116d0eec48103c4ad28767d77fe660d",
+      "code_commit": "3a7e85dd9ce179c93aaf1f9d492616d265b64af1",
+      "mac_full": {
+        "passed": 3240,
+        "warnings": 11,
+        "seconds": 108.46
+      },
+      "linux_full": {
+        "passed": 3240,
+        "warnings": 11,
+        "seconds": 118.37
+      },
+      "target_tests": {
+        "passed": 469,
+        "warnings": 1,
+        "seconds": 48.71
+      },
+      "linux_target_tests": {
+        "passed": 469,
+        "warnings": 1,
+        "seconds": 58.57
+      },
+      "parent_gates": 25,
+      "linux_parent_gates": 25,
+      "ruff": "passed",
+      "lock_check": "passed",
+      "review_model": "kimi-code/k3",
+      "review_receipt": "a11-lifecycle-kimi-k3.json",
+      "scope": "A11c explicit local lifecycle, operation epoch fences and honest custody only; production owner/status bridge and trusted authority updater pending",
+      "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+      "clock_validation": {
+        "samples": 148,
+        "first": 1789691229.6219761,
+        "last": 1789691259.4792664,
+        "backward_steps": []
+      },
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-lifecycle"
     }
   ]
 }

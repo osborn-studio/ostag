@@ -1,0 +1,42 @@
+{
+  "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+  "baseline_commit": "b42a1b2f335c2263eec5b33e9162f71dc879dd62",
+  "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
+  "mac_full": {
+    "passed": 3262,
+    "warnings": 11,
+    "seconds": 128.29
+  },
+  "linux_full": {
+    "passed": 3262,
+    "warnings": 11,
+    "seconds": 138.03
+  },
+  "target_tests": {
+    "passed": 258,
+    "warnings": 1,
+    "seconds": 23.6
+  },
+  "linux_target_tests": {
+    "passed": 258,
+    "warnings": 1,
+    "seconds": 23.23
+  },
+  "parent_gates": 26,
+  "linux_parent_gates": 26,
+  "ruff": "passed",
+  "lock_check": "passed",
+  "review_model": "kimi-code/k3",
+  "review_receipt": "a11-controlbridge-kimi-k3.json",
+  "scope": "A11d explicit file-control/status bridge to concrete local lifecycle; attached v2 never grants production drain ACK; durable startup reconciliation, production owner and trusted authority updater pending",
+  "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+  "clock_validation": {
+    "samples": 148,
+    "minimum_wall_step": 0.20012688636779785,
+    "backward_steps": [],
+    "guest_ntp": "paused after startup",
+    "raw_artifact": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge/linux-clock-after-fix.json",
+    "raw_sha256": "5d65b0f16c2d6204fcab1ea19ff841193d6ad112f76728f2e99f1abd6d2d2302"
+  },
+  "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge"
+}

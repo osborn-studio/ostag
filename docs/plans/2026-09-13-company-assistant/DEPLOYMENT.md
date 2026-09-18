@@ -1,6 +1,6 @@
 # 部署、激活、运营与恢复
 
-最新：A11c 已将暂停代次检查和真实在途记录接入本地受理、worker 与任务卡路径；Codex 编码、Kimi K3 审计批准，macOS/Linux 全量各 3240 项通过。见 [生命周期接线与下一步](A11-LIFECYCLE.md)。生产 owner/控制状态接线、真实权限更新链、完整会议功能与生产部署仍待完成。
+最新：A11d 已将文件控制与状态发布接到真实本地生命周期，暂停禁止新增清理/取消，控制有效期在事件循环停顿时仍可自行失效；Codex 编码、Kimi K3 审计批准，macOS/Linux 全量各 3262 项通过。见 [控制状态接线与下一步](A11-CONTROL-BRIDGE.md)。附加状态不会发出生产排空 ACK；遗留执行核对、生产 owner、可信权限更新、会议采集与部署仍待完成。
 
 本文件是未来操作方案，本轮没有执行其中的服务器或GitHub写动作。OStag自身部署是GitHub Actions→腾讯Lighthouse；业务GitHub→Vercel流程是另一件事。Merge main会在OS Tag CI成功后自动触发生产部署，因此发布意图在merge之前核对。
 
