@@ -32,12 +32,14 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import Future, InvalidStateError
+from dataclasses import replace
 from threading import Condition, Event, Lock, Thread, current_thread
 from time import monotonic
 from uuid import uuid4
 
 from ostag.briefs.generation import generate
 from ostag.briefs.models import _invalid
+from ostag.briefs.lifecycle import LifecycleDenied
 from ostag.briefs.service import BriefService, ConfigChanged
 from ostag.briefs.store import (
     ClockError, Conflict, LeaseGuard, LeaseLost, RecoveryValidity, StoreBusy, StoreError, WorkerContext,
@@ -82,9 +84,36 @@ class _GenerationStore:
         return self.guard.database(self.store.release_cost, worker, reservation_id, evidence=True)
 
 
+class _OwnedModel:
+    """Count the inner adapter coroutine, including detached suppression/GC."""
+    def __init__(self, transport, lifecycle, parent):
+        self.transport, self.lifecycle, self.parent = transport, lifecycle, parent
+
+    async def generate(self, request):
+        op = self.lifecycle.begin("model", parent=self.parent)
+        try:
+            original_reauthorize = request.reauthorize
+            def reauthorize():
+                result = original_reauthorize()
+                op.check()
+                return result
+            request = replace(request, reauthorize=reauthorize)
+            result = await self.transport.generate(request)
+        except BaseException:
+            op.uncertain()
+            raise
+        else:
+            op.finish()
+            return result
+
+
 class BriefWorker:
     def __init__(self, service: BriefService, *, heartbeat_interval: float = 10):
         self.service, self.store = service, service.store
+        self.lifecycle = service.lifecycle
+        if self.lifecycle is not None:
+            self.lifecycle.own_worker(self)
+        self._operation = None
         self.context = WorkerContext("manual-" + uuid4().hex)
         self.heartbeat_interval = heartbeat_interval
         self._stop = Event()
@@ -118,6 +147,8 @@ class BriefWorker:
             # Do not await arbitrary transport cleanup. Outstanding tasks cannot
             # resume on this closed loop; synchronous stuck code remains fenced
             # by the thread-safe stop latch when it eventually returns.
+            if self._operation is not None:
+                self._operation.uncertain()
             self._loop.close()
 
     def run_once(self) -> Future:
@@ -134,6 +165,13 @@ class BriefWorker:
             elif self._busy or self._notifying:
                 status = "busy"
             else:
+                try:
+                    operation = (None if self.lifecycle is None
+                                 else self.lifecycle.begin("worker"))
+                except LifecycleDenied:
+                    result.set_result("unavailable")
+                    return result
+                self._operation = operation
                 self._future = result
                 self._busy = True
                 self._published = False
@@ -143,6 +181,9 @@ class BriefWorker:
                 except RuntimeError:
                     # stop may close the loop between the latch and scheduling.
                     self._busy = False
+                    if operation is not None:
+                        operation.finish()
+                    self._operation = None
                     status = "stopped"
                 else:
                     return result
@@ -178,14 +219,25 @@ class BriefWorker:
     async def _dispatch(self, future):
         try:
             status = await self._execute()
+        except LifecycleDenied:
+            status = "unavailable"
         except (StoreBusy, ClockError, Conflict):
             # No confirmed invocation is at risk on these idle/preclaim paths.
             # Every subsequent submission must redo trusted clock/DB checks.
             status = "store_unavailable"
         except Exception:
             self._quarantined = True
+            if self._operation is not None:
+                self._operation.uncertain()
             status = "store_unavailable"
+        except BaseException:
+            if self._operation is not None:
+                self._operation.uncertain()
+            raise
+        if self._operation is not None:
+            self._operation.finish()
         with self._lock:
+            self._operation = None
             self._busy = False
             self._publish_locked(future, status)
 
@@ -196,7 +248,7 @@ class BriefWorker:
                 await asyncio.wrap_future(self.run_once())
                 await asyncio.sleep(0.05)
         with self._lock:
-            if getattr(self, "_polling", False):
+            if self._stop.is_set() or getattr(self, "_polling", False):
                 return
             self._polling = True
         try:
@@ -227,8 +279,17 @@ class BriefWorker:
             self._thread.join(timeout)
         return "local_stopping" if self._thread.is_alive() else "local_stopped"
 
+    def _check_operation(self):
+        if self.lifecycle is None:
+            return
+        if self._operation is not None:
+            self._operation.check()
+        if self._stop.is_set():
+            raise LifecycleDenied()
+
     def _recovery_valid(self, job):
         try:
+            self._check_operation()
             request, _ = self.service.load_job(job)
             cost = self.store.cost_record(job.scope, job.job_id, CALL_ID)
             # No retry with a new ID, including settled responses lost before commit.
@@ -238,7 +299,8 @@ class BriefWorker:
                                             clock=self.service.clock)
                 return RecoveryValidity(False, False, False)
             self.service.authorize_current(request, job.scope, job.destination,
-                                           stopped=self._stop.is_set, job_id=job.job_id)
+                                           stopped=self._stop.is_set, job_id=job.job_id,
+                                           operation=self._operation)
             return RecoveryValidity(True, True, True)
         except (StoreBusy, ClockError, Conflict):
             # Recovery validation did not complete; leave the detached candidate
@@ -276,20 +338,27 @@ class BriefWorker:
                     raise
 
     async def _execute(self):
+        operation = self._operation
         if self._stop.is_set() or not self.service.configured:
             return "unavailable"
+        self._check_operation()
         # Quarantine before recovery consumes an unrelated attempt/fence.
         if self.store.has_uncertain_cost(self.context):
             self._quarantined = True
+            if operation is not None:
+                operation.uncertain()
             return "needs_input"
+        claim_gate = {} if self.lifecycle is None else {"precommit": self._check_operation}
         job = self.store.recover_one(self.context, validate=self._recovery_valid,
                                     clock=self.service.clock, cause="recovery_required",
-                                    require_known_costs=True)
+                                    require_known_costs=True, **claim_gate)
         if job is None:
             job = self.store.claim_one(self.context, clock=self.service.clock,
-                                       require_known_costs=True)
+                                       require_known_costs=True, **claim_gate)
         if job is None and self.store.has_uncertain_cost(self.context):
             self._quarantined = True
+            if operation is not None:
+                operation.uncertain()
             return "needs_input"
         if job is None:
             return "idle"
@@ -297,10 +366,12 @@ class BriefWorker:
         self._cancellation = cancellation
         cause = "store_error"
         operator_cancel = self.service.watch_cancellation(job.scope, job.job_id)
+        guard = None
         try:
             with LeaseGuard(self.store, job.lease, clock=self.service.clock,
                             interval=self.heartbeat_interval, retry_busy=True,
                             confirmed_job=job, stop_signal=self._stop) as guard:
+                self._check_operation()
                 request, config = self.service.load_job(job)
                 cost = guard.database(self.store.cost_record, job.scope, job.job_id, CALL_ID,
                                       clocked=False)
@@ -311,7 +382,8 @@ class BriefWorker:
 
                 def stopped():
                     return (self._stop.is_set() or guard.lost or cancellation.is_set()
-                            or operator_cancel.is_set())
+                            or operator_cancel.is_set()
+                            or (operation is not None and not operation.allowed()))
 
                 def authorization():
                     nonlocal cause
@@ -320,7 +392,8 @@ class BriefWorker:
                         raise ConfigChanged()
                     try:
                         self.service.authorize_current(request, job.scope, job.destination,
-                                                       stopped=stopped, job_id=job.job_id)
+                                                       stopped=stopped, job_id=job.job_id,
+                                                       operation=operation)
                     except SchemaError:
                         cause = "authorization_denied"
                         raise
@@ -335,15 +408,18 @@ class BriefWorker:
                         await asyncio.sleep(0.02)
                         # No SQLite polling: the independent heartbeat observes
                         # persisted cancellation/fences; local intent is immediate.
-                        if guard.lost or self._stop.is_set() or operator_cancel.is_set():
+                        if stopped():
                             cancellation.set()
 
+                transport = self.service.transport
+                if self.lifecycle is not None:
+                    transport = _OwnedModel(transport, self.lifecycle, operation)
                 watcher = asyncio.create_task(watch())
                 try:
                     result = await generate(store=_GenerationStore(self.store, guard),
                         lease=job.lease, call_id=CALL_ID,
                         sources=request.source_set(job.scope), coverage=request.coverage,
-                        goal=request.goals, config=config, transport=self.service.transport,
+                        goal=request.goals, config=config, transport=transport,
                         checkpoint=checkpoint, cancellation=cancellation, clock=self.service.clock)
                 finally:
                     watcher.cancel()
@@ -375,6 +451,8 @@ class BriefWorker:
             # serialize an exception string, class-derived status or private data.
             pass
         finally:
+            if guard is not None and guard.running and operation is not None:
+                operation.uncertain()
             self._cancellation = None
             self.service.unwatch_cancellation(job.scope, job.job_id)
         # Never retransmit to recover a lost successful COMMIT response.
@@ -383,8 +461,12 @@ class BriefWorker:
         except (StoreBusy, ClockError, Conflict):
             # Unavailability is not evidence of unknown spend. On the next run,
             # the durable global cost check must succeed BEFORE any new claim.
+            if operation is not None:
+                operation.uncertain()
             return "store_unavailable"
         except (StoreError, SchemaError):
+            if operation is not None:
+                operation.uncertain()
             self._quarantined = True
             return "store_unavailable"
 
@@ -406,6 +488,8 @@ class BriefWorker:
                 self.store.release_cost(self.context, cost.reservation_id,
                                         clock=self.service.clock)
             elif cost.state in ("started", "unknown"):
+                if self._operation is not None:
+                    self._operation.uncertain()
                 self._quarantined = True
                 self.store.mark_cost_unknown(self.context, cost.reservation_id, cause,
                                              clock=self.service.clock)

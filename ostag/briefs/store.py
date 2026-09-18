@@ -1439,8 +1439,16 @@ class BriefStore:
         return result
 
     def claim_one(self, worker: WorkerContext, *, clock: Callable[[], str] = utc_now,
-                  require_known_costs: bool = False) -> Job | None:
-        """Trusted worker: claim at most one queued job, with one global live lease."""
+                  require_known_costs: bool = False,
+                  precommit: Callable[[], None] | None = None) -> Job | None:
+        """Claim at most one queued job, with one global live lease.
+
+        Optional precommit is a bounded, non-reentrant local gate after writes;
+        it raises to roll back, but cannot retract a COMMIT already in progress.
+        The caller must retain custody across the entire call and recheck before IO.
+        """
+        if precommit is not None and not callable(precommit):
+            raise _invalid("trusted bounded precommit required")
         owner = _worker(worker)
         if type(require_known_costs) is not bool:
             raise _invalid("require_known_costs must be an internal explicit boolean")
@@ -1456,7 +1464,10 @@ class BriefStore:
             if row is None:
                 return None
             self._forward(row, stamp)
-            return self._claim(db, row, owner, stamp, clock)
+            result = self._claim(db, row, owner, stamp, clock)
+            if precommit is not None and precommit() is not None:
+                raise _invalid("precommit must raise on denial")
+            return result
 
     @staticmethod
     def _fresh_attempt(row: sqlite3.Row, clock: Callable[[], str], observed: int) -> None:
@@ -1611,6 +1622,7 @@ class BriefStore:
         self, worker: WorkerContext, *, validate: Callable[[Job], RecoveryValidity],
         cause: str | None = None, clock: Callable[[], str] = utc_now,
         require_known_costs: bool = False,
+        precommit: Callable[[], None] | None = None,
     ) -> Job | None:
         """Trusted maintenance: inspect at most one expired attempt per call.
 
@@ -1621,7 +1633,11 @@ class BriefStore:
         and total attempts. Invalid checks -> needs_input; expired deadline or
         exhausted attempts -> failed. Validator errors propagate without claim.
         No validation default, no payload approval flags, no implicit new data.
+        Optional bounded precommit fences every mutation, including terminalization,
+        after writes and before COMMIT. It must not wait on store/guard locks.
         """
+        if precommit is not None and not callable(precommit):
+            raise _invalid("trusted bounded precommit required")
         owner = _worker(worker)
         if type(require_known_costs) is not bool:
             raise _invalid("require_known_costs must be an internal explicit boolean")
@@ -1664,14 +1680,21 @@ class BriefStore:
             if stamp >= current["deadline_us"] or current["attempt"] >= MAX_ATTEMPTS:
                 self._terminal(db, current, "failed", stamp)
                 self._failure(db, current, cause, stamp)
+                if precommit is not None and precommit() is not None:
+                    raise _invalid("precommit must raise on denial")
                 return None
             if validity is None or not validity.valid:
                 self._terminal(db, current, "needs_input", stamp)
                 self._failure(db, current, cause, stamp)
+                if precommit is not None and precommit() is not None:
+                    raise _invalid("precommit must raise on denial")
                 return None
             if self._live(db, stamp):
                 return None
-            return self._claim(db, current, owner, stamp, clock)
+            result = self._claim(db, current, owner, stamp, clock)
+            if precommit is not None and precommit() is not None:
+                raise _invalid("precommit must raise on denial")
+            return result
 
     @staticmethod
     def _cost_schema(db: sqlite3.Connection) -> None:

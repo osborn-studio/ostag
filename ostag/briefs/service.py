@@ -41,6 +41,7 @@ from threading import BoundedSemaphore, Event, Lock
 
 from ostag.briefs.generation import GenerationConfig, Provenance, ReadOnlyTransport, Usage, digest
 from ostag.briefs.grants import GrantLookup, authorize
+from ostag.briefs.lifecycle import LifecycleDenied, check_binding
 from ostag.briefs.models import (
     SourceRef, SourceSet, TimeWindow, _identifier, _invalid, _keys, _positive_int,
     _sequence, _text, _utc,
@@ -166,7 +167,7 @@ class BriefService:
                  grants: GrantLookup, sources: Callable[[RequesterContext, str], SourceSnapshot | None],
                  destination: Callable[[RequesterContext], PrivateDestination | None],
                  clock: Callable[[], str] = utc_now, max_intake: int = 8, retention=None,
-                 authority=None):
+                 authority=None, lifecycle=None):
         for callback in (settings, grants, sources, destination, clock):
             if not callable(callback):
                 raise _invalid("mandatory trusted current callbacks required")
@@ -178,6 +179,8 @@ class BriefService:
             if type(authority) is not TrustedBriefAuthority:
                 raise _invalid("concrete local authority required")
             authority._check_binding((settings, grants, sources, destination, clock))
+        check_binding(lifecycle)
+        self.lifecycle = lifecycle
         self._authority = authority
         from ostag.briefs.retention import configure_guard
         self._retention_enabled = configure_guard(retention, store)
@@ -201,9 +204,9 @@ class BriefService:
 
     def close(self):
         self._closed.set()
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._executor.shutdown(wait=False, cancel_futures=self.lifecycle is None)
 
-    def authorize_current(self, request, scope, destination, *, stopped, job_id=None):
+    def authorize_current(self, request, scope, destination, *, stopped, job_id=None, operation=None):
         """Compose durable retention with the final current original mirrors.
 
         All primary SQL waits precede this call. A10's bounded retention I/O
@@ -221,6 +224,10 @@ class BriefService:
         and fences concurrent mutations. Only the mirror pass is inside that
         boundary; retention/primary SQL never holds an authority mutex.
         """
+        original_stopped = stopped
+        def stopped():
+            return original_stopped() or (operation is not None and not operation.allowed())
+
         def mirror():
             if self._authority is None:
                 self._authorize_mirror(request, scope, destination, stopped=stopped)
@@ -231,7 +238,10 @@ class BriefService:
                     self._authorize_mirror(request, scope, destination, stopped=stopped)
 
         if not self._retention_enabled:
-            return mirror()
+            mirror()
+            if operation is not None:
+                operation.check()
+            return
         from ostag.briefs.retention import RetentionGuard, check_guard
         if type(self.retention) is not RetentionGuard:
             raise _invalid("retention unavailable")
@@ -247,6 +257,8 @@ class BriefService:
             denied = True
         if denied:
             raise _invalid("retention authority denied")
+        if operation is not None:
+            operation.check()
 
     def _authorize_mirror(self, request, scope, destination, *, stopped):
         """Original current authority, with no retention or primary store I/O.
@@ -319,10 +331,12 @@ class BriefService:
         request.validate_completion_size(job.scope, config)
         return request, config
 
-    def _submit(self, event):
+    def _submit(self, event, operation=None):
         if not self.configured:
             return BriefStatus("unavailable")
         try:
+            if operation is not None:
+                operation.check()
             if type(event) is not NormalizedEvent or not is_brief_command(event.text):
                 raise _invalid("normalized brief command required")
             _identifier(event.event_id, "event_id")
@@ -337,6 +351,9 @@ class BriefService:
                 if self._retention_enabled:
                     from ostag.briefs.retention import check_guard
                     check_guard(self, scope, existing.job_id)
+                if operation is not None:
+                    self.authorize_current(request, scope, existing.destination,
+                        stopped=self._closed.is_set, job_id=existing.job_id, operation=operation)
                 return BriefStatus(existing.state, existing.job_id)
             if not request.sources or not any(s.excerpt.strip() for s in request.sources):
                 return BriefStatus("needs_input")
@@ -345,7 +362,7 @@ class BriefService:
             try:
                 destination = self.destination(scope)
                 self.authorize_current(request, scope, destination,
-                                       stopped=self._closed.is_set)
+                                       stopped=self._closed.is_set, operation=operation)
             except Exception:
                 return BriefStatus("denied")
             intake = self.clock()
@@ -355,7 +372,10 @@ class BriefService:
                 grant_revision=request.grant_revision, destination=destination, now=intake,
                 execution_seconds=config.parameters.budget.timeout_seconds, request_hash=request_hash,
                 precommit=lambda: self.authorize_current(request, scope, destination,
-                                       stopped=self._closed.is_set))
+                                       stopped=self._closed.is_set, operation=operation))
+            if operation is not None:
+                self.authorize_current(request, scope, destination,
+                    stopped=self._closed.is_set, operation=operation)
             return BriefStatus(job.state, job.job_id)
         except QueueFull:
             return BriefStatus("queue_full")
@@ -372,9 +392,16 @@ class BriefService:
         """Synchronous trusted entry; use handle_event on shared event loops."""
         if not self._slots.acquire(blocking=False):
             return BriefStatus("intake_full")
+        operation = None
         try:
-            return self._submit(event)
+            if self.lifecycle is not None:
+                operation = self.lifecycle.begin("intake")
+            return self._submit(event, operation)
+        except LifecycleDenied:
+            return BriefStatus("unavailable")
         finally:
+            if operation is not None:
+                operation.finish()
             self._slots.release()
 
     async def handle_event(self, event):
@@ -382,16 +409,30 @@ class BriefService:
         # while its synchronous callback is still running in another thread.
         if not self._slots.acquire(blocking=False):
             return BriefStatus("intake_full").render()
+        operation = None
         try:
-            future = self._executor.submit(self._submit, event)
-        except RuntimeError:
+            if self.lifecycle is not None:
+                operation = self.lifecycle.begin("intake")
+            future = self._executor.submit(self._submit, event, operation)
+        except (RuntimeError, LifecycleDenied):
+            if operation is not None:
+                operation.finish()
             self._slots.release()
             return BriefStatus("unavailable").render()
-        future.add_done_callback(lambda _: self._slots.release())
+        def completed(_):
+            if operation is not None:
+                operation.finish()
+            self._slots.release()
+        future.add_done_callback(completed)
         # Shield queued work too: cancelling a concurrent Future would release
         # the semaphore while its cancelled executor queue node remains queued.
         try:
-            return (await asyncio.shield(asyncio.wrap_future(future))).render()
+            result = await asyncio.shield(asyncio.wrap_future(future))
+            if operation is not None:
+                operation.check_release()
+            return result.render()
+        except LifecycleDenied:
+            return BriefStatus("unavailable").render()
         except asyncio.CancelledError:
             # Executor shutdown cancels queued work, not the requesting task.
             # Preserve real caller cancellation even if both happen together.
@@ -424,6 +465,21 @@ class BriefService:
                 self.retention.unwatch(scope, job_id, signal)
 
     def cancel(self, scope: RequesterContext, job_id: str):
+        operation = None
+        try:
+            if self.lifecycle is not None:
+                operation = self.lifecycle.begin("cancel")
+            result = self._cancel(scope, job_id)
+            if operation is not None:
+                operation.check()
+            return result
+        except LifecycleDenied:
+            return BriefStatus("unavailable")
+        finally:
+            if operation is not None:
+                operation.finish()
+
+    def _cancel(self, scope: RequesterContext, job_id: str):
         """Trusted requester context only; persisted cancellation also invalidates outbox."""
         # Signal an active local acceptance gate before waiting for SQLite. The
         # persisted A02 cancelled state remains the durable operator intent;

@@ -45,6 +45,7 @@ import sqlite3
 from threading import Event, Lock
 import time
 
+from ostag.briefs.lifecycle import check_binding
 from ostag.briefs.delivery import FeishuBinding, _TransportEgressGate
 from ostag.briefs.rendering import PrivatePreview, render_navigation
 from ostag.briefs.store import _retirement_method, PrivateDestination, RequesterContext
@@ -693,18 +694,32 @@ class _Operation:
         self.deadline = time.monotonic() + service.timeout
         self.owner = asyncio.current_task()
         self.abandoned = False
+        self.owns_attempt = False
+        self.custody = (None if service.lifecycle is None
+                        else service.lifecycle.begin("card"))
+
+    def finish(self):
+        with self.service._custody_lock:
+            self.service._operations.discard(self)
+        if self.custody is not None:
+            self.custody.finish()
 
     def clock(self):
+        if self.custody is not None:
+            self.custody.check()
         if (self.abandoned or self.owner.cancelling() or self.service._stop.is_set()
                 or time.monotonic() >= self.deadline):
             raise _fail()
-        return self.service._now()
+        value = self.service._now()
+        if self.custody is not None:
+            self.custody.check()
+        return value
 
 
 class CardDeliveryService:
     """Explicit first-delivery and callback lifecycle; no background polling."""
     def __init__(self, *, ledger, namespace, load, resolve_binding, authorize, transport,
-                 clock=time.time, timeout=5, max_concurrency=1, retention=None):
+                 clock=time.time, timeout=5, max_concurrency=1, retention=None, lifecycle=None):
         if (type(ledger) is not CardLedger or not all(callable(v) for v in
                 (load, resolve_binding, authorize, clock, getattr(transport, 'send', None),
                  getattr(transport, 'check_ack', None)))
@@ -713,6 +728,8 @@ class CardDeliveryService:
                 or not 1 <= max_concurrency <= 8):
             raise _fail()
         _id(namespace)
+        check_binding(lifecycle)
+        self.lifecycle = lifecycle
         from ostag.briefs.retention import configure_guard
         self._retention_enabled = configure_guard(retention, ledger)
         self.retention = retention
@@ -721,13 +738,19 @@ class CardDeliveryService:
         self.timeout, self.max_concurrency = timeout, max_concurrency
         self._loop, self._active, self._last_time = None, 0, 0
         self._stop, self._lock = Event(), Lock()
+        self._custody_lock, self._operations = Lock(), set()
 
     @property
     def active_operations(self):
         return self._active
 
     def stop(self):
-        self._stop.set()
+        with self._custody_lock:
+            self._stop.set()
+            pending = tuple(self._operations)
+        for op in pending:
+            if op.custody is not None:
+                op.custody.uncertain()
 
     def _now(self):
         value = self._clock()
@@ -743,9 +766,17 @@ class CardDeliveryService:
             raise _fail()
         if self._active >= self.max_concurrency:
             raise _fail()
+        op = _Operation(self)
+        with self._custody_lock:
+            stopped = self._stop.is_set()
+            if not stopped:
+                self._operations.add(op)
+        if stopped:
+            op.finish()
+            raise _fail()
         self._loop = loop
         self._active += 1
-        return _Operation(self)
+        return op
 
     def _current(self, p, identity=None, *, check_ack=None):
         if not self._lock.acquire(False):
@@ -812,7 +843,10 @@ class CardDeliveryService:
         def policy():
             self._current(p)
             op.clock()
-        return await self._db(op, self.ledger.prepare, p, ttl=ttl, clock=op.clock, check=policy)
+        result = await self._db(op, self.ledger.prepare, p, ttl=ttl, clock=op.clock, check=policy)
+        if op.custody is not None:
+            policy()
+        return result
 
     async def prepare(self, scope, job_id, revision_id, *, ttl=300):
         op = self._enter()
@@ -822,6 +856,7 @@ class CardDeliveryService:
         except Exception:
             pass
         finally:
+            op.finish()
             self._active -= 1
         if result is None:
             raise _fail()
@@ -906,6 +941,9 @@ class CardDeliveryService:
                     raise _fail()
                 self._current(p, intent.identity_json)
                 self.ledger._clock_live(op.clock, window)
+            if op.custody is not None:
+                self._current(p, intent.identity_json)
+                op.clock()
             result = json.loads(rendered[0])
         except Exception:
             pass
@@ -916,6 +954,7 @@ class CardDeliveryService:
                 except Exception:
                     pass
             op.abandoned = True
+            op.finish()
             self._active -= 1
         if result is None:
             raise _fail()
@@ -923,6 +962,19 @@ class CardDeliveryService:
 
     async def _execute(self, scope, delivery_id, job, revision, ttl):
         op = self._enter()
+        try:
+            result = await self._execute_operation(op, scope, delivery_id, job, revision, ttl)
+            if op.custody is not None:
+                op.custody.check()
+            return result
+        except BaseException:
+            if op.custody is not None and op.owns_attempt:
+                op.custody.uncertain()
+            raise
+        finally:
+            op.finish()
+
+    async def _execute_operation(self, op, scope, delivery_id, job, revision, ttl):
         task = attempt = result = None
         cancelled = False
         try:
@@ -946,13 +998,27 @@ class CardDeliveryService:
                 # we may only refresh status; a failed read must not diagnose or
                 # mutate the winner, nor return the earlier pending observation.
                 return await self._db(op, self.ledger.status, scope, delivery_id)
+            op.owns_attempt = True
             async def egress():
                 await self._db(op, self.ledger.egress, attempt, clock=op.clock, check=policy)
                 policy()
                 op.clock()
             gate = _TransportEgressGate(egress)
+            exchange_op = (None if self.lifecycle is None else
+                           self.lifecycle.begin('send', parent=op.custody))
             async def exchange():
-                return await self.transport.send(attempt, before_egress=gate)
+                try:
+                    if exchange_op is not None:
+                        exchange_op.check()
+                    value = await self.transport.send(attempt, before_egress=gate)
+                except BaseException:
+                    if exchange_op is not None:
+                        exchange_op.uncertain()
+                    raise
+                else:
+                    if exchange_op is not None:
+                        exchange_op.finish()
+                    return value
             task = asyncio.create_task(exchange())
             while not task.done():
                 op.clock()
@@ -968,10 +1034,12 @@ class CardDeliveryService:
             await self._db(op, self.ledger.acknowledge, attempt, ack,
                            clock=op.clock, check=acceptance_policy)
             result = await self._db(op, self.ledger.status, scope, delivery_id)
+            if op.custody is not None:
+                acceptance_policy()
         except asyncio.CancelledError:
             cancelled = True
         except Exception:
-            pass
+            result = None
         finally:
             op.abandoned = True
             if task is not None and not task.done():
@@ -984,6 +1052,8 @@ class CardDeliveryService:
             else:
                 self._active -= 1
         if result is None and attempt is not None:
+            if op.custody is not None:
+                op.custody.uncertain()
             try:
                 # Persist even after stop/deadline, with durable rollback checks.
                 self.ledger.unknown(attempt, clock=self._clock,
@@ -1001,28 +1071,48 @@ class CardDeliveryService:
         return result
 
     def cancel(self, scope, delivery_id):
+        custody = None
         failed = False
         try:
+            if self.lifecycle is not None:
+                custody = self.lifecycle.begin("cancel")
             if scope.namespace != self.namespace:
                 raise _fail()
             self.ledger.cancel(scope, delivery_id, clock=self._clock)
         except Exception:
             failed = True
+        finally:
+            if custody is not None:
+                custody.finish()
         if failed:
             raise _fail()
 
     def handle_callback(self, callback_id, *, principal, destination, tenant_id, app_id, message_id):
         """Identity comes only from the authenticated router, never button values."""
         result = None
+        custody = None
         try:
-            result = self._navigate(callback_id, principal, destination, tenant_id, app_id, message_id)
+            if self.lifecycle is not None:
+                custody = self.lifecycle.begin("card")
+            result = self._navigate(callback_id, principal, destination, tenant_id, app_id, message_id,
+                                    custody=custody)
+            if custody is not None:
+                custody.check()
         except (Exception, asyncio.CancelledError):
-            pass
+            result = None
+        finally:
+            if custody is not None:
+                custody.finish()
         if result is None:
             raise _fail()
         return result
 
-    def _navigate(self, token, principal, destination, tenant, app, message):
+    def _navigate(self, token, principal, destination, tenant, app, message, *, custody=None):
+        def clock():
+            value = self._now()
+            if custody is not None:
+                custody.check()
+            return value
         if (type(token) is not str or not _TOKEN.fullmatch(token)
                 or type(principal) is not Principal or type(destination) is not Destination
                 or principal.platform != 'feishu' or destination.platform != 'feishu'
@@ -1031,7 +1121,7 @@ class CardDeliveryService:
             raise _fail()
         scope = RequesterContext(self.namespace, principal)
         failed_release = False
-        with self.ledger.transaction(self._now, wait=0.05) as (db, now):
+        with self.ledger.transaction(clock, wait=0.05) as (db, now):
             cap = db.execute('SELECT * FROM card_tokens WHERE digest=?',
                              (_digest(token.encode()),)).fetchone()
             if cap is None:
@@ -1056,9 +1146,9 @@ class CardDeliveryService:
             db.execute('UPDATE cards SET epoch=?,page=?,response_card=? WHERE delivery_id=?',
                        (epoch, cap['page'], card, row['delivery_id']))
             try:
-                self.ledger._water(db, self._now)
+                self.ledger._water(db, clock)
                 self._current(p, row['identity_json'])
-                self.ledger._clock_live(self._now, window)
+                self.ledger._clock_live(clock, window)
             except (Exception, asyncio.CancelledError):
                 # Conservative spend-only commit on final denial: never restore
                 # the old epoch; do not retain releasable fresh capabilities.
@@ -1070,16 +1160,16 @@ class CardDeliveryService:
             return None
         # Recheck durable cancellation/highwater AFTER ACK/epoch commit waits,
         # then all current authority before returning any private response.
-        with self.ledger.transaction(self._now, wait=0.05) as (db, now):
+        with self.ledger.transaction(clock, wait=0.05) as (db, now):
             current = self.ledger._row(db, scope, row['delivery_id'])
             window = self.ledger._window(db, current)
             if current['cancelled'] or current['epoch'] != epoch:
                 raise _fail()
             if not window['issued'] <= now < window['expires']:
                 raise _fail()
-            self.ledger._water(db, self._now)
+            self.ledger._water(db, clock)
             self._current(p, row['identity_json'])
-            self.ledger._clock_live(self._now, window)
+            self.ledger._clock_live(clock, window)
         self._current(p, row['identity_json'])
-        self.ledger._clock_live(self._now, window)
+        self.ledger._clock_live(clock, window)
         return json.loads(card)
