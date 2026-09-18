@@ -165,13 +165,20 @@ class BriefService:
                  config: GenerationConfig | None, settings: Callable[[], Settings],
                  grants: GrantLookup, sources: Callable[[RequesterContext, str], SourceSnapshot | None],
                  destination: Callable[[RequesterContext], PrivateDestination | None],
-                 clock: Callable[[], str] = utc_now, max_intake: int = 8, retention=None):
+                 clock: Callable[[], str] = utc_now, max_intake: int = 8, retention=None,
+                 authority=None):
         for callback in (settings, grants, sources, destination, clock):
             if not callable(callback):
                 raise _invalid("mandatory trusted current callbacks required")
         bounded_int(max_intake, "max_intake", 20, 1)
         if config is not None and type(config) is not GenerationConfig:
             raise _invalid("explicit pinned generation config required")
+        if authority is not None:
+            from ostag.briefs.authority import TrustedBriefAuthority
+            if type(authority) is not TrustedBriefAuthority:
+                raise _invalid("concrete local authority required")
+            authority._check_binding((settings, grants, sources, destination, clock))
+        self._authority = authority
         from ostag.briefs.retention import configure_guard
         self._retention_enabled = configure_guard(retention, store)
         self.retention = retention
@@ -210,11 +217,18 @@ class BriefService:
         Compatibility: no external mirror signatures/schema changes; disabled
         retention runs the same mirror pass once. Enabled mirrors must be
         nonblocking and non-reentrant, with no SQL, network or policy mutations.
-        A11 must provide these trusted current mirrors and serialize mutations
-        with admission/dispatch when stronger cross-authority ordering is needed.
+        Explicit local authority composition pins a single immutable policy view
+        and fences concurrent mutations. Only the mirror pass is inside that
+        boundary; retention/primary SQL never holds an authority mutex.
         """
         def mirror():
-            self._authorize_mirror(request, scope, destination, stopped=stopped)
+            if self._authority is None:
+                self._authorize_mirror(request, scope, destination, stopped=stopped)
+            else:
+                self._authority._check_binding((self.settings, self.grants, self.sources,
+                                               self.destination, self.clock))
+                with self._authority.coherent_check():
+                    self._authorize_mirror(request, scope, destination, stopped=stopped)
 
         if not self._retention_enabled:
             return mirror()
@@ -326,10 +340,10 @@ class BriefService:
                 return BriefStatus(existing.state, existing.job_id)
             if not request.sources or not any(s.excerpt.strip() for s in request.sources):
                 return BriefStatus("needs_input")
-            destination = self.destination(scope)
             config = self.config  # immutable admission pin; don't reload after callbacks
             request.validate_completion_size(scope, config)
             try:
+                destination = self.destination(scope)
                 self.authorize_current(request, scope, destination,
                                        stopped=self._closed.is_set)
             except Exception:
