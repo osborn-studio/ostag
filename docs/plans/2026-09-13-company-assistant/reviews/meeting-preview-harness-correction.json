@@ -1,0 +1,1 @@
+{"issue":"parent .venv symlink was untracked", "resolution":"removed only parent-created symlink; unchanged allowed product scope", "product_test_failure":false}

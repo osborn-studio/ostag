@@ -1,0 +1,65 @@
+{
+  "candidate_sha256": "c999c331427650951831a65a4e4d7dde3796a5aa8a00665d7abe30af23154a84",
+  "review": {
+    "candidate_sha256": "c999c331427650951831a65a4e4d7dde3796a5aa8a00665d7abe30af23154a84",
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/main.py",
+        "issue": "The `meeting` command is only isolated when it is the very first argv token. argparse accepts the top-level options (`--dry-run`, `--live`, `--config`, `--platform`, `--backend`, `--event`, `--doctor`) before the subcommand, and the post-parse dispatch chain in main_async has no `args.command == \"meeting\"` branch. A `meeting preview` invocation with any leading global option therefore falls through to `load_settings(args.config, **overrides)`, then MonitorStore/OSTagRunner/adapter construction, and in non-dry-run mode `adapter.start(runner)` — i.e. production config loading, business DB opening and a live adapter start from the 'isolated' synthetic command. The sitecustomize isolation test only exercises the `meeting`-first form, so this path is untested. Fix: after `build_parser().parse_args(argv)`, route `args.command == \"meeting\"` to run_preview_cli (or reject it) before any load_settings call.",
+        "reproduction": "python -m ostag.main --dry-run meeting preview --input examples/meeting-preview.json --format json  → early dispatch is skipped (argv[0] is '--dry-run'), parse succeeds with command='meeting', no branch handles it, load_settings is invoked, then SystemExit('--event is required in dry-run mode'); no preview is printed. Same command with `--config <path>` and a non-dry-run config proceeds to create_adapter/adapter.start. Add the sitecustomize hook from test_early_dispatch_in_real_process_has_no_settings_db_or_network to the same invocation and it raises 'forbidden side effect' inside load_settings."
+      },
+      {
+        "file": "ostag/briefs/meeting_preview.py",
+        "issue": "safe_text (URL/domain stripping) is applied to already-validated typed identifiers (`tag`, `ref`, `environment`) when building facts. `tag` is restricted by regex to [A-Za-z0-9._-] and cannot contain a URL, yet the dotted-text heuristic replaces the whole tag with the omitted-link marker, so the release fact loses its typed identifier in the structured output. The shipped golden JSON evidence already shows this: the release_published fact has `\"tag\": \"（链接已省略）\"` instead of `v0.0.1-synthetic`. Branch refs with dots (e.g. `release/1.2`) are mangled the same way in facts and Markdown deployment/check lines. This contradicts the spec requirement to report necessary typed identifiers and not truncate facts; only the citation URL retains the real tag. Fix: for fields validated as safe identifiers, apply only HTML/Markdown escaping (or exempt validated tokens from URL_TEXT substitution).",
+        "reproduction": "python -m ostag.main meeting preview --input examples/meeting-preview.json --format json | grep -n '\"tag\"'  → prints \"tag\": \"（链接已省略）\" for source gh-api-release (see FIXED VERIFIER EVIDENCE demo-json). Change the API PR/deployment `ref` to \"release/1.2\" in a copy of the fixture: facts and the Markdown lines render ref as `release/（链接已省略）` while matching still uses the raw value."
+      }
+    ],
+    "notes": [
+      "Review based solely on the supplied files and fixed evidence; no tests were run and the candidate SHA256 was not recomputed.",
+      "Scope/grant simulation, half-open window on event_at (created_at/updated_at ignored), out-of-scope resource rejection before window filtering, single merge record per repo/PR, exact head check matching (repo+PR+ref+check_sha==head_sha), production deployment matching (repo+ref+merge_sha+environment=='production', in-window only), bare-#N ambiguity listing all candidate repos, explicit-reference-only Feishu linking, deployment_unverified phrased as unknown rather than false, coverage manifest exactness (missing/duplicate/extraneous rejected, failed/denied cannot carry records), needs_input=3 with partial output, and citation construction from frozen owner/repo plus typed IDs all appear correct in the code as written and are consistent with the demo output.",
+      "Bare-reference detector gap (not blocking, but the doc overstates it): the regex `(?<![\\w])#([1-9][0-9]{0,18})\\b` relies on \\b and a \\w lookbehind, and CJK characters are \\w in Python's Unicode regex. Text like `看#12需要再确认` (no spaces, the common Chinese form) raises no ambiguity at all. Consider `(?<![A-Za-z0-9_])#([1-9][0-9]{0,18})(?![0-9])` and document the literal rule precisely.",
+      "run_preview catches ValueError/TypeError/KeyError/OSError/RecursionError/OverflowError but not AttributeError. Whether a non-dict `request`/`mapping`/`grant`/`partitions[i]` payload can surface an AttributeError from the reused from_dict/_keys validators (yielding a traceback and exit 1 instead of the bounded exit-2 error) cannot be verified from the supplied materials; a test with `\"request\": \"x\"` and `\"partitions\": [\"x\"]` would close this.",
+      "The doc claims the window may not extend past the fixture observed_at, but this module does not check `window.end <= observed_at` itself; it relies on freeze_meeting_scope with `now=observed_at`. Unverified here; if freeze does not enforce it, the doc claim is inaccurate.",
+      "JSON `text`, `goal`, `reason`, and identifier fields contain Markdown backslash escapes and HTML entities (e.g. `\\#12`, `&#x27;`), so `--format json` is a sanitized display projection rather than raw text. Acceptable given SourceRef.content_sha256 is over the original text, but consumers should be told the JSON strings are pre-escaped.",
+      "Citation URL for deployment_success uses `/deployments/<id>`, which is not a standard GitHub page; fine for a synthetic preview but should not be described as a real GitHub link format.",
+      "test_real_cli_json_markdown_and_installed_entrypoint asserts an `ostag` console script exists beside sys.executable; this couples the suite to the validation venv layout.",
+      "load_bundle uses os.O_NOFOLLOW/os.mkfifo (POSIX only); acceptable since cross-OS runs are explicitly out of scope, but note it for any future portability work.",
+      "Future live collection, authenticated grant issuance, authorization re-check, and human acceptance remain out of scope and are correctly documented as such; nothing in this candidate claims live or production acceptance."
+    ]
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 57130,
+      "outputTokens": 15,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.057205,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 15615,
+      "cacheReadInputTokens": 3219,
+      "cacheCreationInputTokens": 71359,
+      "webSearchRequests": 0,
+      "costUSD": 2.20875475,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 13217,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "session_id": "0e3085ed-c028-4718-a32b-3cf6509be9b6",
+  "raw_sha256": "af63ebc62672b4154bd71cd520fb2a0f9b13f3dbd904930a0cb2d44d15270373",
+  "raw_file": "fable-review-1789797619044232000.stdout",
+  "scope": "full changed files supplied tool-less; parent executed tests and demo"
+}

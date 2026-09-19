@@ -1,11 +1,11 @@
 {
-  "scope": "Local slices through A11d concrete control/status bridge verified; durable startup reconciliation, production composition, trusted authority updater, meeting collectors, real platform and deployment incomplete",
+  "scope": "R1 local synthetic meeting preview delivered; real data collectors, company meeting workflow and deployment remain incomplete",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
+  "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "5a96f83af59f6fd5ea3bcc67a02048ba9311b9933bd75264d2ccf9b772707c5d",
+  "code_content_sha256": "df29d92edf65d9d162873e334e48c46fa7618689fc2f53b0307b55992a9797ae",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -68,13 +68,18 @@
     "tests/test_brief_lifecycle.py": "9bace2023b092fe46e597609245c9e73f684c9cf6414d69583f8070923f4c8f5",
     "tests/test_brief_lifecycle_integration.py": "f15757179d0c02395f51fc0b1caf0722dce76769a5f92a5fec4627f2ee684950",
     "tests/test_brief_control_bridge.py": "9924a59c58cb5351d8440fe0cd1baa4cd36147858e134cc798a37892d6b83021",
-    "tests/test_brief_control_bridge_integration.py": "ba91fdccc2df827031b28e068bcc4800a776cfd34c39c9c5b05c3cd601703158"
+    "tests/test_brief_control_bridge_integration.py": "ba91fdccc2df827031b28e068bcc4800a776cfd34c39c9c5b05c3cd601703158",
+    "ostag/main.py": "3ce36629d579e067c5cf321aa52e4e89b60ff82b94035c45b4cc7515a149081a",
+    "ostag/briefs/meeting_preview.py": "8d207c97cb9aa6ba05346ab0994a46ec9e8cb6b73ef54675d4d5fcea4563caeb",
+    "tests/test_meeting_preview.py": "55667caf9d388e79686d2fe70fce38c4015ed0e1e0179755c80c67a1dbc5e566",
+    "examples/meeting-preview.json": "ea491f392890c225e294bf3c6f33b3fbf6baaaa7cbb9c23b39ee81968191e075",
+    "docs/ostag/meeting-preview.md": "0a9541fdcedcb58426a9007180a584aaa09d32ac45ef9cf9a82da9295a52240b"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
     "P01": "controlled_osstack_execution_verified; general autonomous runner admission not completed",
     "A01": "verified_local",
-    "remaining_product_tasks": "planned",
+    "remaining_product_tasks": "Real meeting tasks remain unaccepted; R1 synthetic preview is tracked separately; see active_delivery",
     "M01": "verified_local",
     "A02": "verified_local",
     "A03": "verified_local",
@@ -88,7 +93,8 @@
     "A10": "verified_local; A11 runtime and production pending",
     "MONITOR-REPLAY": "verified_local; production pending",
     "A05-refresh": "verified_local; authenticated production command and client update remain A11/D01",
-    "A11": "partial: A11a disabled status, A11b authority, A11c operation custody, A11d concrete file-control/status bridge verified; durable startup reconciliation, production owner and authority updater pending"
+    "A11": "partial: A11a disabled status, A11b authority, A11c operation custody, A11d concrete file-control/status bridge verified; durable startup reconciliation, production owner and authority updater pending",
+    "R1": "verified_local_synthetic; human semantic acceptance pending; does not complete M02-M07"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -112,23 +118,25 @@
     "A05-recovery": "Explicit scoped original-message recovery, epoch CAS, immutable send facts, forward-only schema1 migration, retention/expiry/cancel and no resend verified locally; no actual client update certified",
     "A11-AC1": "partial: strict registry, all flags default off/rejected on, no business DB/worker, independent status owner verified; Compose environment/mount verification and enabled runtime pending",
     "A11-AC2": "partial: A11d binds real local custody to file control and v2 status with short-lived authority and sealed off; v2 drain_ack always false. Durable startup/prior orphan reconciliation and full production owner still pending; local zeros do not prove production drain.",
-    "A11-AC3": "partial: status failure/delay isolation and maintenance no-business-IO verified; enabled schema degradation and same-image business read-only maintenance pending"
+    "A11-AC3": "partial: status failure/delay isolation and maintenance no-business-IO verified; enabled schema degradation and same-image business read-only maintenance pending",
+    "R1-CLI": "Local synthetic dual-source Markdown/JSON output, source integrity, distinct deployment evidence, missing coverage, ambiguity and normal Chinese content verified",
+    "R1-human": "not_run; human semantic and real-data acceptance remain open"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 258,
-    "full_passed": 3262,
+    "target_passed": 315,
+    "full_passed": 3410,
     "warnings": 11,
-    "full_seconds": 128.29,
+    "full_seconds": 131.95,
     "ruff": "passed",
-    "latest_slice": "A11d-controlbridge",
-    "linux_full_passed": 3262
+    "latest_slice": "R1-meeting-preview",
+    "linux": "not_run this increment"
   },
   "review": {
-    "model": "Kimi Code CLI requested kimi-code/k3",
-    "mode": "Actual independent Kimi K3 read-only source and deterministic evidence audit",
-    "successful_reviews": 18,
+    "model": "claude-fable-5-1",
+    "mode": "Actual tool-less CLI; full five changed files and fixed verifier evidence supplied",
+    "successful_reviews": 19,
     "invalid_format_calls": 2,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
@@ -192,7 +200,12 @@
       "tests/test_brief_lifecycle.py": "a11-lifecycle-kimi-k3.json",
       "tests/test_brief_lifecycle_integration.py": "a11-lifecycle-kimi-k3.json",
       "tests/test_brief_control_bridge.py": "a11-controlbridge-kimi-k3.json",
-      "tests/test_brief_control_bridge_integration.py": "a11-controlbridge-kimi-k3.json"
+      "tests/test_brief_control_bridge_integration.py": "a11-controlbridge-kimi-k3.json",
+      "ostag/main.py": "meeting-preview-fable.json",
+      "ostag/briefs/meeting_preview.py": "meeting-preview-fable.json",
+      "tests/test_meeting_preview.py": "meeting-preview-fable.json",
+      "examples/meeting-preview.json": "meeting-preview-fable.json",
+      "docs/ostag/meeting-preview.md": "meeting-preview-fable.json"
     },
     "unresolved_blockers": 0,
     "historical_models": [
@@ -201,8 +214,8 @@
       "gpt-6-astra"
     ],
     "pending_candidate_blockers": 0,
-    "model_scope": "A10 final repair/review; previous per-file Fable/Opus receipts retain their recorded scopes",
-    "latest_receipt": "a11-controlbridge-kimi-k3.json"
+    "model_scope": "R1 only; prior per-file receipts retain scopes",
+    "latest_receipt": "meeting-preview-fable.json"
   },
   "osstack": {
     "version": "0.19.0",
@@ -243,7 +256,9 @@
       "loop_f1c264cb-5a83-415d-9111-47ad654abca1",
       "loop_d31415e5-e40b-4282-9b62-1dc10090cf74",
       "loop_4f3329f3-7ee3-4844-817f-ba114db617b9",
-      "loop_9d90848b-8a4c-4f70-8061-ef0962899887"
+      "loop_9d90848b-8a4c-4f70-8061-ef0962899887",
+      "loop_819baa5c-2e3f-48d1-859e-b3db21c50137",
+      "loop_3de4d221-fedc-4022-9773-1eb8abd6959d"
     ],
     "outcomes": [
       "success",
@@ -325,10 +340,22 @@
       "iterations": 2,
       "run_id": "run_plan_eabd12ea-691f-4a95-b146-1d7ee00c36b2",
       "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05-recovery"
+    },
+    "meeting_preview_repair_state": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock/REPAIR-STATE.json",
+    "latest_meeting_preview": {
+      "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock",
+      "task_id": "task_ffea198a",
+      "outcome": "success",
+      "environment_retry": "parent .venv symlink removed; no product scope expansion",
+      "first_run": "escalated after Fable rejected two product defects; no integration",
+      "second_review": "original defects resolved; ordinary Chinese text erasure discovered and repaired",
+      "repair": "new scoped native run seeded exact rejected snapshot, blockers fixed and re-reviewed",
+      "integration_proof": "reviews/meeting-preview-integration.json",
+      "queue": "archived owned task only"
     }
   },
   "not_run": [
-    "meeting end-to-end",
+    "live company meeting end-to-end",
     "Feishu live reads/writes",
     "release_check",
     "container smoke",
@@ -352,7 +379,11 @@
     "A10 production retention/revocation lifecycle and cleanup scheduler"
   ],
   "next_tasks": [
-    "A11"
+    "A07",
+    "M02",
+    "M03",
+    "M04",
+    "M05"
   ],
   "slices": {
     "A01": {
@@ -1394,9 +1425,31 @@
         "historical_queues": 13,
         "frozen_meeting_evaluation_unchanged": true
       }
+    },
+    "R1-meeting-preview": {
+      "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+      "baseline_commit": "28a25af",
+      "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
+      "mac_full": {
+        "passed": 3410,
+        "warnings": 11,
+        "seconds": 131.95
+      },
+      "target_tests": {
+        "passed": 315,
+        "warnings": 0,
+        "seconds": 7.0
+      },
+      "ruff": "passed",
+      "independent_mutation": "passed",
+      "linux": "not_run for offline CLI increment; production gates retained",
+      "review_model": "claude-fable-5-1",
+      "review_receipt": "meeting-preview-fable.json",
+      "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock",
+      "scope": "R1 synthetic offline preview only; not M05/live acceptance"
     }
   },
-  "latest_slice_content_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+  "latest_slice_content_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
   "pending_findings": [
     {
       "id": "monitor-ack-publication-lifecycle",
@@ -1413,12 +1466,13 @@
       }
     }
   ],
-  "checkpoint": "A11d file-control/status bridge integrated after Codex implementation, macOS/Linux deterministic tests and actual Kimi K3 approval; full A11 still partial",
+  "checkpoint": "R1 technical preview delivered; scope reset from endless A11 slicing to real meeting workflow; human content and live acceptance open",
   "next_task_details": {
-    "A11": "Reconcile durable startup/prior-process work before defining production drain ACK; wire trusted authority acquisition, retention registration and shared lifecycle into one production owner, authenticated recovery/revision routes, protected mounts and deployment preflight.",
-    "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct."
+    "A11": "Deferred to R3 production composition; existing recorded reconciliation/owner/updater work remains. Not an automatic prerequisite for offline R1 or bounded read-only R2.",
+    "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct.",
+    "R2": "One bounded repo/chat/window real read-only pilot, authenticated current rights, pagination and missing-source proof, then source-backed meeting output. R1 synthetic grant must not enter live authority. Validate lossless Chinese/English rendering with URLs, versions, quotes and PR references; R1 display limitations are recorded in PROJECT-UNBLOCK.md."
   },
-  "updated_at_utc": "2026-09-18T13:01:42.467291+00:00",
+  "updated_at_utc": "2026-09-19T06:30:52.058890+00:00",
   "candidates": {},
   "candidate_history": {
     "A10-before-Opus": {
@@ -1522,51 +1576,35 @@
     }
   ],
   "combined_validation": {
-    "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
-    "baseline_commit": "b42a1b2f335c2263eec5b33e9162f71dc879dd62",
-    "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
+    "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+    "baseline_commit": "28a25af",
+    "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
     "mac_full": {
-      "passed": 3262,
+      "passed": 3410,
       "warnings": 11,
-      "seconds": 128.29
-    },
-    "linux_full": {
-      "passed": 3262,
-      "warnings": 11,
-      "seconds": 138.03
+      "seconds": 131.95
     },
     "target_tests": {
-      "passed": 258,
-      "warnings": 1,
-      "seconds": 23.6
+      "passed": 315,
+      "warnings": 0,
+      "seconds": 7.0
     },
-    "linux_target_tests": {
-      "passed": 258,
-      "warnings": 1,
-      "seconds": 23.23
-    },
-    "parent_gates": 26,
-    "linux_parent_gates": 26,
     "ruff": "passed",
-    "lock_check": "passed",
-    "review_model": "kimi-code/k3",
-    "review_receipt": "a11-controlbridge-kimi-k3.json",
-    "scope": "A11d explicit file-control/status bridge to concrete local lifecycle; attached v2 never grants production drain ACK; durable startup reconciliation, production owner and trusted authority updater pending",
-    "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
-    "clock_validation": {
-      "samples": 148,
-      "minimum_wall_step": 0.20012688636779785,
-      "backward_steps": [],
-      "guest_ntp": "paused after startup",
-      "raw_artifact": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge/linux-clock-after-fix.json",
-      "raw_sha256": "5d65b0f16c2d6204fcab1ea19ff841193d6ad112f76728f2e99f1abd6d2d2302"
-    },
-    "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge"
+    "independent_mutation": "passed",
+    "linux": "not_run for offline CLI increment; production gates retained",
+    "review_model": "claude-fable-5-1",
+    "review_receipt": "meeting-preview-fable.json",
+    "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock",
+    "scope": "R1 synthetic offline preview only; not M05/live acceptance"
   },
   "superseded_requirements": [
     {
       "requirement": "A10 canonical Fable5.1 final candidate review",
       "reason": "Latest user selected actual Codex coding and Kimi K3 audit; completed actual Kimi approval is authoritative for this slice."
+    },
+    {
+      "requirement": "A11e as immediate next task; Kimi + dual OS audit for every slice",
+      "reason": "User requested Fable unblock. R1 is isolated offline CLI; Fable reviews this candidate, current host full regression runs once; production gates preserved. R2 meeting pilot now precedes further A11 production composition."
     }
   ],
   "combined_validation_history": [
@@ -1787,6 +1825,58 @@
         "backward_steps": []
       },
       "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-lifecycle"
+    },
+    {
+      "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+      "baseline_commit": "b42a1b2f335c2263eec5b33e9162f71dc879dd62",
+      "code_commit": "cdaf90bb62d8d8358908ad2391d46d131d41ad18",
+      "mac_full": {
+        "passed": 3262,
+        "warnings": 11,
+        "seconds": 128.29
+      },
+      "linux_full": {
+        "passed": 3262,
+        "warnings": 11,
+        "seconds": 138.03
+      },
+      "target_tests": {
+        "passed": 258,
+        "warnings": 1,
+        "seconds": 23.6
+      },
+      "linux_target_tests": {
+        "passed": 258,
+        "warnings": 1,
+        "seconds": 23.23
+      },
+      "parent_gates": 26,
+      "linux_parent_gates": 26,
+      "ruff": "passed",
+      "lock_check": "passed",
+      "review_model": "kimi-code/k3",
+      "review_receipt": "a11-controlbridge-kimi-k3.json",
+      "scope": "A11d explicit file-control/status bridge to concrete local lifecycle; attached v2 never grants production drain ACK; durable startup reconciliation, production owner and trusted authority updater pending",
+      "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+      "clock_validation": {
+        "samples": 148,
+        "minimum_wall_step": 0.20012688636779785,
+        "backward_steps": [],
+        "guest_ntp": "paused after startup",
+        "raw_artifact": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge/linux-clock-after-fix.json",
+        "raw_sha256": "5d65b0f16c2d6204fcab1ea19ff841193d6ad112f76728f2e99f1abd6d2d2302"
+      },
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge"
     }
+  ],
+  "active_delivery": {
+    "id": "R2",
+    "status": "next",
+    "outcome": "one explicitly scoped real read-only GitHub + Feishu meeting pack"
+  },
+  "known_preview_limitations": [
+    "URL-adjacent Chinese text may be omitted",
+    "some filename-like tokens and quote/identifier display are lossy",
+    "JSON is a display projection; not raw normalized facts"
   ]
 }

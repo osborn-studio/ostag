@@ -1,0 +1,10 @@
+{
+  "candidate_sha256": "5ef5aa92ac722860ab3ebe53892e1a912d2c695190c7d7e8a9ea484d1faa5b65",
+  "reproduction": "only the reviewed URL_TEXT AST expression evaluated; no code or IO from candidate executed",
+  "outputs": {
+    "依赖升级到2.0后测试通过": "（链接已省略）",
+    "核实v2.0上线证据": "（链接已省略）",
+    "虚构讨论：#12后升级到2.0再确认": "虚构讨论：#（链接已省略）",
+    "Fix: sync bug": "（链接已省略） sync bug"
+  }
+}

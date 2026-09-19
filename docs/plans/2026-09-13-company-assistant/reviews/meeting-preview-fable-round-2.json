@@ -1,0 +1,61 @@
+{
+  "candidate_sha256": "5ef5aa92ac722860ab3ebe53892e1a912d2c695190c7d7e8a9ea484d1faa5b65",
+  "review": {
+    "candidate_sha256": "5ef5aa92ac722860ab3ebe53892e1a912d2c695190c7d7e8a9ea484d1faa5b65",
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/meeting_preview.py",
+        "issue": "safe_text's third URL_TEXT alternative `(?<![\\w.-])(?:[\\w-]+\\.)+[\\w-]+(?:[/:?#][^\\s<>\\[\\]\"']*)?` uses `\\w`, which in Python str patterns matches CJK ideographs. Any Chinese run that contains a single ASCII dot between word characters (version numbers, decimals, file names: `升级到2.0`, `耗时1.5秒`, `修改config.yaml`) is therefore matched as a 'domain' from the first CJK character after a non-word boundary to the end of the run, and the entire sentence fragment is replaced by `（链接已省略）`. This is not the documented 'dotted version-like token may be replaced'; it erases the whole fact text/goal for ordinary synthetic titles and excerpts, which contradicts 'readable Chinese meeting pack' and 'do not truncate facts'. Because the optional `[/:?#]...` tail is also swallowed and the bare-reference detector runs on `URL_TEXT.sub(\"\", text)`, a `#N` that follows such a run is silently removed before detection, so the required bare-#12 ambiguity is NOT reported for that message. The same first alternative `[a-z][a-z0-9+.-]*:` also replaces ordinary `Word:` prefixes (`Fix: sync bug` -> `（链接已省略） sync bug`). Suggested fix: restrict the domain heuristic to ASCII labels with an alphabetic last label, e.g. `(?<![A-Za-z0-9.-])(?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,}(?![A-Za-z0-9])(?:[/:?#][^\\s<>\\[\\]\"']*)?`, and make the scheme alternative require `://` or an explicit dangerous-scheme list (javascript, data, vbscript, file, mailto); add tests asserting benign Chinese text with ASCII dots survives display and that `#12` after such text still yields an ambiguity; update the doc line about dotted text accordingly.",
+        "reproduction": "1) In a copy of examples/meeting-preview.json set github[0].title to \"虚构：依赖升级到2.0后测试通过\" and run `python -m ostag.main meeting preview --input copy.json --format json`; the pr_merged fact `text` and the source `excerpt` become \"虚构：（链接已省略） 完全虚构的本地演示记录。\" (the full title after the colon is gone). Setting request.goal to \"核实v2.0上线证据\" yields goal == \"（链接已省略）\" (match starts at the first CJK char because the preceding char is not \\w). 2) Set feishu[1].text to \"虚构讨论：#12后升级到2.0再确认\": URL_TEXT.sub strips \"12后升级到2.0再确认\" (lookbehind passes after '#'), leaving \"虚构讨论：#\", so `ambiguities` is empty and no unqualified_pr_reference is reported; the displayed fact text is \"虚构讨论：\\#（链接已省略）\". Python check: `re.search(r'(?<![\\w.-])(?:[\\w-]+\\.)+[\\w-]+', '依赖升级到2.0后测试通过').group()` returns the whole string. 3) Set a title to \"Fix: sync bug\": rendered as \"（链接已省略） sync bug\"."
+      }
+    ],
+    "notes": [
+      "Review based solely on the supplied files and fixed evidence; no tests were run and the candidate SHA256 was not recomputed.",
+      "Both prior blockers are resolved as written: main_async now routes args.command == \"meeting\" to run_preview immediately after parse_args, before any load_settings/MonitorStore/adapter code, and test_early_dispatch_in_real_process_has_no_settings_db_or_network covers leading --dry-run/--live/--config/--platform/--backend/--event/--doctor with a sitecustomize hook that would make load_settings, sqlite3.connect, socket and Popen fatal. Typed `tag` is now only HTML/Markdown-escaped and `ref`/`environment` matching simple path segments and 2–3 part numeric versions bypass URL stripping; the demo JSON shows \"tag\": \"v0.0.1-synthetic\".",
+      "Scope/grant simulation, half-open window on event_at (created_at/updated_at ignored), out-of-scope resource rejection before window filtering, single merge record per repo/PR, exact head check matching (repo+PR+ref, check_sha==head_sha==pr.head_sha), production deployment matching (repo+ref+sha==merge_sha+environment=='production', in-window only), release/commit/check never inferred as deployed, bare-#N ambiguity listing all selected repos, explicit-reference-only Feishu linking, deployment_unverified phrased as unknown, coverage manifest exactness, failed/denied partitions cannot carry records, needs_input=3 with partial output, and citation construction from frozen owner/repo plus typed IDs all appear correct in the code and consistent with the demo output.",
+      "In the leading-global-option path (`--dry-run meeting preview ...`), invalid arguments go through argparse's default error handler, so argv values are echoed to stderr (e.g. `invalid choice: 'private-secret'`), unlike the meeting-first path which uses run_preview_cli's generic message. This is argv, not fixture payload, so not treated as blocking, but the doc's exit-code-2 claim ('不回显输入') is only exact for the meeting-first form; either route the leading-option case through run_preview_cli too or narrow the doc wording.",
+      "AttributeError is still not in run_preview's catch list. The added scalar tests for request/mapping/grant/partitions pass, showing _keys and the reused from_dict validators raise ValueError/TypeError for those; `observed_at` being a non-string (e.g. 1, null, {}) is passed straight to freeze_meeting_scope as `now` and to _utc and is not covered by a test. Cannot be verified from the supplied materials; a CLI test with `\"observed_at\": 1` asserting exit 2 and no traceback would close it.",
+      "Underscores in validated identifiers are still Markdown-escaped in the JSON projection (`feature_x` -> `feature\\_x` for ref/environment/tag) while matching uses raw values. This is consistent with the documented 'JSON is a sanitized display projection' caveat but consumers comparing fact identifiers to raw fixture values will see a mismatch.",
+      "Safety of mapping-derived strings (repository full_name, chat_id) in Markdown relies on the existing ProjectMapping/MeetingRequest validators; full_name is interpolated into citation URLs and chat_id into `feishu:chat:<id>` resource IDs rendered raw in the sources and gaps lines. Not verifiable here; acceptable for a synthetic fixture authored by the same user, but worth a one-line assertion (ASCII owner/repo and identifier-safe chat_id) if this module is ever fed anything other than hand-written fixtures.",
+      "run_preview prints via print(); BrokenPipeError (e.g. `| head`) or a non-UTF-8 stdout locale would surface a traceback rather than the bounded error. Minor for a local CLI.",
+      "test_real_cli_json_markdown_and_installed_entrypoint still asserts an `ostag` console script beside sys.executable, coupling the suite to the validation venv layout; test_other_main_command_dispatch_is_preserved is an unmarked async test and depends on asyncio_mode=auto (passes per evidence).",
+      "load_bundle uses os.O_NOFOLLOW and the tests use os.mkfifo (POSIX only); cross-OS is explicitly out of scope.",
+      "Future live collection, authenticated grant issuance, authorization re-check and human acceptance remain out of scope and are correctly confined to documentation; nothing in the candidate claims live or production acceptance."
+    ]
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 61592,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.061672,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 24158,
+      "cacheReadInputTokens": 3219,
+      "cacheCreationInputTokens": 77180,
+      "webSearchRequests": 0,
+      "costUSD": 2.7523247499999997,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 21286,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "session_id": "9b7d2da5-7ab3-434f-a2b9-5cc65688f51e",
+  "raw_sha256": "1691803ff9296b1a7ca77b2f2d1f8e00fbdfbbb999badf9add48d40fe443c953",
+  "raw_file": "fable-review-1789798316264022000.stdout",
+  "scope": "full changed files supplied tool-less; parent executed tests and demo"
+}

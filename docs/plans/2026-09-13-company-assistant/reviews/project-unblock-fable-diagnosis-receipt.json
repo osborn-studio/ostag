@@ -1,0 +1,36 @@
+{
+  "requested_model": "claude-fable-5-1",
+  "observed_model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 24487,
+      "outputTokens": 24,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.024606999999999997,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 11580,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 30166,
+      "webSearchRequests": 0,
+      "costUSD": 1.18234,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 4542,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "session_id": "b82ca053-a880-4468-b69d-14726e89ff00",
+  "source_sha256": "7052166ec407791a1fb574431a0f805185685abacda0893a8e157f7d9675c43d",
+  "scope": "tool-less supplied project evidence audit, not source audit"
+}
