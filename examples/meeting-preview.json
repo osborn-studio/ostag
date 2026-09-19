@@ -1,0 +1,332 @@
+{
+  "synthetic": true,
+  "version": 1,
+  "request": {
+    "namespace": "synthetic-preview",
+    "requesting_principal": {
+      "platform": "feishu",
+      "actor_id": "synthetic-reviewer"
+    },
+    "goal": "【虚构演示】核实同步功能的合并、检查与上线证据，确认会议还缺什么输入。",
+    "purpose": "release-review",
+    "mapping_id": "synthetic-project",
+    "mapping_revision": 1,
+    "window": {
+      "start": "2026-09-10T00:00:00Z",
+      "end": "2026-09-17T00:00:00Z",
+      "display_timezone": "Asia/Shanghai"
+    },
+    "repo_ids": [
+      "101",
+      "102"
+    ],
+    "chat_ids": [
+      "synthetic_dev",
+      "synthetic_qa"
+    ],
+    "source_categories": [
+      "pulls",
+      "issues",
+      "issue_comments",
+      "commits",
+      "releases",
+      "checks",
+      "deployments"
+    ],
+    "required_partition_ids": [
+      "github:repo:101:pulls",
+      "github:repo:101:issues",
+      "github:repo:101:issue_comments",
+      "github:repo:101:commits",
+      "github:repo:101:releases",
+      "github:repo:101:checks",
+      "github:repo:101:deployments",
+      "github:repo:102:pulls",
+      "github:repo:102:issues",
+      "github:repo:102:issue_comments",
+      "github:repo:102:commits",
+      "github:repo:102:releases",
+      "github:repo:102:checks",
+      "github:repo:102:deployments",
+      "feishu:chat:synthetic_dev:messages",
+      "feishu:chat:synthetic_qa:messages"
+    ],
+    "audience": [
+      {
+        "platform": "feishu",
+        "actor_id": "synthetic-reviewer"
+      }
+    ],
+    "shareable_sources": [],
+    "grant_id": "synthetic-grant",
+    "grant_revision": 1,
+    "budget_profile_id": "synthetic-preview",
+    "budget_profile_revision": 1
+  },
+  "mapping": {
+    "namespace": "synthetic-preview",
+    "mapping_id": "synthetic-project",
+    "revision": 1,
+    "name": "虚构的双源演示项目",
+    "allowed_requesters": [
+      {
+        "platform": "feishu",
+        "actor_id": "synthetic-reviewer"
+      }
+    ],
+    "repositories": [
+      {
+        "namespace": "synthetic-preview",
+        "repo_id": "101",
+        "full_name": "synthetic-example/demo-api",
+        "branch": "main",
+        "default_branch": "main"
+      },
+      {
+        "namespace": "synthetic-preview",
+        "repo_id": "102",
+        "full_name": "synthetic-example/demo-web",
+        "branch": "main",
+        "default_branch": "main"
+      }
+    ],
+    "chats": [
+      {
+        "namespace": "synthetic-preview",
+        "chat_id": "synthetic_dev",
+        "name": "虚构开发群"
+      },
+      {
+        "namespace": "synthetic-preview",
+        "chat_id": "synthetic_qa",
+        "name": "虚构测试群"
+      }
+    ],
+    "people": [],
+    "history_window": {
+      "start": "2026-09-01T00:00:00Z",
+      "end": "2026-10-01T00:00:00Z",
+      "display_timezone": "UTC"
+    }
+  },
+  "grant": {
+    "grant_id": "synthetic-grant",
+    "namespace": "synthetic-preview",
+    "principal": {
+      "platform": "feishu",
+      "actor_id": "synthetic-reviewer"
+    },
+    "resource_ids": [
+      "github:repo:101",
+      "github:repo:102",
+      "feishu:chat:synthetic_dev",
+      "feishu:chat:synthetic_qa"
+    ],
+    "purpose": "release-review",
+    "allowed_audience": [
+      {
+        "platform": "feishu",
+        "actor_id": "synthetic-reviewer"
+      }
+    ],
+    "model_egress_allowed": true,
+    "valid_from": "2026-09-18T00:00:00Z",
+    "expires_at": "2026-09-19T00:00:00Z",
+    "revision": 1
+  },
+  "observed_at": "2026-09-18T08:00:00Z",
+  "github": [
+    {
+      "source_id": "gh-api-merge",
+      "repo_id": "101",
+      "kind": "pr_merged",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：同步功能 PR 已合并",
+      "excerpt": "完全虚构的本地演示记录。",
+      "pr_number": 12,
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "merge_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "ref": "main",
+      "created_at": "2026-09-01T10:00:00Z",
+      "updated_at": "2026-09-18T07:00:00Z"
+    },
+    {
+      "source_id": "gh-web-merge",
+      "repo_id": "102",
+      "kind": "pr_merged",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：页面功能 PR 已合并",
+      "excerpt": "完全虚构的本地演示记录。",
+      "pr_number": 12,
+      "head_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "merge_sha": "dddddddddddddddddddddddddddddddddddddddd",
+      "ref": "main",
+      "created_at": "2026-09-11T10:00:00Z",
+      "updated_at": "2026-09-16T10:00:00Z"
+    },
+    {
+      "source_id": "gh-api-check",
+      "repo_id": "101",
+      "kind": "check_success",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：精确 head 检查成功",
+      "excerpt": "完全虚构的本地演示记录。",
+      "pr_number": 12,
+      "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "check_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "check_run_id": 501,
+      "ref": "main"
+    },
+    {
+      "source_id": "gh-api-issue",
+      "repo_id": "101",
+      "kind": "issue",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：上线确认清单",
+      "excerpt": "完全虚构的本地演示记录。",
+      "issue_number": 21
+    },
+    {
+      "source_id": "gh-api-comment",
+      "repo_id": "101",
+      "kind": "issue_comment",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：讨论确认方式",
+      "excerpt": "完全虚构的本地演示记录。",
+      "issue_number": 21,
+      "comment_id": 601
+    },
+    {
+      "source_id": "gh-api-commit",
+      "repo_id": "101",
+      "kind": "commit",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：同步实现提交",
+      "excerpt": "完全虚构的本地演示记录。",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ref": "main"
+    },
+    {
+      "source_id": "gh-api-release",
+      "repo_id": "101",
+      "kind": "release_published",
+      "event_at": "2026-09-15T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "title": "虚构：发布版本条目",
+      "excerpt": "完全虚构的本地演示记录。",
+      "tag": "v0.0.1-synthetic",
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "ref": "main"
+    }
+  ],
+  "feishu": [
+    {
+      "source_id": "chat-shipped",
+      "chat_id": "synthetic_dev",
+      "text": "虚构说法：同步功能已上线。",
+      "event_at": "2026-09-16T09:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z",
+      "references": [
+        {
+          "repo_id": "101",
+          "pr_number": 12
+        }
+      ]
+    },
+    {
+      "source_id": "chat-ambiguous",
+      "chat_id": "synthetic_dev",
+      "text": "虚构讨论：#12 需要再确认。",
+      "event_at": "2026-09-16T10:00:00Z",
+      "observed_at": "2026-09-18T08:00:00Z"
+    }
+  ],
+  "partitions": [
+    {
+      "partition_id": "github:repo:101:pulls",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:101:issues",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:101:issue_comments",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:101:commits",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:101:releases",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:101:checks",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:101:deployments",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:pulls",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:issues",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:issue_comments",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:commits",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:releases",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:checks",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "github:repo:102:deployments",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "feishu:chat:synthetic_dev:messages",
+      "status": "complete",
+      "reason": "虚构窗口数据已提供。"
+    },
+    {
+      "partition_id": "feishu:chat:synthetic_qa:messages",
+      "status": "failed",
+      "reason": "虚构测试群采集失败；需补充输入。"
+    }
+  ]
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -43,6 +44,12 @@ from ostag.work_monitor.executor import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run OS Tag.")
     subparsers = parser.add_subparsers(dest="command")
+
+    meeting = subparsers.add_parser("meeting", help="Local synthetic meeting preview.")
+    meeting_sub = meeting.add_subparsers(dest="meeting_command", required=True)
+    preview = meeting_sub.add_parser("preview", help="Render a synthetic JSON fixture locally.")
+    preview.add_argument("--input", required=True)
+    preview.add_argument("--format", choices=["markdown", "json"], default="markdown")
 
     memory = subparsers.add_parser("memory", help="Manage optional OS Tag channel memory.")
     memory_sub = memory.add_subparsers(dest="memory_command", required=True)
@@ -568,7 +575,16 @@ async def run_executor_command(args: argparse.Namespace) -> int:
 
 
 async def main_async(argv: list[str] | None = None) -> int:
+    preview_argv = sys.argv[1:] if argv is None else argv
+    if preview_argv[:1] == ["meeting"]:
+        from ostag.briefs.meeting_preview import run_preview_cli
+
+        return run_preview_cli(build_parser(), preview_argv)
     args = build_parser().parse_args(argv)
+    if args.command == "meeting":
+        from ostag.briefs.meeting_preview import run_preview
+
+        return run_preview(args.input, args.format)
     if args.command == "memory":
         return run_memory_command(args)
     if args.command == "run":
