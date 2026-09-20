@@ -1,4 +1,5 @@
 """Transport tests use local child processes and synthetic errors only."""
+import errno
 import json
 import os
 import signal
@@ -6,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -75,9 +77,74 @@ def child_running(pid):
     try:
         if status.exists() and status.read_text().split(")", 1)[1].strip().startswith("Z"):
             return False
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # The process can disappear between the kill probe and either /proc access.
         return False
     return True
+
+
+@pytest.mark.parametrize("stage,error_number", [
+    ("kill", errno.ESRCH),
+    ("exists", errno.ESRCH),
+    ("read_text", errno.ESRCH),
+    ("read_text", errno.ENOENT),
+])
+def test_child_running_process_disappearance(monkeypatch, stage, error_number):
+    error = OSError(error_number, "process disappeared")
+    kill = Mock()
+    exists = Mock(return_value=True)
+    read_text = Mock(return_value="12345 (child) S 1 0 0")
+    {"kill": kill, "exists": exists, "read_text": read_text}[
+        stage
+    ].side_effect = error
+    # Inject at the exists boundary: pathlib's stat delegation varies by Python version.
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "kill", kill)
+        patch.setattr(Path, "exists", exists)
+        patch.setattr(Path, "read_text", read_text)
+        running = child_running(12345)
+    assert running is False
+    kill.assert_called_once_with(12345, 0)
+    if stage in ("kill", "exists"):
+        read_text.assert_not_called()
+
+
+@pytest.mark.parametrize("stage", ["kill", "exists", "read_text"])
+@pytest.mark.parametrize("error_number", [errno.EPERM, errno.EACCES, errno.EIO, errno.EINVAL])
+def test_child_running_propagates_other_errors(monkeypatch, stage, error_number):
+    error = OSError(error_number, "probe failed")
+    kill = Mock()
+    exists = Mock(return_value=True)
+    read_text = Mock(return_value="12345 (child) S 1 0 0")
+    {"kill": kill, "exists": exists, "read_text": read_text}[
+        stage
+    ].side_effect = error
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "kill", kill)
+        patch.setattr(Path, "exists", exists)
+        patch.setattr(Path, "read_text", read_text)
+        with pytest.raises(OSError) as caught:
+            child_running(12345)
+    assert caught.value is error
+
+
+@pytest.mark.parametrize("state,expected", [("Z", False), ("S", True), ("R", True),
+                                           (None, True)])
+def test_child_running_zombie_live_and_no_proc(monkeypatch, state, expected):
+    kill = Mock()
+    read_text = Mock(return_value=f"12345 (child) {state} 1 0 0")
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "kill", kill)
+        # macOS has no /proc: a successful kill probe still means the PID is live.
+        patch.setattr(Path, "exists", Mock(return_value=state is not None))
+        patch.setattr(Path, "read_text", read_text)
+        running = child_running(12345)
+    assert running is expected
+    kill.assert_called_once_with(12345, 0)
+    if state is None:
+        read_text.assert_not_called()
+    else:
+        read_text.assert_called_once_with()
 
 
 @pytest.mark.parametrize("mode", ["timeout", "overflow", "leader_exit", "success"])
