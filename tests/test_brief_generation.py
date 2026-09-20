@@ -561,18 +561,20 @@ async def test_original_profile_timeout_does_not_reset_between_generator_instanc
 
 
 async def test_bounded_async_transport_timeout_retains_unknown_charge(setup):
-    _, _, now, _ = setup
-    now[0] = 0.999
+    # Keep the full one-second budget so the scheduled transport has time to start.
     entered = []
     async def hang(request):
         entered.append(True)
         await asyncio.Event().wait()
     config = GenerationConfig(replace(parameters(), budget=replace(parameters().budget,
                               timeout_seconds=1)), 100000)
-    result, _ = await run(setup, FakeTransport(effect=hang), config=config)
+    # Bound the test independently in case the production timeout regresses.
+    result, _ = await asyncio.wait_for(
+        run(setup, FakeTransport(effect=hang), config=config), timeout=10)
     assert result.status == "timeout" and entered
     store, job, _, _ = setup
-    assert store.cost_record(SCOPE, job.job_id, "call-1").charged_micros == 10000
+    record = store.cost_record(SCOPE, job.job_id, "call-1")
+    assert record.state == "unknown" and record.charged_micros == 10000
 
 
 async def test_cancellation_and_deadline_during_accept_checkpoint_discard_candidate(setup):

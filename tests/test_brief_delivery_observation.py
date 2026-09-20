@@ -643,18 +643,21 @@ def test_additive_migrations_preserve_every_old_row(tmp_path, schema):
 
 def test_actual_pinned_old_binary_rejects_schema4_without_writes(tmp_path):
     """Load the actual pre-U01 store from this repository's immutable baseline."""
-    import subprocess
+    import hashlib
     import sys
     import types
     from pathlib import Path
     baseline = "5e2e79b15489016085e94b95e9e56594ffb68b26"
-    root = Path(__file__).resolve().parents[1]
-    source = subprocess.run(["git", "show", f"{baseline}:ostag/briefs/store.py"], cwd=root,
-                            check=True, capture_output=True, text=True).stdout
+    # Byte-exact ostag/briefs/store.py from baseline; works without Git history.
+    fixture = Path(__file__).resolve().parent / "fixtures/briefs/store-before-u01-5e2e79b.py.txt"
+    source = fixture.read_bytes()
+    assert hashlib.sha256(source).hexdigest() == (
+        "508ab3eadced9b87b570686bed9bb3be59927b4c9461c609eddcad474458d680"
+    ), f"legacy store fixture differs from {baseline}:ostag/briefs/store.py"
     module = types.ModuleType("_u01_actual_legacy_store")
     sys.modules[module.__name__] = module
     try:
-        exec(compile(source, "pinned_legacy_brief_store.py", "exec"), module.__dict__)
+        exec(compile(source, str(fixture), "exec"), module.__dict__)
         assert module.CURRENT_SCHEMA_VERSION == 2 and module.READABLE_SCHEMA_MAX == 3
         path = tmp_path / "new.db"
         store = BriefStore(path)
