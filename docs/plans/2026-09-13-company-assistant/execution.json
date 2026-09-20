@@ -1,11 +1,11 @@
 {
-  "scope": "R1 local synthetic meeting preview delivered; real data collectors, company meeting workflow and deployment remain incomplete",
+  "scope": "R1 synthetic preview and R2 bounded local live collector delivered; real GitHub observed, Feishu/live dual-source meeting acceptance and production remain pending",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
-  "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
+  "code_commit": "2b5dc803d03704b41bf2261cb07d5bf3d1fb48ff",
   "first_code_commit": "a0ec5df5216816f56d1e7f238c1a2496ad6a2654",
-  "code_content_sha256": "df29d92edf65d9d162873e334e48c46fa7618689fc2f53b0307b55992a9797ae",
+  "code_content_sha256": "0292ee7aed1516357e6a8b7beba8ff448770e43b9cef2a7af44b916c60d98fd4",
   "file_sha256": {
     "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701",
     "ostag/briefs/grants.py": "c0f7153599f27d85982052b8231003a8c792ba95139196b8017291089ff7ace4",
@@ -69,17 +69,22 @@
     "tests/test_brief_lifecycle_integration.py": "f15757179d0c02395f51fc0b1caf0722dce76769a5f92a5fec4627f2ee684950",
     "tests/test_brief_control_bridge.py": "9924a59c58cb5351d8440fe0cd1baa4cd36147858e134cc798a37892d6b83021",
     "tests/test_brief_control_bridge_integration.py": "ba91fdccc2df827031b28e068bcc4800a776cfd34c39c9c5b05c3cd601703158",
-    "ostag/main.py": "3ce36629d579e067c5cf321aa52e4e89b60ff82b94035c45b4cc7515a149081a",
+    "ostag/main.py": "648b68f3cac224bb9a368ee88185976dff2c89b8bdebeb630237be607edc959e",
     "ostag/briefs/meeting_preview.py": "8d207c97cb9aa6ba05346ab0994a46ec9e8cb6b73ef54675d4d5fcea4563caeb",
     "tests/test_meeting_preview.py": "55667caf9d388e79686d2fe70fce38c4015ed0e1e0179755c80c67a1dbc5e566",
     "examples/meeting-preview.json": "ea491f392890c225e294bf3c6f33b3fbf6baaaa7cbb9c23b39ee81968191e075",
-    "docs/ostag/meeting-preview.md": "0a9541fdcedcb58426a9007180a584aaa09d32ac45ef9cf9a82da9295a52240b"
+    "docs/ostag/meeting-preview.md": "0a9541fdcedcb58426a9007180a584aaa09d32ac45ef9cf9a82da9295a52240b",
+    "ostag/briefs/meeting_collect.py": "85bb480a52b6495037831331665a3df675ed8c8a71483392e50afa5a1ab92b81",
+    "ostag/briefs/meeting_io.py": "4971a593b30c1b4dc63fc8c3ba78bfd9be19d8a81a83c1c2717fa672af50961e",
+    "tests/test_meeting_collect.py": "799d9f1d3081d159480efb12b226aaef796c81eca7c0fda3fb13b273d1d12fe0",
+    "tests/test_meeting_io.py": "1e41384cb8850c3b7cd06573ed1fddfaef10d4835e89fc4fe8dd62b472895878",
+    "docs/ostag/meeting-collect.md": "8fa4a7a05766e1f2b3a4eb6125c0c2a1f29c16c6696bb72e32a08c3161a1a92b"
   },
   "progress": {
     "P00": "local_baseline_verified; production visibility unknown/not_run",
     "P01": "controlled_osstack_execution_verified; general autonomous runner admission not completed",
     "A01": "verified_local",
-    "remaining_product_tasks": "Real meeting tasks remain unaccepted; R1 synthetic preview is tracked separately; see active_delivery",
+    "remaining_product_tasks": "R2 real dual-source and content acceptance remain active; collector subset does not complete A07/M02-M05",
     "M01": "verified_local",
     "A02": "verified_local",
     "A03": "verified_local",
@@ -94,7 +99,8 @@
     "MONITOR-REPLAY": "verified_local; production pending",
     "A05-refresh": "verified_local; authenticated production command and client update remain A11/D01",
     "A11": "partial: A11a disabled status, A11b authority, A11c operation custody, A11d concrete file-control/status bridge verified; durable startup reconciliation, production owner and authority updater pending",
-    "R1": "verified_local_synthetic; human semantic acceptance pending; does not complete M02-M07"
+    "R1": "verified_local_synthetic; human semantic acceptance pending; does not complete M02-M07",
+    "R2": "local CLI verified; live GitHub succeeded; no live Feishu or human meeting acceptance"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -120,24 +126,26 @@
     "A11-AC2": "partial: A11d binds real local custody to file control and v2 status with short-lived authority and sealed off; v2 drain_ack always false. Durable startup/prior orphan reconciliation and full production owner still pending; local zeros do not prove production drain.",
     "A11-AC3": "partial: status failure/delay isolation and maintenance no-business-IO verified; enabled schema degradation and same-image business read-only maintenance pending",
     "R1-CLI": "Local synthetic dual-source Markdown/JSON output, source integrity, distinct deployment evidence, missing coverage, ambiguity and normal Chinese content verified",
-    "R1-human": "not_run; human semantic and real-data acceptance remain open"
+    "R1-human": "not_run; human semantic and real-data acceptance remain open",
+    "R2-CLI": "bounded GET-only collection, authenticated local identity checks, explicit partial coverage, source fidelity and process cleanup verified locally; GitHub real runs succeeded",
+    "R2-live": "GitHub 7day and separately labelled 30day control verified; Feishu auth keychain unavailable and chat scope missing; dual-source and semantic acceptance not_run"
   },
   "tests": {
     "python": "3.11.15",
     "locked_all_extras": true,
-    "target_passed": 315,
-    "full_passed": 3410,
+    "target_passed": 254,
+    "full_passed": 3508,
     "warnings": 11,
-    "full_seconds": 131.95,
+    "full_seconds": 144.71,
     "ruff": "passed",
-    "latest_slice": "R1-meeting-preview",
+    "latest_slice": "R2-meeting-collect",
     "linux": "not_run this increment"
   },
   "review": {
     "model": "claude-fable-5-1",
-    "mode": "Actual tool-less CLI; full five changed files and fixed verifier evidence supplied",
-    "successful_reviews": 19,
-    "invalid_format_calls": 2,
+    "mode": "Actual tool-less CLI; full six changed files and fixed verifier evidence supplied",
+    "successful_reviews": 20,
+    "invalid_format_calls": 3,
     "coverage": {
       "ostag/briefs/__init__.py": "a01-fable-initial.json",
       "ostag/briefs/grants.py": "a01-fable-initial.json",
@@ -201,11 +209,16 @@
       "tests/test_brief_lifecycle_integration.py": "a11-lifecycle-kimi-k3.json",
       "tests/test_brief_control_bridge.py": "a11-controlbridge-kimi-k3.json",
       "tests/test_brief_control_bridge_integration.py": "a11-controlbridge-kimi-k3.json",
-      "ostag/main.py": "meeting-preview-fable.json",
+      "ostag/main.py": "meeting-collect-fable.json",
       "ostag/briefs/meeting_preview.py": "meeting-preview-fable.json",
       "tests/test_meeting_preview.py": "meeting-preview-fable.json",
       "examples/meeting-preview.json": "meeting-preview-fable.json",
-      "docs/ostag/meeting-preview.md": "meeting-preview-fable.json"
+      "docs/ostag/meeting-preview.md": "meeting-preview-fable.json",
+      "ostag/briefs/meeting_collect.py": "meeting-collect-fable.json",
+      "ostag/briefs/meeting_io.py": "meeting-collect-fable.json",
+      "tests/test_meeting_collect.py": "meeting-collect-fable.json",
+      "tests/test_meeting_io.py": "meeting-collect-fable.json",
+      "docs/ostag/meeting-collect.md": "meeting-collect-fable.json"
     },
     "unresolved_blockers": 0,
     "historical_models": [
@@ -214,8 +227,8 @@
       "gpt-6-astra"
     ],
     "pending_candidate_blockers": 0,
-    "model_scope": "R1 only; prior per-file receipts retain scopes",
-    "latest_receipt": "meeting-preview-fable.json"
+    "model_scope": "R2 local collector only; prior per-file receipts retain scopes",
+    "latest_receipt": "meeting-collect-fable.json"
   },
   "osstack": {
     "version": "0.19.0",
@@ -352,6 +365,16 @@
       "repair": "new scoped native run seeded exact rejected snapshot, blockers fixed and re-reviewed",
       "integration_proof": "reviews/meeting-preview-integration.json",
       "queue": "archived owned task only"
+    },
+    "latest_meeting_collect": {
+      "task_id": "task_8b1304f6",
+      "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/r2-live-meeting",
+      "outcome": "success",
+      "queue": "archived owned task only",
+      "review": "actual Fable 5.1",
+      "first_run": "escalated; no integration; first Fable call returned no verdict",
+      "repair_state": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/r2-live-meeting/REPAIR-STATE.json",
+      "repair": "exact candidate restored; inclusive start regression fixed; structured Fable verdict required"
     }
   },
   "not_run": [
@@ -1447,9 +1470,31 @@
       "review_receipt": "meeting-preview-fable.json",
       "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock",
       "scope": "R1 synthetic offline preview only; not M05/live acceptance"
+    },
+    "R2-meeting-collect": {
+      "candidate_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
+      "baseline_commit": "79e90bae190bdf6bbf55976c9189cfef58eb83fd",
+      "code_commit": "2b5dc803d03704b41bf2261cb07d5bf3d1fb48ff",
+      "mac_full": {
+        "passed": 3508,
+        "warnings": 11,
+        "seconds": 144.71
+      },
+      "target_tests": {
+        "passed": 254,
+        "warnings": 0,
+        "seconds": 10.31
+      },
+      "ruff": "passed",
+      "independent_cli_probe": "passed; fake GET-only executables, --live isolation, normal text/source fidelity and Feishu failure behavior",
+      "linux": "not_run this local CLI increment; no production certification",
+      "review_model": "claude-fable-5-1",
+      "review_receipt": "meeting-collect-fable.json",
+      "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/r2-live-meeting",
+      "scope": "R2 local authenticated read-only collector; actual GitHub-only observation; Feishu live and human meeting acceptance pending"
     }
   },
-  "latest_slice_content_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+  "latest_slice_content_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
   "pending_findings": [
     {
       "id": "monitor-ack-publication-lifecycle",
@@ -1466,13 +1511,13 @@
       }
     }
   ],
-  "checkpoint": "R1 technical preview delivered; scope reset from endless A11 slicing to real meeting workflow; human content and live acceptance open",
+  "checkpoint": "R2 local collector and actual GitHub read delivered; real Feishu and human useful-meeting acceptance remain explicit next steps",
   "next_task_details": {
     "A11": "Deferred to R3 production composition; existing recorded reconciliation/owner/updater work remains. Not an automatic prerequisite for offline R1 or bounded read-only R2.",
     "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct.",
-    "R2": "One bounded repo/chat/window real read-only pilot, authenticated current rights, pagination and missing-source proof, then source-backed meeting output. R1 synthetic grant must not enter live authority. Validate lossless Chinese/English rendering with URLs, versions, quotes and PR references; R1 display limitations are recorded in PROJECT-UNBLOCK.md."
+    "R2": "Use delivered meeting collect for one chosen chat/repo/window after fixing current Feishu keychain access; validate actual dual-source evidence and useful meeting organization. Current code covers five GitHub categories, not checks/deployments or full M02/M03. No automatic credential downgrade."
   },
-  "updated_at_utc": "2026-09-19T06:30:52.058890+00:00",
+  "updated_at_utc": "2026-09-20T14:26:12.007886+00:00",
   "candidates": {},
   "candidate_history": {
     "A10-before-Opus": {
@@ -1576,26 +1621,26 @@
     }
   ],
   "combined_validation": {
-    "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
-    "baseline_commit": "28a25af",
-    "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
+    "candidate_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
+    "baseline_commit": "79e90bae190bdf6bbf55976c9189cfef58eb83fd",
+    "code_commit": "2b5dc803d03704b41bf2261cb07d5bf3d1fb48ff",
     "mac_full": {
-      "passed": 3410,
+      "passed": 3508,
       "warnings": 11,
-      "seconds": 131.95
+      "seconds": 144.71
     },
     "target_tests": {
-      "passed": 315,
+      "passed": 254,
       "warnings": 0,
-      "seconds": 7.0
+      "seconds": 10.31
     },
     "ruff": "passed",
-    "independent_mutation": "passed",
-    "linux": "not_run for offline CLI increment; production gates retained",
+    "independent_cli_probe": "passed; fake GET-only executables, --live isolation, normal text/source fidelity and Feishu failure behavior",
+    "linux": "not_run this local CLI increment; no production certification",
     "review_model": "claude-fable-5-1",
-    "review_receipt": "meeting-preview-fable.json",
-    "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock",
-    "scope": "R1 synthetic offline preview only; not M05/live acceptance"
+    "review_receipt": "meeting-collect-fable.json",
+    "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/r2-live-meeting",
+    "scope": "R2 local authenticated read-only collector; actual GitHub-only observation; Feishu live and human meeting acceptance pending"
   },
   "superseded_requirements": [
     {
@@ -1867,12 +1912,39 @@
         "raw_sha256": "5d65b0f16c2d6204fcab1ea19ff841193d6ad112f76728f2e99f1abd6d2d2302"
       },
       "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-controlbridge"
+    },
+    {
+      "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+      "baseline_commit": "28a25af",
+      "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
+      "mac_full": {
+        "passed": 3410,
+        "warnings": 11,
+        "seconds": 131.95
+      },
+      "target_tests": {
+        "passed": 315,
+        "warnings": 0,
+        "seconds": 7.0
+      },
+      "ruff": "passed",
+      "independent_mutation": "passed",
+      "linux": "not_run for offline CLI increment; production gates retained",
+      "review_model": "claude-fable-5-1",
+      "review_receipt": "meeting-preview-fable.json",
+      "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock",
+      "scope": "R1 synthetic offline preview only; not M05/live acceptance"
     }
   ],
   "active_delivery": {
     "id": "R2",
-    "status": "next",
-    "outcome": "one explicitly scoped real read-only GitHub + Feishu meeting pack"
+    "status": "local_collector_delivered_live_dual_source_pending",
+    "outcome": "one explicitly scoped real read-only GitHub + Feishu meeting pack",
+    "blockers": [
+      "Feishu chat scope missing",
+      "local lark-cli keychain not initialized"
+    ],
+    "next": "resolve current user credential access, collect one chosen chat with same repo/window, then human review of meeting content"
   },
   "known_preview_limitations": [
     "URL-adjacent Chinese text may be omitted",

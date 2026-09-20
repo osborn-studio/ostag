@@ -1,0 +1,46 @@
+{
+  "proof": {
+    "candidate_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
+    "baseline_commit": "79e90bae190bdf6bbf55976c9189cfef58eb83fd",
+    "code_commit": "2b5dc803d03704b41bf2261cb07d5bf3d1fb48ff",
+    "mac_full": {
+      "passed": 3508,
+      "warnings": 11,
+      "seconds": 144.71
+    },
+    "target_tests": {
+      "passed": 254,
+      "warnings": 0,
+      "seconds": 10.31
+    },
+    "ruff": "passed",
+    "independent_cli_probe": "passed; fake GET-only executables, --live isolation, normal text/source fidelity and Feishu failure behavior",
+    "linux": "not_run this local CLI increment; no production certification",
+    "review_model": "claude-fable-5-1",
+    "review_receipt": "meeting-collect-fable.json",
+    "artifacts": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/r2-live-meeting",
+    "scope": "R2 local authenticated read-only collector; actual GitHub-only observation; Feishu live and human meeting acceptance pending"
+  },
+  "verification_commands": {
+    "parent": {
+      "returncode": 0,
+      "output_tail": "Independent CLI checks passed: live-flag isolation, GET-only fake providers, normal Chinese and URL fidelity, source integrity, PR merge window, Feishu failure keeps GitHub and hides diagnostics.\n"
+    },
+    "target": {
+      "returncode": 0,
+      "output_tail": "........................................................................ [ 28%]\n........................................................................ [ 56%]\n........................................................................ [ 85%]\n......................................                                   [100%]\n254 passed in 10.31s\n"
+    },
+    "lint": {
+      "returncode": 0,
+      "output_tail": "All checks passed!\n"
+    },
+    "full": {
+      "returncode": 0,
+      "output_tail": "l path; migrate it to platform:actor_id:level\n    mapping = parse_principal_permissions(config.actor_permissions)\n\ntests/test_governed_writes.py::test_full_chat_loop_propose_approve_apply\n  /Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/task_8b1304f6-58a39e84/ostag/core/permissions.py:77: UserWarning: Ignoring legacy actor grant 'ou_sender:write' on a remote Principal path; migrate it to platform:actor_id:level\n    mapping = parse_principal_permissions(config.actor_permissions)\n\ntests/test_governed_writes.py::test_read_actor_cannot_apply_governed_write\n  /Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/task_8b1304f6-58a39e84/ostag/core/permissions.py:77: UserWarning: Ignoring legacy actor grant 'ou_sender:read' on a remote Principal path; migrate it to platform:actor_id:level\n    mapping = parse_principal_permissions(config.actor_permissions)\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n3508 passed, 11 warnings in 144.71s (0:02:24)\n"
+    },
+    "cli-help": {
+      "returncode": 0,
+      "output_tail": "usage: main.py meeting collect [-h] --repo REPO --start START --end END\n                               --timezone TIMEZONE --goal GOAL\n                               [--chat-id CHAT_ID] [--format {markdown,json}]\n\noptions:\n  -h, --help            show this help message and exit\n  --repo REPO\n  --start START\n  --end END\n  --timezone TIMEZONE\n  --goal GOAL\n  --chat-id CHAT_ID\n  --format {markdown,json}\n"
+    }
+  }
+}

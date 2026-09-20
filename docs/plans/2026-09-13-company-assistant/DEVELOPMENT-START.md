@@ -1,11 +1,11 @@
 # 当前开发入口
 
-当前交付：R1 本地合成会议预览已实现，Codex 编码、实际 Fable 5.1 审查批准；Python 3.11 全量 3410 项通过。见 [卡点复盘与剩余工作](PROJECT-UNBLOCK.md)、[实际会议包](MEETING-PREVIEW-EXAMPLE.md)、[运行说明](../../ostag/meeting-preview.md)。下一步 R2 是单项目真实双源只读试点；不再默认继续拆 A11。真实采集、飞书产品接入、内容验收和发布尚未完成。
+当前交付：R2 本地真实只读采集 CLI 已实现，Codex 编码、实际 Fable 5.1 批准；Python 3.11 全量 3508 项通过。GitHub 真实 7 天窗口零事件，单独标注的 30 天对照窗口取得 4 个来源、8 条事件。飞书群范围和本机钥匙串问题尚待解决；双源现场与内容验收、服务接入及发布未完成。见 [R2 交付与下一步](MEETING-COLLECT.md)、[运行说明](../../ostag/meeting-collect.md)；仍以真实会议试点为活动目标，不默认继续拆 A11。
 
 ## 接下来怎样推进
 
 1. R1 已可运行：在 integration 工作区执行 `.venv/bin/python -m ostag.main meeting preview --input examples/meeting-preview.json --format markdown`；示例缺一个必需分区，正常输出草稿并退出 3。
-2. R2 联合推进 M02/M03、A07 的有界真实读取与 M04/M05 的证据组织，用一个明确 repo/chat/window 完成只读资料会议包；仅在真正需要时补授权与预算配置。不能把 bundle 自带 grant 当真实授权。
+2. R2 已可运行 `meeting collect`（见运行说明），下一步明确一个飞书群并修复当前用户的钥匙串访问，用同一 repo/chat/window 完成真实双源资料包，再验收进展、冲突、待决事项和建议行动。当前本机 CLI 不使用 bundle 自带 grant，也不替代公司服务授权。
 3. R3 完成 M06/M07 与所需 A11/D01/D02/D07 的服务接入、恢复、真实平台与发布验收。其余写回、销售和上游适配保持独立，不阻塞第一次会议试点。
 
 每轮以可运行命令、可读输出和具体行为验收结束；不把没有触发场景的新加固层自动追加为前提。既有安全保护和正式发布门禁保留。进度由 [execution.json](execution.json) 与 [复盘](PROJECT-UNBLOCK.md)记录；backlog 是冻结的原始计划。

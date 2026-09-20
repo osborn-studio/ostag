@@ -1,0 +1,36 @@
+{
+  "candidate_receipt": "builder-1789913175732452000.receipt.json",
+  "session_id": "739cd6da-6647-4c07-813e-123e036de489",
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 47843,
+      "outputTokens": 16,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.04792299999999999,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 21405,
+      "cacheReadInputTokens": 3219,
+      "cacheCreationInputTokens": 61695,
+      "webSearchRequests": 0,
+      "costUSD": 2.3049747499999995,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 21244,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "reason": "tool request instead of final verdict; no approval",
+  "raw": "fable-1789913225317721000.stdout"
+}

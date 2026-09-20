@@ -1,0 +1,53 @@
+{
+  "candidate_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
+  "review": {
+    "candidate_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Scope judged as declared: five GitHub partitions + basic Feishu text messages as a private local read-only draft; docs correctly refuse M02/M03/M05/D07/MC24 completion claims and mark live provider behavior and independent review as pending. No fake grant, namespace, settings load, DB, model call, write or new dependency is introduced.",
+      "Static review only: I did not run tests or recompute the candidate hash. The supplied fixed evidence (254 targeted, 3508 full, Ruff clean, parent CLI probe) is consistent with the code I traced but was not treated as proof of approval.",
+      "Live-only uncertainties (not blockers; parent GH smoke should surface them as visible gaps, never as silent success): (a) `repos/{repo}/commits/{quote(default_branch, safe='')}` percent-encodes '/' as %2F for slash-containing default branches; if GitHub rejects the encoded ref the commits partition gets a `provider_failed` gap. (b) A fractional user-supplied `--end` is passed verbatim as commits `until`; GitHub documents whole-second ISO 8601, so a 422 would appear as a commits gap. (c) Feishu message list responses that omit `items` on an empty page (rather than `items: []`) would be reported as `invalid_schema` instead of an exhausted empty chat. (d) If Feishu `update_time` differs from `create_time` for unedited messages, every message would carry the edited caveat/gap and `draft_ready` would be unreachable with chat scope. (e) `--params` carries `page_size` as a JSON integer; accepted by the fake, unverified against lark-cli 1.0.56.",
+      "Repository full_name comparison is exact (case-sensitive); an operator passing a differently-cased `--repo` than GitHub's canonical name gets `repo_access_mismatch` and GitHub content withheld. This matches the spec's 'exact stable repo ID/name' but may deserve a doc line for the parent's live run.",
+      "The pulls partition has no `since` filter and enumerates until a short page or 4 pages; repositories with >200 PRs will always report `page_limit` and exit 3 even when all in-window PRs sit on page 1 (sorted updated desc). This is honest per the spec's exhaustion definition, but an optional early stop when an entire page's `updated_at` precedes window start would raise usefulness without weakening bounds.",
+      "Minor labeling: draft/unpublished releases are excluded under the `outside_window` reason (no event), which is slightly misleading; a dedicated reason would be clearer. Similarly, after `fact_limit` the collector keeps fetching further pages whose records are all rejected (bounded, visible, but wasteful).",
+      "Process cleanup: in the success path the leader is reaped by `proc.wait()` before `killpg(proc.pid)` in `finally`; the killpg still reaches surviving descendants sharing the pgid, but there is a theoretical PID-reuse race if the reaped pid is immediately reissued to a new session leader. Practically negligible for this local operator tool; noted for completeness.",
+      "Markdown projection: tabs and other Cc characters render as `\t` etc., and literal `\\uXXXX` text in inputs is indistinguishable from projections; hashes cover the original so integrity is unaffected, and the docs already state the projection rule.",
+      "Test quality: fixtures exercise normal mixed Chinese/URL/version/#12 content alongside malicious input, strict-after provider filtering with fractional boundaries, identity/repo change withholding, keychain failure keeping GitHub, one-chat-failure isolation, pagination cap/repeat/duplicate drift, real subprocess timeout/overflow/descendant cleanup, and a real-process CLI run with leading globals under a sitecustomize that forbids settings/sqlite/runner/adapter paths."
+    ]
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 60882,
+      "outputTokens": 15,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.060957,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 20492,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 78685,
+      "webSearchRequests": 0,
+      "costUSD": 2.59832,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 17987,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "session_id": "68bf0043-3a90-45da-8ae5-ba58de8b7eb1",
+  "raw_file": "fable-1789913911534600000.stdout",
+  "raw_sha256": "25157888c9d8d6b6290cc66b79682efac10c797c465d87ab12b90bb2e141edad",
+  "scope": "full six changed files; tools disabled; parent executed verification"
+}
