@@ -19,6 +19,8 @@ from ostag.briefs.lifecycle import (
 
 _LIMIT = 4096
 _IO_TIMEOUT = 0.5
+_STARTUP_TIMEOUT = 5.0
+_CHILD_READY = b"brief-child-ready/1:"
 _HEARTBEAT = 0.25
 _PROTOCOL = "brief-local-custody/1"
 _ATTACHED_FIELDS = {
@@ -564,6 +566,26 @@ def _serve(connection, status_dir, control_path, boot_id):
         connection.close()
 
 
+def _bootstrap(connection, readiness, serve, status_dir, control_path, boot_id):
+    """Signal interpreter/module readiness, without opening any writer files.
+
+    Leave the first ordinary request queued for the existing serve protocol.
+    Its arrival gates writer.open(), so even initial disk IO uses the IO budget.
+    Passing serve explicitly preserves spawn-safe failure-injection targets.
+    """
+    try:
+        try:
+            marker = _CHILD_READY + boot_id.encode("ascii")
+            if os.write(readiness.fileno(), marker) != len(marker):
+                return
+        finally:
+            readiness.close()
+        if connection.poll(_STARTUP_TIMEOUT):
+            serve(connection, status_dir, control_path, boot_id)
+    finally:
+        connection.close()
+
+
 class BriefStatusOwner:
     """One file owner per lifespan, with a fresh boot and a lifetime flock.
 
@@ -584,6 +606,8 @@ class BriefStatusOwner:
     v2 is exclusively a local observation, NEVER production drain evidence:
     durable startup reconciliation and prior-process remote orphans are unknown.
 
+    Interpreter/module bootstrap has a separate 5 second async readiness budget;
+    writer open and all filesystem work remain under the ordinary IO deadline.
     One spawned process isolates all filesystem IO. There is only one outstanding
     request, with a deadline; a stuck child is killed and reaped before any final
     publication is attempted. No detached thread can later overwrite shutdown
@@ -600,6 +624,8 @@ class BriefStatusOwner:
         self.health, self.reason = "degraded", "starting"
         self.last_status = None
         self._process = self._connection = self._task = None
+        self._readiness = None
+        self._child_ready = False
         self._pending = False
         self._needs_reap = False
         self._request = 0
@@ -609,31 +635,67 @@ class BriefStatusOwner:
     def _spawn(self):
         context = multiprocessing.get_context("spawn")
         self._connection, child = context.Pipe()
-        self._process = context.Process(
-            target=_serve if self._lifecycle is None else _serve_attached,
-            args=(child, self.status_dir, self.control_path, self.boot_id),
-            daemon=True,
-        )
+        ready_child = None
+        self._child_ready = False
         try:
+            self._readiness, ready_child = context.Pipe(duplex=False)
+            os.set_blocking(self._readiness.fileno(), False)
+            self._process = context.Process(
+                target=_bootstrap,
+                args=(child, ready_child, _serve if self._lifecycle is None else _serve_attached,
+                      self.status_dir, self.control_path, self.boot_id),
+                daemon=True,
+            )
             self._process.start()
-        except Exception:
-            self._connection.close()
-            raise
         finally:
             child.close()
+            if ready_child is not None:
+                ready_child.close()
+
+    async def _start_child(self, *, terminal=False):
+        deadline = asyncio.get_running_loop().time() + _STARTUP_TIMEOUT
+        try:
+            self._spawn()
+            expected = _CHILD_READY + self.boot_id.encode("ascii")
+            received = b""
+            while True:
+                if self._stop.is_set() and not terminal:
+                    return
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise TimeoutError
+                try:
+                    # Raw, nonblocking, bounded reads also time out partial markers.
+                    chunk = os.read(self._readiness.fileno(), len(expected) + 1 - len(received))
+                except BlockingIOError:
+                    await asyncio.sleep(0.01)
+                    continue
+                if not chunk:
+                    if received != expected:
+                        raise _Fault("ipc_invalid")
+                    self._child_ready = True
+                    return
+                received += chunk
+                if not expected.startswith(received):
+                    raise _Fault("ipc_invalid")
+        finally:
+            if self._readiness is not None:
+                self._readiness.close()
+                self._readiness = None
 
     async def _publish(self, lifecycle):
         if self._lifecycle is not None:
             return await self._publish_attached(lifecycle)
         if self._pending:
             raise RuntimeError("publication already pending")
-        self._connection.send(lifecycle)
-        self._pending = True
         deadline = asyncio.get_running_loop().time() + _IO_TIMEOUT
+        self._pending = True
+        self._connection.send(lifecycle)
         while not self._connection.poll():
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError
             await asyncio.sleep(0.01)
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError
         result = self._connection.recv()
         self._pending = False
         if "error" in result:
@@ -648,9 +710,9 @@ class BriefStatusOwner:
     async def _exchange(self, request, phase, data):
         if self._pending:
             raise _Fault("ipc_pending")
+        deadline = asyncio.get_running_loop().time() + _IO_TIMEOUT
         self._pending = True
         _send(self._connection, _message(self.boot_id, request, phase, data))
-        deadline = asyncio.get_running_loop().time() + _IO_TIMEOUT
         while not self._connection.poll():
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError
@@ -729,22 +791,27 @@ class BriefStatusOwner:
 
     async def _reap(self):
         process = self._process
-        if process is None or process.pid is None:
-            return True
-        for action in (process.terminate, process.kill):
-            if not process.is_alive():
-                break
-            action()
-            deadline = asyncio.get_running_loop().time() + _IO_TIMEOUT
-            while process.is_alive() and asyncio.get_running_loop().time() < deadline:
-                await asyncio.sleep(0.01)
-        if process.is_alive():
-            self.health, self.reason = "degraded", "worker_unreaped"
-            return False
-        process.join(timeout=0)
-        process.close()
+        if process is not None:
+            if process.pid is not None:
+                for action in (process.terminate, process.kill):
+                    if not process.is_alive():
+                        break
+                    action()
+                    deadline = asyncio.get_running_loop().time() + _IO_TIMEOUT
+                    while process.is_alive() and asyncio.get_running_loop().time() < deadline:
+                        await asyncio.sleep(0.01)
+                if process.is_alive():
+                    self.health, self.reason = "degraded", "worker_unreaped"
+                    return False
+                process.join(timeout=0)
+            process.close()
         self._process = None
-        self._connection.close()
+        for name in ("_connection", "_readiness"):
+            connection = getattr(self, name)
+            if connection is not None:
+                connection.close()
+                setattr(self, name, None)
+        self._child_ready = False
         self._pending = False
         return True
 
@@ -768,7 +835,7 @@ class BriefStatusOwner:
 
     async def _run(self):
         try:
-            self._spawn()
+            await self._start_child()
             while not self._stop.is_set():
                 await self._publish("running")
                 self._initial.set()
@@ -779,7 +846,8 @@ class BriefStatusOwner:
                 except TimeoutError:
                     pass
         except TimeoutError:
-            self.health, self.reason = "degraded", "io_timeout"
+            self.health = "degraded"
+            self.reason = "io_timeout" if self._child_ready else "startup_timeout"
         except Exception:
             if self.reason != "ownership_conflict":
                 self.health, self.reason = "degraded", "worker_failed"
@@ -793,13 +861,13 @@ class BriefStatusOwner:
         conflict = self.reason == "ownership_conflict"
         recover = self._pending or self._needs_reap
         try:
-            if self._process is not None and self._process.is_alive() and not conflict:
+            if self._child_ready and self._process.is_alive() and not conflict:
                 if not recover:
                     await self._publish("stopped")
                     return
             if await self._reap() and not conflict and recover:
                 # One bounded terminal attempt after the timed-out writer is dead.
-                self._spawn()
+                await self._start_child(terminal=True)
                 await self._publish("stopped")
         except Exception:
             self.health, self.reason = "degraded", "status_unavailable"
