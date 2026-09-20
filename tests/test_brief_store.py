@@ -8,6 +8,7 @@ import sqlite3
 import subprocess
 import sys
 from threading import Barrier
+from time import monotonic, sleep
 
 import pytest
 
@@ -36,6 +37,21 @@ def admit(store, key="key", **kwargs):
                 execution_seconds=180, now=at())
     args.update(kwargs)
     return store.admit(SCOPE, idempotency_key=key, **args)
+
+
+def admit_with_busy_retry(store, key="key", *, timeout=15, **kwargs):
+    # Retry only transient contention; each SQLite wait still uses the fixture's 0.1s.
+    deadline = monotonic() + timeout
+    while True:
+        try:
+            return admit(store, key, **kwargs)
+        except StoreBusy:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise
+            sleep(min(0.01, remaining))
+            if monotonic() >= deadline:
+                raise
 
 
 def publish(store, lease, now=None, **kwargs):
@@ -132,18 +148,17 @@ def test_concurrent_capacity_and_idempotency(store):
     barrier = Barrier(24)
 
     def submit(i):
-        barrier.wait()
+        barrier.wait(timeout=10)
         try:
-            return admit(store, str(i))
+            return admit_with_busy_retry(store, str(i))
         except QueueFull:
             return None
 
-    # A bounded timeout large enough for the real concurrent writers in this test.
-    store = BriefStore(store.path, busy_timeout=3)
     with ThreadPoolExecutor(max_workers=24) as pool:
         results = list(pool.map(submit, range(24)))
     accepted = [job for job in results if job]
     assert len(accepted) == 20
+    assert results.count(None) == 4
     original = accepted[0]
     assert admit(store, original.idempotency_key).job_id == original.job_id
     with pytest.raises(Conflict):
@@ -159,14 +174,55 @@ def test_concurrent_exact_replay_has_one_row(store):
     barrier = Barrier(8)
 
     def submit(_):
-        barrier.wait()
-        return admit(store)
+        barrier.wait(timeout=10)
+        return admit_with_busy_retry(store)
 
-    store = BriefStore(store.path, busy_timeout=3)
     with ThreadPoolExecutor(max_workers=8) as pool:
         jobs = list(pool.map(submit, range(8)))
     assert len({job.job_id for job in jobs}) == 1
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT count(*) FROM brief_jobs").fetchone()[0] == 1
     assert admit(store, payload={"sources": [{"text": "synthetic", "id": "source-1"}]}).job_id == jobs[0].job_id
+
+
+@pytest.mark.parametrize("release_on_busy", [True, False], ids=["retry", "exhausted"])
+def test_admission_busy_retry_with_real_lock(store, monkeypatch, release_on_busy):
+    original = store.admit
+    busy_errors = []
+    with sqlite3.connect(store.path) as holder:
+        holder.execute("BEGIN EXCLUSIVE")
+        def attempt(*args, **kwargs):
+            try:
+                return original(*args, **kwargs)
+            except StoreBusy as error:
+                busy_errors.append(error)
+                if release_on_busy:
+                    holder.rollback()
+                raise
+        monkeypatch.setattr(store, "admit", attempt)
+        if release_on_busy:
+            assert admit_with_busy_retry(store).state == "queued"
+            assert len(busy_errors) == 1
+        else:
+            started = monotonic()
+            with pytest.raises(StoreBusy) as error:
+                admit_with_busy_retry(store, timeout=0.25)
+            assert monotonic() - started >= 0.25
+            assert error.value is busy_errors[-1]
+            assert holder.execute("SELECT count(*) FROM brief_jobs").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("error_type", [StoreError, Conflict, QueueFull, RuntimeError])
+def test_admission_busy_retry_propagates_other_errors(store, monkeypatch, error_type):
+    error = error_type("unexpected admission failure")
+    calls = []
+    def fail(*args, **kwargs):
+        calls.append(True)
+        raise error
+    monkeypatch.setattr(store, "admit", fail)
+    with pytest.raises(error_type) as caught:
+        admit_with_busy_retry(store)
+    assert caught.value is error and calls == [True]
 
 
 @pytest.mark.parametrize("scope", [

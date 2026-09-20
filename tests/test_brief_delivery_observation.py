@@ -3,6 +3,7 @@ import asyncio
 from dataclasses import replace
 import json
 import sqlite3
+from time import sleep
 
 import pytest
 
@@ -903,26 +904,40 @@ async def test_busy_after_send_retries_only_persistence_and_reauthorizes(ready):
     assert len(service.transport.sends) == 1
 
 
-async def test_post_send_storage_unavailable_keeps_durable_initial_uncertainty(ready):
+@pytest.mark.parametrize("pre_send_delay", [0, 0.12], ids=["normal", "slow"])
+async def test_post_send_storage_unavailable_keeps_durable_initial_uncertainty(
+        ready, monkeypatch, pre_send_delay):
     from ostag.briefs.delivery import DeliveryError
     ready[0].store.enable_delivery()
-    service = delivery(ready, timeout=0.08)
+    service = delivery(ready)
     await service.prepare(ready[2])
+    begin_delivery = service.store.begin_delivery
+    def delayed_claim(*args, **kwargs):
+        attempt = begin_delivery(*args, **kwargs)
+        # Exercise >80 ms of pre-send work after the durable claim commits.
+        sleep(pre_send_delay)
+        return attempt
+    monkeypatch.setattr(service.store, "begin_delivery", delayed_claim)
     holder = sqlite3.connect(service.store.path)
+    locked = asyncio.Event()
     async def respond(attempt):
         holder.execute("BEGIN EXCLUSIVE")
+        locked.set()
         raise RuntimeError("PRIVATE lost response with blocked database")
     service.transport.send_effect = respond
     try:
-        with pytest.raises(DeliveryError):
-            await service.send(SCOPE, ready[2].delivery_id)
+        with pytest.raises(DeliveryError, match="^transport_error$") as error:
+            await asyncio.wait_for(service.send(SCOPE, ready[2].delivery_id), timeout=10)
+        assert error.value.__context__ is None
+        assert locked.is_set() and holder.in_transaction
+        assert len(service.transport.sends) == 1
     finally:
         holder.rollback()
         holder.close()
     result = BriefStore(service.store.path).delivery_snapshot(WORKER, SCOPE, ready[2].delivery_id)
     assert result.state == "started" and result.uncertainty.reason == "send_unverified"
     assert result.receipt_json is None
-    assert await service.send(SCOPE, ready[2].delivery_id) == result
+    assert await asyncio.wait_for(service.send(SCOPE, ready[2].delivery_id), timeout=10) == result
     assert len(service.transport.sends) == 1
 
 
