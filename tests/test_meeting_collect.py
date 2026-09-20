@@ -38,8 +38,10 @@ def issue():
 
 def message(chat="oc_one", **changes):
     at = str(int(datetime.fromisoformat(AT.replace("Z", "+00:00")).timestamp() * 1000))
-    value = dict(message_id="om_one", chat_id=chat, message_type="text", create_time=at,
-                 update_time=at, deleted=False, sender={"id": "ou_other", "id_type": "open_id"},
+    value = dict(message_id="om_one", chat_id=chat, msg_type="text", create_time=at,
+                 update_time=at, deleted=False, updated=False,
+                 sender={"id": "ou_other", "id_type": "open_id",
+                         "sender_type": "user", "tenant_key": "fake_tenant"},
                  body={"content": json.dumps({"text": NORMAL + f"\nhttps://github.com/{REPO}/pull/12"},
                                              ensure_ascii=False)})
     value.update(changes)
@@ -48,6 +50,14 @@ def message(chat="oc_one", **changes):
 
 def envelope(data):
     return {"ok": True, "identity": "user", "data": data}
+
+
+def system_message(**changes):
+    value = message(message_id="om_system", msg_type="system",
+                    sender={"id": "", "id_type": "", "sender_type": "", "tenant_key": ""},
+                    body={"content": "Synthetic system notice"})
+    value.update(changes)
+    return value
 
 
 class Scripted:
@@ -343,9 +353,10 @@ def test_issue_pr_exclusion_and_half_open_local_filter():
 
 
 @pytest.mark.parametrize("change,reason", [
-    ({"message_type": "image"}, "non_text_message_not_expanded"),
+    ({"msg_type": "image"}, "non_text_message_not_expanded"),
     ({"deleted": True}, "deleted_message_historical_content_unavailable"),
-    ({"update_time": "1790000000000"}, "edited_message_historical_content_unavailable"),
+    ({"update_time": "1790000000000", "updated": True},
+     "edited_message_historical_content_unavailable"),
     ({"thread_id": "omt_a"}, "thread_not_expanded"),
 ])
 def test_media_deleted_edited_thread_are_observations_with_gaps(change, reason):
@@ -434,8 +445,15 @@ def test_cli_invalid_stdout_generic_and_no_settings(monkeypatch, capsys):
     assert build_parser().parse_args(["meeting", "preview", "--input", "a"]).input == "a"
 
 
-def test_real_process_cli_leading_globals_uses_only_scripted_provider_binaries(tmp_path):
+@pytest.mark.parametrize("include_system", [False, True])
+def test_real_process_cli_leading_globals_uses_only_scripted_provider_binaries(tmp_path,
+                                                                             include_system):
     fake = Scripted()
+    records = fake.responses["/open-apis/im/v1/messages"]["data"]["items"]
+    # Metadata can change without a content edit, even after the collection window.
+    records[0]["update_time"] = str(int(datetime.fromisoformat(NEW).timestamp() * 1000))
+    if include_system:
+        records.append(system_message())
     responses = tmp_path / "responses.json"
     responses.write_text(json.dumps(fake.responses))
     script = (f"#!{PYTHON}\nimport json,sys\n"
@@ -453,17 +471,41 @@ def test_real_process_cli_leading_globals_uses_only_scripted_provider_binaries(t
         "ostag.config.load_settings=forbidden\nsqlite3.connect=forbidden\n"
         "import ostag.core.runner\nostag.core.runner.OSTagRunner.__init__=forbidden\n"
         "import ostag.adapters.feishu\nostag.adapters.feishu.FeishuAdapter.__init__=forbidden\n")
-    env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ["PATH"],
+    env = dict(os.environ, PATH=str(tmp_path),
                PYTHONPATH=str(tmp_path) + os.pathsep + str(Path.cwd()))
     args = [PYTHON, "-m", "ostag.main", "--config", str(tmp_path / "does-not-exist"),
             "--backend", "openai_api", "--doctor", "--live", "meeting", "collect",
             "--repo", REPO, "--start", START, "--end", END, "--timezone", "America/Los_Angeles",
             "--goal", "项目周会", "--chat-id", "oc_one", "--format", "json"]
     completed = subprocess.run(args, capture_output=True, text=True, env=env, timeout=20)
-    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert completed.returncode == (3 if include_system else 0), completed.stdout + completed.stderr
     assert completed.stderr == ""
     result = json.loads(completed.stdout)
-    assert result["status"] == "draft_ready" and result["facts"]
+    assert result["status"] == ("needs_input" if include_system else "draft_ready")
+    sources = [s for s in result["sources"] if s["provider"] == "feishu"]
+    facts = [f for f in result["facts"] if f["provider"] == "feishu"]
+    assert len(sources) == len(facts) == len(records)
+    for record, source, fact in zip(records, sources, facts):
+        assert source["resource_id"] == record["message_id"]
+        assert source["message_type"] == fact["message_type"] == record["msg_type"]
+        assert source["content"] == record["body"]["content"]
+        assert source["content_sha256"] == hashlib.sha256(record["body"]["content"].encode()).hexdigest()
+        assert source["record_sha256"] == hashlib.sha256(json.dumps(
+            record, ensure_ascii=True, sort_keys=True).encode()).hexdigest()
+        assert fact["kind"] == "chat_message_created" and fact["event_at"] == AT
+    assert sources[0]["text"].startswith(NORMAL)
+    assert sources[0]["sender"] == facts[0]["sender"] == {"id": "ou_other", "id_type": "open_id"}
+    assert sources[0]["provider_updated_at"] == NEW
+    assert "edited_message_historical_content_unavailable" not in reasons(result)
+    if include_system:
+        assert sources[1]["sender"] is None and facts[1]["sender"] is None
+        assert sources[1]["text"] is None and "associated_source_ids" not in sources[1]
+        assert "non_text_message_not_expanded" in sources[1]["caveats"]
+        assert reasons(result) == {"non_text_message_not_expanded"}
+    cov = result["coverage"]["feishu:oc_one"]
+    assert cov["records_received"] == cov["records_included"] == len(records)
+    assert cov["records_excluded"] == 0 and cov["exhausted"] and not cov["withheld"]
+    assert result["identities"]["feishu_verified"]
     assert not (tmp_path / "does-not-exist").exists()
 
 
@@ -542,6 +584,105 @@ def test_feishu_invalid_schemas_keep_valid_sibling(change):
     result = run(fake)
     assert "invalid_schema" in reasons(result)
     assert any(s["source_id"].endswith("om_valid") for s in result["sources"])
+
+
+@pytest.mark.parametrize("fields", [
+    {"msg_type": "text"}, {"message_type": "text"},
+    {"msg_type": "text", "message_type": "text"},
+])
+def test_feishu_message_type_compatibility_preserves_original_record(fields):
+    fake = Scripted()
+    record = message()
+    del record["msg_type"]
+    record.update(fields)
+    original = copy.deepcopy(record)
+    fake.responses["/open-apis/im/v1/messages"]["data"]["items"] = [record]
+    result = run(fake)
+    source = next(s for s in result["sources"] if s["provider"] == "feishu")
+    assert result["status"] == "draft_ready" and source["message_type"] == "text"
+    assert source["record_sha256"] == hashlib.sha256(json.dumps(
+        original, ensure_ascii=True, sort_keys=True).encode()).hexdigest()
+    assert record == original
+
+
+@pytest.mark.parametrize("fields", [
+    {}, {"msg_type": "text", "message_type": "system"},
+    *({key: value} for key in ("msg_type", "message_type")
+      for value in (None, False, 1, [], {}, "", " ")),
+    *({"msg_type": value, "message_type": "text"}
+      for value in (None, False, 1, [], {}, "", " ")),
+    *({"msg_type": "text", "message_type": value}
+      for value in (None, False, 1, [], {}, "", " ")),
+])
+def test_feishu_invalid_or_conflicting_message_types_keep_valid_sibling(fields):
+    fake = Scripted()
+    record = message()
+    del record["msg_type"]
+    record.update(fields)
+    fake.responses["/open-apis/im/v1/messages"]["data"]["items"] = [
+        record, message(message_id="om_valid")]
+    result = run(fake)
+    assert [s["resource_id"] for s in result["sources"] if s["provider"] == "feishu"] == ["om_valid"]
+    cov = result["coverage"]["feishu:oc_one"]
+    assert cov["records_received"] == 2 and cov["records_included"] == cov["records_excluded"] == 1
+    assert cov["reasons"] == {"invalid_schema": 1} and cov["exhausted"]
+
+
+@pytest.mark.parametrize("kind", ["text", "image", "system"])
+@pytest.mark.parametrize("sender", [
+    None, {}, {"id": None, "id_type": ""}, {"id": "", "id_type": False},
+    {"id": "ou_fake", "id_type": ""}, {"id": "", "id_type": "open_id"},
+])
+def test_feishu_malformed_senders_keep_valid_sibling(kind, sender):
+    fake = Scripted()
+    fake.responses["/open-apis/im/v1/messages"]["data"]["items"] = [
+        message(msg_type=kind, sender=sender), message(message_id="om_valid")]
+    result = run(fake)
+    assert [s["resource_id"] for s in result["sources"] if s["provider"] == "feishu"] == ["om_valid"]
+    assert result["coverage"]["feishu:oc_one"]["reasons"] == {"invalid_schema": 1}
+
+
+@pytest.mark.parametrize("kind", ["text", "image"])
+def test_feishu_empty_sender_exception_is_only_for_system(kind):
+    fake = Scripted()
+    fake.responses["/open-apis/im/v1/messages"]["data"]["items"] = [
+        system_message(msg_type=kind), message(message_id="om_valid")]
+    result = run(fake)
+    assert [s["resource_id"] for s in result["sources"] if s["provider"] == "feishu"] == ["om_valid"]
+    assert result["coverage"]["feishu:oc_one"]["reasons"] == {"invalid_schema": 1}
+
+
+@pytest.mark.parametrize("updated", [False, True, "absent"])
+@pytest.mark.parametrize("timestamp", [AT, NEW])
+def test_feishu_updated_flag_controls_edit_caveat_with_legacy_absent_fallback(updated, timestamp):
+    fake = Scripted()
+    record = message(update_time=str(int(datetime.fromisoformat(timestamp).timestamp() * 1000)))
+    if updated == "absent":
+        del record["updated"]
+    else:
+        record["updated"] = updated
+    fake.responses["/open-apis/im/v1/messages"]["data"]["items"] = [record]
+    result = run(fake)
+    source = next(s for s in result["sources"] if s["provider"] == "feishu")
+    fact = next(f for f in result["facts"] if f["provider"] == "feishu")
+    edited = timestamp != AT if updated == "absent" else updated
+    caveat = "edited_message_historical_content_unavailable"
+    assert (caveat in source["caveats"]) == (caveat in fact["caveats"]) == edited
+    assert (caveat in reasons(result)) == edited
+    assert result["status"] == ("needs_input" if edited else "draft_ready")
+    assert source["provider_updated_at"] == fact["provider_updated_at"] == timestamp
+    assert fact["kind"] == "chat_message_created" and fact["event_at"] == AT
+
+
+@pytest.mark.parametrize("field", ["updated", "deleted"])
+@pytest.mark.parametrize("value", [None, 0, 1, "false", "true", [], {}])
+def test_feishu_invalid_flags_keep_valid_sibling(field, value):
+    fake = Scripted()
+    fake.responses["/open-apis/im/v1/messages"]["data"]["items"] = [
+        message(**{field: value}), message(message_id="om_valid")]
+    result = run(fake)
+    assert [s["resource_id"] for s in result["sources"] if s["provider"] == "feishu"] == ["om_valid"]
+    assert result["coverage"]["feishu:oc_one"]["reasons"] == {"invalid_schema": 1}
 
 
 def test_cli_exit_three_for_missing_scope_and_lossless_json(monkeypatch, capsys):

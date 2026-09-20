@@ -245,10 +245,23 @@ class Collector:
         updated = milliseconds(item.get("update_time"))
         require(type(item.get("deleted")) is bool and type(item.get("body")) is dict
                 and type(item.get("sender")) is dict)
-        kind = string(item.get("message_type"), 100)
+        # msg_type is the live CLI contract; accept the legacy alias only when
+        # absent or identical, never masking a malformed present field.
+        kind = string(item["msg_type"] if "msg_type" in item else item.get("message_type"), 100)
+        if "message_type" in item:
+            require(string(item["message_type"], 100) == kind)
         content = string(item["body"].get("content"), empty=True)
-        sender = {"id": string(item["sender"].get("id"), 256),
-                  "id_type": string(item["sender"].get("id_type"), 100)}
+        if kind == "system" and item["sender"].get("id") == "" and item["sender"].get("id_type") == "":
+            sender = None  # Explicitly unattributed; never substitute the collecting user.
+        else:
+            sender = {"id": string(item["sender"].get("id"), 256),
+                      "id_type": string(item["sender"].get("id_type"), 100)}
+        if "updated" in item:
+            require(type(item["updated"]) is bool)
+            edited = item["updated"]
+        else:
+            # Compatibility for older records without the explicit content-edit flag.
+            edited = updated != created
         caveats, text = ["chat_claim_observed_current_content"], None
         if item["deleted"]:
             caveats.append("deleted_message_historical_content_unavailable")
@@ -258,7 +271,7 @@ class Collector:
             text = string(body.get("text"), empty=True)
         else:
             caveats.append("non_text_message_not_expanded")
-        if updated != created:
+        if edited:
             caveats.append("edited_message_historical_content_unavailable")
         markers = {}
         for marker in ("root_id", "parent_id", "thread_id"):
