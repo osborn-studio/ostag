@@ -1,0 +1,24 @@
+{
+  "code_commit": "7f8c87a931f2a040290379130625a40d8c135668",
+  "candidate_sha256": "2389d727e2a33b98c7edde8b96b7f96de5ae241dcad2037b7d03c72f26ac28d8",
+  "target_tests": 328,
+  "full_tests": 3582,
+  "warnings": 11,
+  "lint": "passed",
+  "fable_verdict": "approved",
+  "blockers": 0,
+  "actual_provider_live": {
+    "received": 81,
+    "included": 81,
+    "excluded": 0,
+    "schema_rejections": 0,
+    "sources_with_github": 85,
+    "events_with_github": 89,
+    "edited_history_gaps": 26,
+    "nontext_gaps": 21,
+    "thread_context_gaps": 3,
+    "identity_checks": "both providers verified before and after"
+  },
+  "private_data": "outside repository; no private contents sent to coding/review models",
+  "deployment": "not performed"
+}
