@@ -1,5 +1,5 @@
 {
-  "scope": "R1 synthetic preview and R2 bounded local live collector delivered; real GitHub observed, Feishu/live dual-source meeting acceptance and production remain pending",
+  "scope": "Local brief foundations plus R1 synthetic preview and R2 bounded real dual-source pilot delivered; production composition, semantic acceptance and activation remain pending",
   "plan_commit": "81195d9bfc2bb4bacb8f47595e7d41310e4a7166",
   "main_baseline": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
   "branch": "codex/ostag-company-integration",
@@ -84,7 +84,7 @@
     "P00": "local_baseline_verified; production visibility unknown/not_run",
     "P01": "controlled_osstack_execution_verified; general autonomous runner admission not completed",
     "A01": "verified_local",
-    "remaining_product_tasks": "R2 real dual-source and content acceptance remain active; collector subset does not complete A07/M02-M05",
+    "remaining_product_tasks": "40 frozen tasks: 9 local core, 5 partial, 26 without whole-task completion evidence; these are not production completion counts",
     "M01": "verified_local",
     "A02": "verified_local",
     "A03": "verified_local",
@@ -100,7 +100,9 @@
     "A05-refresh": "verified_local; authenticated production command and client update remain A11/D01",
     "A11": "partial: A11a disabled status, A11b authority, A11c operation custody, A11d concrete file-control/status bridge verified; durable startup reconciliation, production owner and authority updater pending",
     "R1": "verified_local_synthetic; human semantic acceptance pending; does not complete M02-M07",
-    "R2": "local CLI verified; live GitHub succeeded; no live Feishu or human meeting acceptance"
+    "R2": "verified_local_real_dual_source: 81 chat records plus GitHub; user review of meeting draft pending",
+    "A07": "partial: authenticated local user CLI chat history collected in one real pilot; service authority, media/threads and full task acceptance pending",
+    "M02": "partial: one-repository PR/issues/comments/commits/releases collection verified; checks/deployments, organization scope and full task acceptance pending"
   },
   "acceptance": {
     "A01-AC1": "strict direct/wire types, UTC windows, exact IANA keys, scope and model egress tested",
@@ -127,8 +129,8 @@
     "A11-AC3": "partial: status failure/delay isolation and maintenance no-business-IO verified; enabled schema degradation and same-image business read-only maintenance pending",
     "R1-CLI": "Local synthetic dual-source Markdown/JSON output, source integrity, distinct deployment evidence, missing coverage, ambiguity and normal Chinese content verified",
     "R1-human": "not_run; human semantic and real-data acceptance remain open",
-    "R2-CLI": "bounded GET-only collection, authenticated local identity checks, explicit partial coverage, source fidelity and process cleanup verified locally; GitHub real runs succeeded",
-    "R2-live": "GitHub 7day and separately labelled 30day control verified; Feishu auth keychain unavailable and chat scope missing; dual-source and semantic acceptance not_run"
+    "R2-CLI": "bounded GET-only collection, authenticated local identity checks, explicit partial coverage, source fidelity and process cleanup verified locally; GitHub and Feishu real reads verified",
+    "R2-live": "real 30-day dual-source pilot verified: 81 Feishu messages plus one GitHub repository; original app authentication restored; human semantic acceptance remains pending"
   },
   "tests": {
     "python": "3.11.15",
@@ -379,11 +381,7 @@
   },
   "not_run": [
     "live company meeting end-to-end",
-    "Feishu live reads/writes",
-    "release_check",
     "container smoke",
-    "production preflight",
-    "push",
     "main merge",
     "deployment",
     "real provider generation/semantic evaluation",
@@ -399,7 +397,9 @@
     "A11 automatic first-card dispatch and production lifespan integration",
     "A06 authenticated signed correction/adoption/retraction card UI and end-to-end Feishu acceptance",
     "A06 multi-user rendering/lock latency certification and production retention lifecycle integration",
-    "A10 production retention/revocation lifecycle and cleanup scheduler"
+    "A10 production retention/revocation lifecycle and cleanup scheduler",
+    "Feishu business writes/platform interaction acceptance (read-only local collection already verified)",
+    "stage PR GitHub Linux Python 3.11 CI (pending creation)"
   ],
   "next_tasks": [
     "A07",
@@ -1511,13 +1511,13 @@
       }
     }
   ],
-  "checkpoint": "R2 local collector and actual GitHub read delivered; real Feishu and human useful-meeting acceptance remain explicit next steps",
+  "checkpoint": "R2 real Feishu + GitHub collection and meeting draft delivered; stage PR preparation now active; not a production activation claim",
   "next_task_details": {
     "A11": "Deferred to R3 production composition; existing recorded reconciliation/owner/updater work remains. Not an automatic prerequisite for offline R1 or bounded read-only R2.",
     "D01": "Authorized test destination: actual create schema/sender fields, signed callbacks, desktop/mobile rendering, expiry and failure acceptance; keep platform creation/read/semantic evidence distinct.",
-    "R2": "Use delivered meeting collect for one chosen chat/repo/window after fixing current Feishu keychain access; validate actual dual-source evidence and useful meeting organization. Current code covers five GitHub categories, not checks/deployments or full M02/M03. No automatic credential downgrade."
+    "R2": "Completed real collection for one explicit chat/repository/30-day window after restoring original app. Human content review and media/thread limitations remain; no auth restart needed."
   },
-  "updated_at_utc": "2026-09-20T14:26:12.007886+00:00",
+  "updated_at_utc": "2026-09-20T16:05:58.538277Z",
   "candidates": {},
   "candidate_history": {
     "A10-before-Opus": {
@@ -1938,17 +1938,39 @@
   ],
   "active_delivery": {
     "id": "R2",
-    "status": "local_collector_delivered_live_dual_source_pending",
-    "outcome": "one explicitly scoped real read-only GitHub + Feishu meeting pack",
-    "blockers": [
-      "Feishu chat scope missing",
-      "local lark-cli keychain not initialized"
+    "status": "real_dual_source_pilot_delivered_human_acceptance_pending",
+    "outcome": "One user-selected 30-day chat/repository window; all 81 chat records included, 85 sources and 89 events across both providers",
+    "blockers": [],
+    "limitations": [
+      "edited historical text unavailable",
+      "non-text content and complete reply context not expanded",
+      "one repository only; check/deploy histories not collected"
     ],
-    "next": "resolve current user credential access, collect one chosen chat with same repo/window, then human review of meeting content"
+    "next": "Review meeting usefulness; scoped release PR, current release checks and D02 host prerequisites before production"
   },
   "known_preview_limitations": [
     "URL-adjacent Chinese text may be omitted",
     "some filename-like tokens and quote/identifier display are lossy",
     "JSON is a display projection; not raw normalized facts"
-  ]
+  ],
+  "latest_verified_code_commit": "7f8c87a931f2a040290379130625a40d8c135668",
+  "latest_verified_receipt": "reviews/feishu-contract-live-verification.json",
+  "snapshot_note": "Existing code_commit/file_sha256/tests/review/combined_validation fields retain their historical R2 snapshot; latest_verified_code_commit and receipt supersede for the subsequent Feishu fix. Release-candidate evidence is tracked separately.",
+  "stage_release_2026_09_20": {
+    "status": "ready_for_draft_pr_deployment_blocked",
+    "initial_release_check": {
+      "passed": 3577,
+      "failed": 5,
+      "compile": "passed",
+      "ruff": "passed",
+      "root_cause": "spawn interpreter startup consumed 500ms IPC deadline",
+      "evidence": "OStag-runtime/stage-release-2026-09-20/release-check.log"
+    },
+    "startup_fix": "verified and integrated; actual Codex/osstack plus Fable 5.1 independent approval",
+    "final_release_check": "passed: 3611 tests, 11 warnings on Python 3.13.13; targeted 124 on Python 3.11.15; Linux 3.11 CI pending",
+    "deployment": "blocked: trusted host deployment lock and brief drain preflight not installed; restricted wrapper has no installer",
+    "inventory": "RELEASE-STATUS-2026-09-20.md",
+    "code_commit": "b7fcca5eefaf6b0e360a0f57b6ce856485c3f791",
+    "receipt": "reviews/stage-release-startup.json"
+  }
 }

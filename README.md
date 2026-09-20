@@ -45,6 +45,14 @@ strategic direction.
   OStag submits a SHA-bound GitHub review and waits for that SHA to reach a
   Vercel Production `READY` deployment with an assigned alias.
 
+## Local meeting preparation
+
+`ostag meeting collect` reads one GitHub repository and up to two explicitly
+selected Feishu chats through the operator's locally authenticated CLIs. It emits
+private Markdown or JSON with sources and coverage gaps; it does not send messages
+or activate server-side meeting workflows. See [usage and limits](docs/ostag/meeting-collect.md)
+and the [stage release status](docs/plans/2026-09-13-company-assistant/RELEASE-STATUS-2026-09-20.md).
+
 ## Architecture
 
 ```text

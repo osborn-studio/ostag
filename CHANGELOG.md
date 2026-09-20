@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Separate brief status subprocess bootstrap from bounded IO deadlines; add 29 startup, cancellation and terminal-recovery regressions.
+
+- Added local `meeting preview` and bounded, read-only `meeting collect` commands
+  for GitHub and explicitly selected Feishu chats, with source hashes, time-window
+  filtering, identity verification and visible coverage gaps.
+- Added opt-in brief domain foundations for generation, revision, private cards,
+  delivery observation, retention and lifecycle fencing. Server-side brief flags
+  remain disabled and reject activation until production composition is ready.
+- Fixed work-monitor control replay and lost-publication recovery so repeated
+  apply requests reuse their reserved command without duplicate publication.
+- Fixed the live Feishu `msg_type` contract, unattributed system notices and
+  explicit content-edit flags in local meeting collection.
+- Recorded staged implementation and independent verification evidence, with
+  outstanding product acceptance and deployment prerequisites kept explicit.
+
 - Added a CI-gated GitHub Actions production deployment for the Tencent
   Lighthouse work monitor. Each release is commit-bound, checksum-verified,
   backed up online before Compose switches images, health-checked through the
