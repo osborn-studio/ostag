@@ -1,0 +1,28 @@
+{
+  "basis": "Frozen A10 AC plus inspected existing local generation/delivery/callback/revision contracts",
+  "base": "9b5f9f8",
+  "official_references": [
+    "https://www.sqlite.org/lang_transaction.html",
+    "https://www.sqlite.org/pragma.html#pragma_synchronous",
+    "https://www.sqlite.org/pragma.html#pragma_secure_delete",
+    "https://docs.python.org/3.11/library/os.html#os.stat_result",
+    "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/stat.h",
+    "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/fcntl.h"
+  ],
+  "limits": "SQLite logical deletion/secure_delete is not physical erasure of SSD snapshots/backups/remote delivered cards. New authority ledger should use DELETE/EXTRA; existing ledgers need scoped compatible operational changes only.",
+  "local_files_sha256": {
+    "ostag/briefs/store.py": "eb03b2dc1bf21799c11d25ca0cf333e07642a59d28443e58266df684f38de698",
+    "ostag/briefs/service.py": "a809dc95ae13e9dd7c6846bc7cf5ec082d5a911d9da3af31fbbe584a8b1b160b",
+    "ostag/briefs/worker.py": "0f23fc655622917f76d21312a4bfb385d8a38aa9b87afbf9ef89d54258cfed87",
+    "ostag/briefs/delivery.py": "23428abed3f4ff26a145de14006108690a52980f7dee96a774e17639e3fd64d6",
+    "ostag/briefs/card_delivery.py": "be4aa0c22529fc2a57d8f8704eec81a6d77c0303be28e15ed6c6a17a8eefcc70",
+    "ostag/briefs/callbacks.py": "43dbcf604a8aafd5be7f6ace6801ebfa0f9b3d8a8f12c056733eecc4c7860be1",
+    "ostag/briefs/revisions.py": "bdc83f8b7574b4da84dc2592d0df3e4f88a0b396afdd47ff4474a882bcb0a120",
+    "docs/plans/2026-09-13-company-assistant/TASKS.md": "993dccb74090d2b953cc216cb82d78317e522b780dfafda7e4a4298b7e226baf",
+    "docs/plans/2026-09-13-company-assistant/A06-REVISIONS.md": "294a9862a79460dcf216ebd3df1f517f4ae23f99d211cacbc5ee8929390e447a"
+  },
+  "official_docs_verified": "2026-09-15, SQLite PRAGMA secure_delete and synchronous; ordinary-table zeroing, FAST freelist limitation, virtual-table limitations, EXTRA directory-sync guarantee scope verified from official docs",
+  "platform_evidence": "2026-09-15: official Python3.11 os.stat_result documents st_birthtime as optional on some Unix systems. Current candidate deliberately denies when absent. Linux production capability must be implemented/verified before enablement; macOS tests do not certify it.",
+  "continuation": "Focused Linux/Python3.11 portability repair after first native run escalated on actual Fable429. No substitute reviewer or approval.",
+  "linux_abi_verified": "2026-09-15 parent read official Linux UAPI stat.h and fcntl.h: statx256-byte layout, mask-gated birth time/type/inode, signed seconds+nanoseconds, unconditional device fields, AT_EMPTY_PATH0x1000 / AT_SYMLINK_NOFOLLOW0x100. Static layout comparison and mocked ABI tests are not native Linux runtime certification."
+}

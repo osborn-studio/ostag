@@ -1,0 +1,57 @@
+{
+  "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+  "review": {
+    "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Review based solely on the supplied five files and the fixed evidence (315 targeted / 3410 full tests, Ruff clean, demo JSON and Markdown). No tests were run and the candidate SHA256 was not recomputed here.",
+      "Prior blocker is resolved as written. URL_TEXT is compiled with re.ASCII and the domain alternative is now `(?<![A-Za-z0-9.-])(?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,}(?![A-Za-z0-9])(?:[/:?#]...)?`: for `依赖升级到2.0后测试通过`, `核实v2.0上线证据`, `耗时1.5秒` the label after the dot starts with a digit so nothing matches; `Fix:` no longer matches because the scheme alternative requires `://` or one of javascript/data/vbscript/file/mailto. The bare-#N detector therefore sees `#12` in `虚构讨论：#12后升级到2.0再确认`. Tests test_benign_dotted_chinese_and_word_prefix_survive_display, test_literal_bare_reference_boundaries and test_url_patterns_still_omitted_from_display_and_references cover exactly the reproductions from the prior review, and the doc paragraph was updated accordingly (config.yaml caveat is documented and tested).",
+      "Semantics re-verified in code and consistent with the demo output: scope/grant/namespace/revision/requester/resource checks go through freeze_meeting_scope with a fixed synthetic Settings/BudgetProfile and output states authorization=simulated_only; window inclusion is half-open on event_at only (created_at/updated_at only validated for ordering); out-of-scope repo/chat/category rejects the whole input before window filtering; out-of-window events are counted per partition; one merge record per repo+PR; check match requires repo+PR+ref and check_sha==check.head_sha==pr.head_sha; production deployment requires repo+ref+sha==merge_sha+environment=='production' (case-exact) and only in-window records participate; commit/release/check are never promoted to deployed; 已上线 claim with explicit reference and unknown deployment yields deployment_unverified phrased as unknown with evidence IDs/times and a question; bare #N lists all request.repo_ids and never infers; manifest exactness enforced; failed/denied partitions cannot carry records; required gap => needs_input/meeting_ready=false/exit 3 with full partial output; citations built only from frozen owner/repo plus typed IDs; content_sha256 over raw title+\\n+excerpt or raw text; every source_ids list resolves to the sources index.",
+      "Non-blocking: the URL tail `[^\\s<>\\[\\]\"']*` is ASCII-whitespace-bounded, so a URL immediately followed by CJK punctuation swallows the rest of the run, e.g. feishu text `详见https://rogue.invalid/x，#12已上线需确认` displays as `详见（链接已省略）` and no unqualified_pr_reference is emitted for #12. This mirrors how GFM autolink extension would extend the link, and the raw hash is preserved, so it is a fidelity/readability limitation rather than a defect; stopping the tail at the first non-ASCII character (e.g. `[!-~]` minus the excluded brackets/quotes) would keep trailing Chinese text and bare references visible. The `data:`/`file:` scheme words are likewise replaced when adjacent to CJK (`更新data:字段` -> `更新（链接已省略）`).",
+      "Non-blocking: _escape_display runs html.escape (quote=True) before Markdown escaping, so an ASCII apostrophe becomes `&\\#x27;` in JSON/terminal and renders as the literal text `&#x27;` in a Markdown viewer; double quotes become `&quot;` in terminal output. Inert but degrades readability of English quotes; escaping Markdown first or not HTML-escaping quotes would fix it.",
+      "Non-blocking, unverifiable here: a non-string bundle observed_at (e.g. 1, null, {}) reaches freeze_meeting_scope as `now` before any _utc validation; if that code path raises AttributeError it is not in run_preview's catch list and would produce exit 1 with a traceback instead of exit 2. Validating `_utc(bundle['observed_at'], 'observed_at')` before _freeze (or adding AttributeError to the catch list) plus a CLI test with `\"observed_at\": 1` would close this.",
+      "Non-blocking: build_preview re-serializes the bundle with default separators and rejects >1 MiB, so a compact fixture close to the documented 1 MiB file limit can pass load_bundle and still be rejected; a file-size-only bound (or compact separators in the re-check) would match the doc.",
+      "Non-blocking: the leading-global-option form (`--dry-run meeting preview ...`) still uses argparse's default error handler, so invalid argv values (not fixture content) are echoed to stderr; the meeting-first form is generic. The doc's exit-2 wording is exact only for the meeting-first form.",
+      "Non-blocking: domain-like tokens preceded by `.`, `-` or an ASCII alphanumeric (`.rogue.invalid`, `12rogue.invalid`) or with a digit in the last label (`rogue.co1`, `1.2.3.4`) are not replaced; they are not autolinkable by GFM and remain plain text. A release `tag` matching the tag schema may itself look like a domain (`v1.rogue.invalid`) and is only escaped, but it is a typed identifier and never rendered as a link outside the github.com citation.",
+      "Non-blocking: the bare-reference detector runs on raw text while display strips format/control characters, so `#1\\u200b2` is reported as PR 1 but displayed as `\\#12`; deterministic and documented as a literal rule, just worth knowing.",
+      "Non-blocking: validated identifiers with underscores are Markdown-escaped in the JSON projection (`feature_x` -> `feature\\_x` for ref/environment/tag) while matching uses raw values; documented as a display projection. Safety of mapping-derived full_name (in citation URLs) and chat_id (in resource IDs rendered raw) still relies on the existing ProjectMapping/MeetingRequest validators.",
+      "Non-blocking: print() output can raise BrokenPipeError under `| head`; test_real_cli_json_markdown_and_installed_entrypoint requires an `ostag` console script beside sys.executable; os.mkfifo/O_NOFOLLOW are POSIX-only (cross-OS explicitly out of scope).",
+      "Scope confinement holds: no network, settings loading, DB, subprocess, model call, message send, route or dependency change; early dispatch is covered by a real-process sitecustomize test; main.py changes are limited to the meeting subparser and the two dispatch branches, with the status dispatch regression test passing. Future live collection, authenticated grant issuance and human acceptance remain in documentation only."
+    ]
+  },
+  "modelUsage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 62948,
+      "outputTokens": 12,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.06300800000000001,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 29608,
+      "cacheReadInputTokens": 3219,
+      "cacheCreationInputTokens": 78919,
+      "webSearchRequests": 0,
+      "costUSD": 3.05960475,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 27109,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "session_id": "48018d06-5dd2-4673-b84f-258043ce6fa2",
+  "raw_sha256": "af14c5c0c283307c7675d5998806510b9d37483f28669b7ce86ecd543ac355f8",
+  "raw_file": "fable-review-1789798891163045000.stdout",
+  "scope": "full changed files supplied tool-less; parent executed tests and demo"
+}

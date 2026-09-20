@@ -1,0 +1,5 @@
+{
+  "reason": "Parent scope correction: tests/test_work_monitor_controls.py is additionally allowed ONLY to update test_approval_does_not_enqueue_and_apply_enqueues_exactly_one_versioned_command from expecting sequential replay SchemaError to expecting original applying receipt with unchanged command count/identity/payload and unchanged ledger bytes. The old sequential-error assertion conflicts with the existing concurrent-success contract. This is a deliberate idempotency behavior correction; preserve every other controls test unchanged. No test removal or xfail. Prior instruction requiring every controls test unchanged is superseded only for this assertion.",
+  "stopped_owned_builder_pid": 78268,
+  "original_queue_preserved": true
+}

@@ -7,7 +7,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
@@ -37,6 +37,8 @@ def create_feishu_card_router(
     service: WorkMonitorService | Callable[[], WorkMonitorService],
     *,
     copilot: object | Callable[[], object | None] | None = None,
+    briefs: object | None = None,
+    brief_cards: object | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -67,7 +69,9 @@ def create_feishu_card_router(
 
     @router.post("/webhooks/feishu/card-action")
     async def card_action(request: Request) -> dict[str, object]:
-        verified: VerifiedFeishuCallback = request.state.feishu_callback
+        verified = getattr(request.state, 'feishu_callback', None)
+        if type(verified) is not VerifiedFeishuCallback:
+            raise HTTPException(401, 'verified Feishu callback required')
         if verified.kind == "challenge":
             challenge = verified.payload.get("challenge")
             if challenge is None:
@@ -77,6 +81,49 @@ def create_feishu_card_router(
         value = verified.payload["event"]["action"]["value"]
         if set(value) != {"callback_id"} or not isinstance(value["callback_id"], str):
             return failure_card("操作无效")
+        if value['callback_id'].startswith('bc_'):
+            from ostag.briefs.card_delivery import CardDeliveryService
+
+            try:
+                if type(brief_cards) is not CardDeliveryService:
+                    raise ValueError('unavailable')
+                header, event = verified.payload['header'], verified.payload['event']
+                tenant = header.get('tenant_key')
+                if (type(tenant) is not str or not tenant
+                        or event['operator'].get('tenant_key', tenant) != tenant):
+                    raise ValueError('unavailable')
+                card = brief_cards.handle_callback(value['callback_id'],
+                    principal=verified.principal, destination=verified.destination,
+                    tenant_id=tenant, app_id=header['app_id'],
+                    message_id=event['context'].get('open_message_id'))
+                return {'card': raw_card(card)}
+            except Exception:
+                # Inert/spent/unknown/disabled card-v1 capabilities never fall through.
+                return {'toast': {'type': 'error', 'content': 'Brief card unavailable'}}
+        if value['callback_id'].startswith('br_'):
+            # FeishuCardSecurity is the mandatory authentication boundary. Never
+            # use action-supplied actor, tenant, chat, revision or message fields.
+            from ostag.briefs.callbacks import BriefCallbackController
+
+            try:
+                if type(briefs) is not BriefCallbackController:
+                    raise ValueError('unavailable')
+                header = verified.payload['header']
+                event = verified.payload['event']
+                tenant = header.get('tenant_key')
+                if (type(tenant) is not str or not tenant
+                        or event['operator'].get('tenant_key', tenant) != tenant):
+                    raise ValueError('unavailable')
+                card = briefs.handle_callback(
+                    value['callback_id'], principal=verified.principal,
+                    destination=verified.destination, tenant_id=tenant,
+                    app_id=header['app_id'],
+                    message_id=event['context'].get('open_message_id'),
+                )
+                return {'card': raw_card(card)}
+            except Exception:
+                # A br_ capability never falls through to monitor/relay controls.
+                return {'toast': {'type': 'error', 'content': 'Brief preview unavailable'}}
         try:
             relay = active_copilot()
             if value["callback_id"].startswith("cr_") and relay is not None:

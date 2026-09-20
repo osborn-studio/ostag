@@ -1,0 +1,30 @@
+[
+  {
+    "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/task_2e2b6631-2e6c4984",
+    "sha256": "4bf26079d198844b8d7a2f5adc39b9f08af38a52e0a535becacd8fbf1eb50ea6",
+    "files": [
+      "ostag/adapters/feishu.py",
+      "ostag/briefs/card_delivery.py",
+      "tests/test_brief_card_delivery.py",
+      "tests/test_brief_card_recovery.py"
+    ],
+    "requested_model": "gpt-6-astra",
+    "model_basis": "explicit latest user instruction: use codex",
+    "engine": "actual Codex CLI",
+    "events_file": "builder-1789611153837046000.stdout"
+  },
+  {
+    "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/task_2e2b6631-2e6c4984",
+    "sha256": "6d2fb2d982c7ea2ed04dcf6148ce95fcaf05be2e06f9278584f450c0a51585cc",
+    "files": [
+      "ostag/adapters/feishu.py",
+      "ostag/briefs/card_delivery.py",
+      "tests/test_brief_card_delivery.py",
+      "tests/test_brief_card_recovery.py"
+    ],
+    "requested_model": "gpt-6-astra",
+    "model_basis": "explicit latest user instruction: use codex",
+    "engine": "actual Codex CLI",
+    "events_file": "builder-1789612044386190000.stdout"
+  }
+]

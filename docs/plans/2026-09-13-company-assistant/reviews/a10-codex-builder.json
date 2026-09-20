@@ -1,0 +1,23 @@
+{
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a10-retention-48fe0e3e",
+  "sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+  "files": [
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/card_transport.py",
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/feishu_transport.py",
+    "ostag/briefs/openai_transport.py",
+    "ostag/briefs/retention.py",
+    "ostag/briefs/revisions.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_retention.py",
+    "tests/test_brief_revocation.py"
+  ],
+  "requested_model": "gpt-6-astra",
+  "model_basis": "explicit latest user instruction: use codex",
+  "engine": "actual Codex CLI",
+  "events_file": "builder-1789571837082941000.stdout"
+}

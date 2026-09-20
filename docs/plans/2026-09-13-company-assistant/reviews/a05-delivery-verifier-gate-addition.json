@@ -1,0 +1,7 @@
+{
+  "reason": "Independent lost begin receipt and failed losing claimant isolation probes for new card ledger",
+  "before_sha256": "a2b91f94111f2242df1a6fa2ee0f6d1232470e8c02dc3e2c1ed2e010e0f3eb56",
+  "after_sha256": "c380f1c93541d9af13ca1b0d4055adeeffef6b6afc3d7742189fd04730cc63d0",
+  "timing": "builder still running; verifier not launched; first verifier process will load amendment",
+  "probe_sha256": "e5d5b332e2fa506839edda3ce2f55132ab3a552f3b2318a64ffa2842adc2a317"
+}

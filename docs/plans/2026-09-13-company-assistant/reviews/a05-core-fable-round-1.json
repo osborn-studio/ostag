@@ -1,0 +1,58 @@
+{
+  "candidate_sha256": "e96465bb7d7e3eed22f34010bde19d5d3cba1b0e10d648bc0c3ff338ee4c1b17",
+  "base": "8c8c216dabfe977fb01351b5f659502f748cdfc2",
+  "files": [
+    "ostag/adapters/feishu.py",
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/feishu_transport.py",
+    "ostag/briefs/rendering.py",
+    "ostag/work_monitor/feishu_routes.py",
+    "tests/test_brief_cards.py",
+    "tests/test_brief_feishu_transport.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 54553,
+      "outputTokens": 22,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.054662999999999996,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 41098,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 71733,
+      "webSearchRequests": 0,
+      "costUSD": 3.48973775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 38891,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "feishu_transport._UNSAFE is far stricter than the module docstring implies: it rejects any '@', '<', '>', '`', '*', any Cf-category char (e.g. ZWJ in emoji sequences) and any 'word.word' token (e.g. 'i.e.', 'Node.js', 'St.Louis') anywhere in the frozen revision JSON. This is fail-closed and permitted by the brief, but it will make a meaningful share of legitimately A03-validated drafts undeliverable over the U01 TEXT path. Parent docs should state this breadth explicitly; consider aligning with A03's _LINK plus '<at' detection in follow-up.",
+      "rendering.render_private fails closed (RenderError 'preview page exceeds bound') rather than exceeding 16 KiB in the worst case of 128-char job_id AND revision_id consisting mostly of '_'/'-' (each defanged to ~18 ASCII-escaped bytes) combined with a full ~11000-byte page. Correct behaviour, but callers should expect that edge.",
+      "CallbackLedger.lookup takes BEGIN IMMEDIATE (write lock) solely to persist the observed highwater; every lookup therefore contends with claims/issues under the 50 ms budget. Acceptable per the documented fail-closed contention policy, but it lowers throughput of read-only replays.",
+      "The callback capability key binds job/revision ids but not a digest of the rendered draft; correctness relies on the U01 invariant that a stored revision is immutable for its revision_id. _current() re-loading and comparing the full PrivatePreview mitigates in-process, but note the assumption.",
+      "Tests rely on environment assumptions the verifier will settle: multiprocessing 'fork' context on macOS, tests-dir imports (test_brief_validation/test_brief_service helpers such as evidence()/Authority/SCOPE and the coverage gap text 'missing page'), IdentityStore.bind_private being re-callable on the same monitor.db across multiple signed_app() constructions, and pytest-asyncio/anyio auto mode for unmarked async tests.",
+      "Ruff: a handful of lines exceed 100 chars (e.g. callbacks.py controller attribute assignment, feishu_transport.py before_egress/token check, one transport-test parametrize entry) and test import lists are not isort-ordered (BriefCallbackController, CallbackLedger, CallbackError; render_private before render_group_status). Existing repo code already has >100-char lines, so this is likely not enforced, but flagging in case I001/E501 are enabled.",
+      "Scope confirmation: no auto-send card lifecycle, versioned card outbox, or device/platform acceptance is claimed; uuid is intentionally omitted from the create body; original U01 wire bytes are transmitted unchanged; adapter helper only prepares a local card and never calls send_card/reply."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a05-a271b892",
+  "source_metadata_sha256": "11911375eb7c65b62c3f626200ed896b2b1a93bc432bec14973f05927a5336fa"
+}

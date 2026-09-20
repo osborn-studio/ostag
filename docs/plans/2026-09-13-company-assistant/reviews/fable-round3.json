@@ -1,0 +1,76 @@
+{
+  "verdict": "approved_for_planning",
+  "reviewed_plan_hash": "00acda5cd1daa686c8782829be15c9333023af653e3ed9be951e864ecf70a912",
+  "scope": "第三轮规划挑战，仅评规划可执行性与内部一致性。工具关闭，未运行仓库、CI或服务器；代码事实以Codex提供的核查文本为准。评审对象为README/TASKS/VALIDATION/DEPLOYMENT/COLLABORATION/backlog.json/validate_plan.py当前文本。不要求本轮实施，不要求真实飞书或部署操作。批准仅表示规划可以进入实施，实施diff仍需逐切片独立评审。",
+  "resolved_findings": [
+    "排空闭环：D02-AC1与DEPLOYMENT第4/6步已把fresh ack、零lease、零在途放进服务器preflight，not_ready在切镜像前失败且不进入自动rollback；重触发为同一main SHA重跑，不push空提交；排空覆盖merge→CI→deploy，CI失败由操作者显式选择；每窗口只合一个PR；首次从旧镜像升级有legacy_no_brief显式bootstrap。已解除。",
+    "运行期admission：改为主机受保护目录只读bind mount的控制文件，boot_id隔离、单调generation、字段未知即off，每次接单/claim/新IO前重读，boot一律off。已解除。",
+    "R2回滚：明确强制ENABLED/HISTORY/ACTIONS/ROUTINES/SALES及admission全off，使用显式Compose恢复override并核对实际容器环境，原脚本命令仅作对照。已解除。",
+    "brief schema兼容：manifest声明可读区间、迁移只前向、旧版遇高版本只停brief域并上报degraded、同digest只读维护模式替代恢复镜像。README/A02-AC1/A11-AC3/D02-AC2/R3一致。已解除。",
+    "A2/B/C独立stage：D01限定A1 profile；D04-AC1/D05-AC1/D06-AC1各自以含新实现的候选重跑D01三项门槛；A07-AC3在目标1.0.69容器验契约，真实身份在D04验收；D04含服务器user身份OAuth全生命周期。已解除。",
+    "评测拆分：A12只承诺Q01/Q07–Q09/Q12–Q16/Q18–Q24共16情景（计数核对无误）且≥4保留变体；A2的8情景与全部6保留变体在D04用含A09候选重验，关键case各3次。已解除。",
+    "D02依赖改为P00/A02/A11，锁核对可提前；主机锁现状写明为“仓库脚本尚无证据，先核验再补全”；设施准备窗口暂不合main。已解除。",
+    "依赖漏项：A09已加A10，B02已加A08，五个flag在A11统一严格注册且未实现模块拒绝开启，后续模块分别接入。已解除（但接入的归属仍有一处新缺口，见findings F3）。",
+    "参数版本：预算集/prompt/验证规则/模型身份组成不可变参数版本进入config hash与BriefRevision；180秒为单作业总墙钟含全部重试、不重置deadline；心跳独立线程、续租失败停IO写入A02-AC2与L2。已解除。",
+    "backlog.json与validate_plan.py本轮已附；27任务/81AC与TASKS逐条比对、无环、闭包断言、本地链接检查的逻辑可读且与文档一致。"
+  ],
+  "findings": [
+    {
+      "id": "F1",
+      "severity": "medium",
+      "trigger": "D03-AC2按计划先“全部off上线”。A11-AC1规定全off不创建brief worker/DB；而DEPLOYMENT排空协议规定“若已有brief能力，缺状态即not_ready”。于是全off上线后的下一次部署（D03-AC3回滚演练、D04升级）会因为没有状态/ack文件而永久not_ready，除非状态写入器在ENABLED=false时也运行。这是本轮修订新引入的矛盾。",
+      "location": "TASKS.md A11-AC1/A11-AC2；DEPLOYMENT.md“运行期暂停的具体协议”末两段；配置表缺状态目录项",
+      "required_change": "写明：只要镜像含brief能力，状态/排空ack写入器（boot_id、control generation、admission、active lease、在途IO分项、新鲜时间）就无条件运行，与OSTAG_BRIEF_ENABLED无关；全off时上报lease=0、inflight=0、admission=off。A11-AC1改为“全off不创建brief worker/业务DB，但仍写状态文件”。配置表补OSTAG_BRIEF_STATUS_DIR（服务可写、与数据卷和控制目录分离），并声明其为主机bind mount以便preflight在容器外读取。D02故障注入用例加“全off镜像preflight可通过”。"
+    },
+    {
+      "id": "F2",
+      "severity": "medium",
+      "trigger": "A12依赖仅A06，闭包为A01–A06。但A1子集中Q24（保留到期/tombstone/备份恢复）需要A10-AC2与D02，Q18整版失效需要A10-AC1，Q21“暂停后drain受控恢复”需要A11控制文件。按现状A12在A10/A11未合入时即可宣称16情景通过，与上一轮对A12的修正原则相同。",
+      "location": "TASKS.md A12依赖与A12-AC1；backlog.json A12.depends_on；VALIDATION.md“A12只放行A1”段",
+      "required_change": "二选一并同步backlog/TASKS/validator：（a）A12 depends_on改为A06、A11（闭包自然含A10），A12成为A1批次最后一个开发任务；或（b）A12-AC1明确Q18/Q21/Q24三项在A12时点只交付用例定义与harness，实际通过证据由D01-AC3/D03-AC1在含A10/A11的合并候选上产生。无论哪种，D03-AC1增加“16情景在合并tree上重跑，关键case 3次”的措辞，避免A12阶段的绿灯被直接带到发布。validate_plan.py增加相应闭包断言。"
+    },
+    {
+      "id": "F3",
+      "severity": "medium",
+      "trigger": "TASKS开头与DEPLOYMENT规定HISTORY/ACTIONS/SALES分别在A09/B02/C02接入并复用A11严格flag测试，但A09（依赖A04/A07/A08/A10）、B02（依赖B01/A08）、C02（依赖C01/B03）的依赖闭包均不含A11，候选文件也不含config.py或tests/test_brief_flags.py。接入工作没有任何一个任务在依赖和文件范围上承接，实施时会落到D04/D05/D06“顺手改”。",
+      "location": "TASKS.md A09/B02/C02的依赖与候选文件；backlog.json对应depends_on/files；DEPLOYMENT.md开关段",
+      "required_change": "A09、B02、C02的depends_on各加A11（无环：A11依赖A05/A06/A10，均不依赖这三者）；files各加ostag/config.py与tests/test_brief_flags.py，保持≤5个（A09为5个，B02需去掉fixtures或合并到测试文件，C02为5个）。B04已依赖A11，只需补files。validate_plan.py增加assert A11 in closure('A09')/('B02')/('C02')。README“A2开发不必等待A1整段试点”不受影响，因A11在试点之前。"
+    },
+    {
+      "id": "F4",
+      "severity": "medium",
+      "trigger": "第3步排空、第8步“恢复admission”、R1停用与R3维护模式都要求操作者写主机/etc/ostag/brief-control。但DEPLOYMENT同时规定保持固定命令SSH入口、不打开任意shell、不能从普通shell绕过wrapper，且可核验命令只列了preflight。控制文件的写入/查看命令没有进入受信运维路径。",
+      "location": "DEPLOYMENT.md“可核验命令”“服务器互斥”“运行期暂停的具体协议”；TASKS.md D02-AC1/AC3",
+      "required_change": "D02增加受信运维命令（wrapper子命令或已验证的操作者登录路径）：brief-control show / set admission=on|off maintenance=on|off，自动填入当前boot_id并递增generation，在同一主机锁内原子rename写入；变更涉及PRODUCTION_SSH_WRAPPER_SHA256时按现有规则同步。DEPLOYMENT第3/8步、R1、R3改为引用该命令，不再泛称“操作者写入”。"
+    },
+    {
+      "id": "F5",
+      "severity": "low",
+      "trigger": "配置表保留OSTAG_BRIEF_ADMISSION_ENABLED并称其为“启动安全默认值”，同时规定“每次boot一律off”“环境变量不能跨boot恢复on”。一个只能为false的开关没有语义，A11统一注册时会产生“true到底是拒绝、忽略还是生效”的实现分歧。",
+      "location": "DEPLOYMENT.md开关表；TASKS.md A11-AC1",
+      "required_change": "删除该变量，或明确“A11严格注册时值为true即启动失败/拒绝”。推荐删除，admission只由控制文件决定。"
+    },
+    {
+      "id": "F6",
+      "severity": "low",
+      "trigger": "TASKS“才形成PR”未写PR目标分支；COLLABORATION只对osstack自动合回规定integration分支。若A01等任务的PR直接合main，会在D02锁安装前触发自动部署，违反“锁未证明时不得部署本次功能，即使开关off”。",
+      "location": "TASKS.md通用完成段；COLLABORATION.md循环段；DEPLOYMENT.md第6步",
+      "required_change": "一句话写明：A/B/C阶段任务PR目标为专用integration分支（受同样CI），main只在每个发布窗口接收一个由D02安装锁之后创建的release PR。"
+    }
+  ],
+  "implementation_gates": [
+    "G1（A11/D02）：状态/ack写入器与ENABLED解耦并有独立主机可读目录；D02故障注入必须包含“全off镜像preflight通过”“有brief能力但缺状态文件not_ready”“legacy_no_brief仅对无brief消费者的旧版成立”三组用例，否则D03不得开始。",
+    "G2（A12/D03）：A12不得在A10/A11未进入同一候选tree时报告Q18/Q21/Q24通过；D03-AC1证据必须包含合并tree上16情景重跑与关键case 3次的实际运行记录。",
+    "G3（A09/B02/C02）：各自PR的diff中必须含config.py注册接入与tests/test_brief_flags.py的复用用例；未接入的profile在A11注册表中保持“拒绝开启”，D04/D05/D06不接受在发布任务里顺手接线。",
+    "G4（D02）：控制文件读写命令进入受信运维路径并完成hash同步；D03第8步“恢复admission”只能通过该命令执行，且演练留boot_id/generation/ack时间证据。",
+    "G5（所有阶段）：任务PR只合integration分支；main每窗口一个release PR，且在D02锁/preflight脚本安装并核验之后。validate_plan.py同步补F2/F3闭包断言，backlog与TASKS修改后重跑通过。"
+  ],
+  "non_blocking_notes": [
+    "A12-AC1“18开发+6独立保留变体”与VALIDATION“Q编号不自动指定holdout、operator选取独立变体”可读为两种关系（24情景划分为18/6，或24情景每个有开发用例、另有6个私有变体）。数值上两种读法都自洽，建议写死一种，便于A12 harness定义split。",
+    "工程SLO“500消息内P95≤180秒”与180秒硬超时相等，若失败不计入分母则该指标恒成立。建议P95目标低于硬超时（如120秒）或明确失败计入。",
+    "成本“每任务上限/每日上限”只出现在VALIDATION，未进入预算参数集或配置表。建议纳入参数版本或OSTAG_BRIEF_GRANTS_FILE/模型配置，并在A03-AC3“有预算”中显式包含。",
+    "validate_plan.py当前只检查文件路径在TASKS中出现，不检查file_status与TASKS的existing/new标注一致；可加一条断言，成本极低。",
+    "A07-AC1在L0/L1层验证凭据生命周期只能依赖mock凭据服务，建议在A07候选文件或VALIDATION注明这一点，避免与D04真实OAuth验收混淆。",
+    "本轮结论基于Codex提供的源码核查文本；关于server.py lifespan接线、MonitorStore拒绝降级、RunLedger receipt持久化、部署脚本与wrapper现状，我未独立核实。"
+  ]
+}

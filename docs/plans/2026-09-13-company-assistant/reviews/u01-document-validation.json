@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "checked_at_utc": "2026-09-14T14:43:39.960292+00:00",
+  "command": "TMPDIR=<external-task-temp> .venv/bin/python -m pytest -q tests/test_secret_hygiene_script.py",
+  "passed": 4,
+  "seconds": 4.9,
+  "evidence_origin": "actual exec session 80052 tool output after U01 documentation and all three Fable receipts were written",
+  "scanner_rules_unchanged": true,
+  "platform_calls": "none"
+}

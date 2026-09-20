@@ -1,0 +1,15 @@
+{
+  "candidate_sha256": "c32f0c6bb287cee9f6221724ae28a50d159192bf231df74ebacedf6c6863b544",
+  "review_note": "Kimi non-blocking suggestion to reject colon in principal.platform explicitly",
+  "disposition": "not applicable: Principal and Brief _principal already restrict platform to the fixed allowlist; no product patch needed",
+  "evidence": {
+    "normal_principal_constructor": "rejected",
+    "forged_exact_principal_revalidated_by_snapshot": "rejected"
+  },
+  "source_sha256": {
+    "ostag/core/identity.py": "d938aad77a29253dc37b87eb574f3df1749f5c0a709ec7660b9fe8b144e9b89c",
+    "ostag/briefs/models.py": "328872e812cea5d3d3427573abbf17fd3fe1912bd7e78f98f2bc45e5f8aca5a5",
+    "ostag/briefs/authority.py": "edd1981d12882406715cd83ad3518afc5b0ef0ab43bf97bc50778ad1ebd35f12"
+  },
+  "scope": "Parent executed this supplemental deterministic check; original Kimi receipt is unchanged"
+}

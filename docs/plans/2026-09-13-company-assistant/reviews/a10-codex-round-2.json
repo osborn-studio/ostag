@@ -1,0 +1,36 @@
+{
+  "candidate_sha256": "a486541e1336cfef1a565acc4e59dc47d7537e13eaacedfd0688cc5eccb7f6bc",
+  "base": "a9360fbd2ae67e6931bc47c22bc4215e23c24b95",
+  "files": [
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/retention.py",
+    "ostag/briefs/revisions.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_retention.py",
+    "tests/test_brief_revocation.py"
+  ],
+  "reviewer": "independent actual Codex CLI",
+  "requested_model": "gpt-6-astra",
+  "events_file": "codex-review-1789563756775444000.stdout",
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/service.py",
+        "issue": "[P1] BriefService.authorize_current still performs blocking retention I/O after its last current source, grant and destination lookups. Its subsequent checks inspect captured freshness/expiry timestamps and cancellation only. They cannot detect an ACL removal, grant revocation/replacement or private-destination change occurring during the retention transaction wait. Consequently generation can authorize subsequent provider egress or completion using stale original authority. The combined authorization ordering repair applied to downstream services must also cover these mutable generation permissions; retaining their earlier deadlines does not cover revocation.",
+        "reproduction": "Static reproduction, not executed: register a job with retention expiry t=60 and source/grant expiry beyond t=10. At t=9, let the final generation authorize_current pass its source/grant lookups. Have another connection hold BEGIN IMMEDIATE on the retention ledger until this call encounters contention. Remove the source from the trusted ACL mirror, or replace its grant with a revoked grant, then release the writer within 50 ms. Leave retention authorized and do not invoke coordinator revocation. The retention check succeeds; final_now checks the previously captured objects, and stopped remains false. Authorization therefore returns successfully to the count/create egress checkpoint or completion precommit despite the original permission having been revoked."
+      }
+    ],
+    "notes": [
+      "Static review of the supplied candidate only; no tools, tests or external model calls were run.",
+      "The downstream combined-authority ordering repair addresses the prior reported finding. Native Linux runtime acceptance remains unverified; Linux requires libc statx and filesystem STATX_BTIME support."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a10-retention-02a92819",
+  "review_effort": "high",
+  "source_metadata_sha256": "66b92c3f15a4cf80dfcec1508dcef69b96ffde32388512f1964f5378939ffaad"
+}

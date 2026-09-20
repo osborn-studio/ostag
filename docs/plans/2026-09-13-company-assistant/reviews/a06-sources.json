@@ -1,0 +1,11 @@
+{
+  "basis": "Frozen A06 AC and inspected current local contracts; no new external API in this slice",
+  "base": "cfcf230",
+  "local_files_sha256": {
+    "ostag/briefs/store.py": "eb03b2dc1bf21799c11d25ca0cf333e07642a59d28443e58266df684f38de698",
+    "ostag/briefs/rendering.py": "a838ab4b1b4a0e72d8b460e8f43ef6611d266219f0daa45d42a5d84b0874e894",
+    "ostag/briefs/card_delivery.py": "be4aa0c22529fc2a57d8f8704eec81a6d77c0303be28e15ed6c6a17a8eefcc70",
+    "ostag/briefs/service.py": "a809dc95ae13e9dd7c6846bc7cf5ec082d5a911d9da3af31fbbe584a8b1b160b",
+    "docs/plans/2026-09-13-company-assistant/TASKS.md": "993dccb74090d2b953cc216cb82d78317e522b780dfafda7e4a4298b7e226baf"
+  }
+}

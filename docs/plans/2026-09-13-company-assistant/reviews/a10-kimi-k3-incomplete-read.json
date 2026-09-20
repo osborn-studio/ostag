@@ -1,0 +1,34 @@
+{
+  "candidate_sha256": "51707a4390814a396785c0204463c3acb227b6524cdc234aeec506e0df01d792",
+  "requested_model": "kimi-code/k3",
+  "configured_provider": "managed:kimi-code",
+  "configured_model": "k3",
+  "engine": "actual Kimi Code CLI",
+  "mode": "read-only independent audit and supplied verification evidence review",
+  "verdict": {
+    "candidate_sha256": "51707a4390814a396785c0204463c3acb227b6524cdc234aeec506e0df01d792",
+    "verdict": "inconclusive",
+    "blockers": [
+      {
+        "file": "ostag/briefs/store.py",
+        "issue": "Incomplete review scope caused by tooling failure, not by a code defect: the Read tool repeatedly returned only lines 1-1000 of this 2155-line file. Every attempt to pass line_offset/n_lines pagination parameters was ignored (the parameter was dropped from the executed call and the identical first-1000-line result was returned 5+ times). Lines 1001-2155, which contain admit/cancel/claim_one/cost settlement/delivery accept paths central to the A10 fence, cost custody and retirement verification review, could not be read.",
+        "reproduction": "Invoke Read on .../candidate-51707a/ostag/briefs/store.py with line_offset=1001; the tool returns lines 1-1000 with 'Max 1000 lines reached' regardless of the offset parameter."
+      },
+      {
+        "file": "tests/test_brief_retention.py, tests/test_brief_revocation.py, ostag/briefs/openai_transport.py, ostag/briefs/feishu_transport.py, ostag/briefs/card_transport.py, ostag/briefs/rendering.py, ostag/briefs/validation.py, ostag/briefs/grants.py, ostag/briefs/generation.py, codex-review-1789565527572214000.receipt.json, and all supplied evidence files (target/full/parent stdout, linux-tests-passed.json, linux-full-tests.stdout, linux-parent-gates.json)",
+        "issue": "Not yet read. Because the mandated scope includes both test files, all unchanged transport/grants/generation contracts, the prior Codex receipt and the deterministic evidence, I cannot confirm or refute the two alleged unresolved findings (actual HTTPX connect/DNS/TLS wait occurring before private provider body egress; card ACK credential rotation during the retention wait), cannot verify the evidence belongs to this candidate hash, and cannot distinguish the supplied local synthetic test results from production acceptance. Per the audit rules I may not claim a partial-file skim is a full review, so no approval or changes_requested verdict is supportable.",
+        "reproduction": "Attempted sequential reads exhausted the session on repeated store.py pagination failures before these files could be opened."
+      }
+    ],
+    "notes": [
+      "What was fully read: manifest.json (all 99 lines), prompt.md (19 lines), authority-fence.md (41 lines), and complete files callbacks.py (376), service.py (425), retention.py (868), card_delivery.py (872), delivery.py (740), revisions.py (668), worker.py (413), plus store.py lines 1-1000 of 2155.",
+      "Static observations from the fully-read portion (NOT a verdict basis): the current candidate visibly restructures the composed authorization point versus the ordering defect described in authority-fence.md - check_guard(guard) performs the bounded durable retention read first, then invokes the original nonblocking current mirror via the authorize= hook, then applies the captured minimum-deadline/clock fence in _finish/_check without further successful-path retention I/O (retention.py:410-470, 599-617, 687-718). This pattern is consistently applied at callbacks.py:304-307, card_delivery.py:643-646 and the post-commit navigation rechecks (card_delivery.py:862-872), delivery.py:461-471 (before_egress/acceptance policy composition), and revisions.py:462-478 plus the post-render _fresh recheck at revisions.py:572-576. This matches the fence.md requirement that retention I/O precede the final original mirror, but I could not verify it against tests or the transport contracts.",
+      "The card ACK credential-rotation allegation could not be assessed: card_delivery.py acknowledge() (lines 529-553) checks check() (which includes the retention guard and original authorize mirror) after the receipt UPDATE and before commit, and CardCreateAck carries a credential_digest field (line 250), but the actual transport behavior in card_transport.py/feishu_transport.py (unchanged contracts) was never read, and the prior Codex receipt defining the exact claim was never read.",
+      "The HTTPX connect/DNS/TLS wait allegation could not be assessed: openai_transport.py and generation.py were never read. I make no claim about AsyncClient.__aenter__ or any transport internals.",
+      "Evidence files were never opened; nothing in this review validates that target-tests/full-tests/parent-gates/linux outputs correspond to candidate 51707a. All supplied test evidence is stated by the task to be local synthetic; no production/remote-platform acceptance is claimed or evaluated here.",
+      "To unblock: re-run this audit in a session where Read pagination (line_offset) functions, or supply store.py lines 1001-2155 and the unread packet files in <=1000-line chunks as separate paths. A complete re-review of the full specified scope is required before any approved/changes_requested verdict can be issued."
+    ]
+  },
+  "packet": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-retirement-fence/kimi-k3/candidate-51707a",
+  "events_file": "audit-51707a.stdout"
+}

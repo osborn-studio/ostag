@@ -1,0 +1,55 @@
+{
+  "candidate_sha256": "ac08e38f82556723e287e1d6be3d77791341e955f7a71fc4933abee144fc5ebe",
+  "base": "74fda396f18ed13a89ad982215896d1eff05219f",
+  "files": [
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/store.py",
+    "tests/test_brief_delivery_observation.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 66907,
+      "outputTokens": 22,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.067017,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 17730,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 92030,
+      "webSearchRequests": 0,
+      "costUSD": 2.72727775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 16519,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Custody repair verified statically at both layers: service only calls _unknown when this operation's own begin_delivery/begin_delivery_observation returned a claim (attempt/observation stay None on StoreBusy loops, timeout/stop/cancel during lock wait, lost COMMIT response, or failing status read), and store.delivery_unknown/_accept_delivery/check_delivery_egress require matching owner_id + opaque token for send or an unsettled owned (owner, token, candidate, ordinal) read record for observation. Loser diagnostics with stale/wrong/missing token or another reader's unit raise Conflict before any UPDATE; first_failure remains COALESCE-immutable and send_unverified is committed with the claim before IO.",
+      "Send fence not relaxed: claim is a single UPDATE ... WHERE state='pending' under BEGIN EXCLUSIVE with random token; check_delivery_egress requires state='started' + token, so a post-note 'unknown' row can never re-enter egress; begin_delivery returns None (never a new token) on started/unknown/accepted rows across handles/processes.",
+      "Non-blocking design weakness: the second, synchronous before_egress gate inside the transport uses the nonwaiting (timeout=0) transaction with no retry, so a benign concurrent reader/writer at that instant raises StoreBusy through the adapter and is recorded as a permanent 'transport_error'/unknown with no IO. Within the spec's 'once started, conservatively unknown' rule, but operationally lossy; the parent's real-contention gate could be sensitive to this if contention is not injected only into the loser.",
+      "Diagnostic labelling: Conflict/StoreBusy raised by the in-transport egress closure (e.g. outbox cancelled after adapter await) is sanitized as 'transport_error', and non-REASONS service failures ('conflict') are recorded as 'store_error'. Fixed/sanitized and private-free, but the stored reason can misdescribe a local cancellation as transport IO.",
+      "Minor: delivery_unknown returns early on provider_accepted without settling the observation unit (budget already spent, harmless); begin_* custody lost to a post-transaction op.check() failure leaves a started row/spent read unit with no diagnostic, matching the documented conservative boundary.",
+      "Privacy/chaining: all DeliveryError raises occur outside except blocks; _delivery_transaction rethrows a freshly built StoreError after the finally so SQLite text/context is dropped; policy/clock/callback exceptions (incl. CancelledError and malformed DeliveryError args) collapse to fixed codes.",
+      "Schema: enable_delivery builds 2->3->4 explicitly, constructor still stops at 2, enable_manual at 3; exact-DDL _inspect, DELETE/FULL/EXCLUSIVE preserved on the new nonwaiting path; _cost_schema accepts 2/3/4; old rows untouched. The pinned-old-binary test depends on git commit 5e2e79b... being reachable in the worktree history.",
+      "Limitations honestly retained: no HTTP/Feishu adapter, no uuid-lookup claim, no ID recovery for an entirely lost response, provider_accepted never implies human receipt; tests are synthetic fakes and cannot certify platform delivery."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-u01-79affd7e",
+  "source_metadata_sha256": "407801c84bf4917b93c9d559b407527902470ea4dca18195ddddcc4a32515ad0"
+}

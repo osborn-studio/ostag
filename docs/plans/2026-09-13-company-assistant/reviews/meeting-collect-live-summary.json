@@ -1,0 +1,217 @@
+{
+  "product_files": {
+    "ostag/main.py": "648b68f3cac224bb9a368ee88185976dff2c89b8bdebeb630237be607edc959e",
+    "ostag/briefs/meeting_collect.py": "85bb480a52b6495037831331665a3df675ed8c8a71483392e50afa5a1ab92b81",
+    "ostag/briefs/meeting_io.py": "4971a593b30c1b4dc63fc8c3ba78bfd9be19d8a81a83c1c2717fa672af50961e"
+  },
+  "runs": [
+    {
+      "label": "7day",
+      "window": {
+        "start": "2026-09-13T07:00:00Z",
+        "end": "2026-09-20T07:00:00Z",
+        "display_timezone": "America/Los_Angeles"
+      },
+      "exit_code": 3,
+      "status": "needs_input",
+      "facts": 0,
+      "sources": 0,
+      "coverage": {
+        "github:pulls": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 12,
+          "records_included": 0,
+          "records_excluded": 12,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {
+            "outside_window": 12
+          }
+        },
+        "github:issues": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 0,
+          "records_included": 0,
+          "records_excluded": 0,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {}
+        },
+        "github:issue_comments": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 0,
+          "records_included": 0,
+          "records_excluded": 0,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {}
+        },
+        "github:commits": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 0,
+          "records_included": 0,
+          "records_excluded": 0,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {}
+        },
+        "github:releases": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 4,
+          "records_included": 0,
+          "records_excluded": 4,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {
+            "outside_window": 4
+          }
+        },
+        "feishu": {
+          "pages_received": 0,
+          "pages_included": 0,
+          "pages_excluded": 0,
+          "records_received": 0,
+          "records_included": 0,
+          "records_excluded": 0,
+          "facts_included": 0,
+          "exhausted": false,
+          "withheld": false,
+          "reasons": {
+            "feishu_scope_missing": 1
+          }
+        }
+      },
+      "gaps": [
+        {
+          "partition": "feishu",
+          "reason": "feishu_scope_missing"
+        }
+      ],
+      "github_verified": true,
+      "tip_sha": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
+      "elapsed_seconds": 7.539668374985922,
+      "json_sha256": "3042575b53dc45ed107e6bbd2572d492d6fcfc111e8e836014805440212f6870"
+    },
+    {
+      "label": "30day-control",
+      "window": {
+        "start": "2026-08-21T07:00:00Z",
+        "end": "2026-09-20T07:00:00Z",
+        "display_timezone": "America/Los_Angeles"
+      },
+      "exit_code": 3,
+      "status": "needs_input",
+      "facts": 8,
+      "sources": 4,
+      "coverage": {
+        "github:pulls": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 12,
+          "records_included": 2,
+          "records_excluded": 10,
+          "facts_included": 6,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {
+            "outside_window": 10
+          }
+        },
+        "github:issues": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 2,
+          "records_included": 0,
+          "records_excluded": 2,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {
+            "pr_in_issues_partition": 2
+          }
+        },
+        "github:issue_comments": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 0,
+          "records_included": 0,
+          "records_excluded": 0,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {}
+        },
+        "github:commits": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 2,
+          "records_included": 2,
+          "records_excluded": 0,
+          "facts_included": 2,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {}
+        },
+        "github:releases": {
+          "pages_received": 1,
+          "pages_included": 1,
+          "pages_excluded": 0,
+          "records_received": 4,
+          "records_included": 0,
+          "records_excluded": 4,
+          "facts_included": 0,
+          "exhausted": true,
+          "withheld": false,
+          "reasons": {
+            "outside_window": 4
+          }
+        },
+        "feishu": {
+          "pages_received": 0,
+          "pages_included": 0,
+          "pages_excluded": 0,
+          "records_received": 0,
+          "records_included": 0,
+          "records_excluded": 0,
+          "facts_included": 0,
+          "exhausted": false,
+          "withheld": false,
+          "reasons": {
+            "feishu_scope_missing": 1
+          }
+        }
+      },
+      "gaps": [
+        {
+          "partition": "feishu",
+          "reason": "feishu_scope_missing"
+        }
+      ],
+      "github_verified": true,
+      "tip_sha": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
+      "elapsed_seconds": 7.393535250041168,
+      "json_sha256": "c032594f74c8854b259f66c0e35d70bf2fe389d86c9c22d02ace68cf71854c5d"
+    }
+  ],
+  "feishu_auth_probe": "keychain_unavailable; no chat read; no credential changes",
+  "private_raw_content_sent_to_models": false
+}

@@ -1,0 +1,6 @@
+{
+  "finding": "Delayed thread captures ready_to_apply; another thread applies and acknowledges applied; delayed thread resumes and appends applying, downgrading terminal ledger state.",
+  "probe": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay/parent_monitor_terminal.py",
+  "observed": "AssertionError: Delayed ready replay downgraded applied receipt",
+  "required": "Revalidate durable command state and latest receipt before publishing applying. Coordinate the final read/publication with command ACK ownership in this service; no terminal downgrade, and no new command/ledger event for replay. Keep original pending lost-ACK recovery. Add deterministic regression using real SQLite/RunLedger."
+}

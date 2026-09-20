@@ -1,0 +1,164 @@
+{
+  "scope": "planning and read-only baseline only",
+  "base_sha": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
+  "pytest": {
+    "command": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag/.venv/bin/python -m pytest -q",
+    "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-upgrade-plan",
+    "passed": 1121,
+    "warnings": 11,
+    "duration_seconds": 21.63,
+    "exit_code": 0,
+    "python": "3.13.13",
+    "fresh_locked_environment": false
+  },
+  "ruff": {
+    "command": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag/.venv/bin/python -m ruff check ostag tests",
+    "result": "All checks passed",
+    "exit_code": 0
+  },
+  "osstack": {
+    "version": "0.19.0",
+    "doctor_ok": true,
+    "existing_tasks": 13,
+    "daemon_checked": false,
+    "loop_started": false
+  },
+  "lark_cli": {
+    "host_version": "1.0.56",
+    "dockerfile_version": "1.0.69",
+    "host_history_order_flag": "--order",
+    "live_calls": false
+  },
+  "not_run": [
+    "Python3.11 locked installation",
+    "release_check",
+    "container smoke",
+    "production health/SSH",
+    "Feishu live read/write",
+    "new feature tests",
+    "deploy"
+  ],
+  "plan_structure_validation": {
+    "status": "passed",
+    "tasks": 27,
+    "acceptance_items": 81,
+    "acyclic": true,
+    "release_dependency_closures": "passed",
+    "local_links": "passed",
+    "implementation_verified": false,
+    "whitespace": "passed"
+  },
+  "original_workspaces": [
+    {
+      "name": "OStag",
+      "clean_at_final_check": true
+    },
+    {
+      "name": "OStag-console",
+      "clean_at_final_check": true
+    },
+    {
+      "name": "OStag-company-m0",
+      "clean_at_final_check": true
+    },
+    {
+      "name": "OStag-pr-evidence",
+      "clean_at_final_check": true
+    },
+    {
+      "name": "OStag-deploy-ingress",
+      "clean_at_final_check": true
+    }
+  ],
+  "remote_main_rechecked": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
+  "artifacts_only": true,
+  "product_files_modified": false,
+  "git_push_merge_deploy": false,
+  "final_plan": {
+    "files": {
+      "README.md": "0e8e95b24374845e04217731d1f3872ee6b00c45fcf14c531189cee92a921853",
+      "TASKS.md": "352bac34f0b658d5c94aebc1d7608b52b430886c28a17e097e3add38ccddebaf",
+      "VALIDATION.md": "3fc6ff4c286cf04e67814097bc33885f84495fc414cf873e7adfbb635e889fd6",
+      "DEPLOYMENT.md": "a929bfb7e7761dc24a8386b9829d82dfe38f360a356f1af563c28749e2eb166b",
+      "COLLABORATION.md": "22fadad38ad33ce24d23e2edf2ae3fdfe4c0950d12fac7954c6a07ec654ad8ff",
+      "backlog.json": "ec0b2b23ff8a6c51530ae34222341446b818a007b16f4486cb41e435668c13c7",
+      "validate_plan.py": "77787f564c713d94afdca6401eb02e931cc1dd9ad7e82d6c689d83f2e1a6151f"
+    },
+    "plan_hash": "0074c3000e631a4c12d2c9df6eb8f79a86f2b98b8da0f8adcee57827bf517899",
+    "fable_rounds": 4,
+    "last_review_verdict": "approved_for_planning",
+    "last_reviewed_hash": "865fd8f86c29adcff88aa2fb814d1965765b6e969513bfce35c85352841daddb",
+    "codex_post_review_adoptions": [
+      "F7",
+      "F8",
+      "F9",
+      "F10"
+    ],
+    "post_review_adoptions_fable_rereviewed": false
+  },
+  "meeting_enhancement": {
+    "date": "2026-09-13",
+    "scope": "planning documents and read-only research",
+    "ostag_main": "b73dc1d9709a4924b7928b8d7ebe9ef171720ff4",
+    "upstream_base": "2689b07c50095974e224468fd1fb0f89d8c3c621",
+    "upstream_head": "3a3136dcb8395b6dda6c872a8398d21a70935a23",
+    "upstream_commits": 59,
+    "upstream_files": 199,
+    "upstream_checkout_verified": true,
+    "visible_organization_repositories": 12,
+    "visible_organization_repositories_private": 12,
+    "organization_exhaustiveness_proved": false,
+    "private_repository_business_content_read": false,
+    "feishu_live_read": false,
+    "new_product_tests_run": false,
+    "prior_baseline_tests_are_not_new_feature_evidence": true,
+    "code_modified": false,
+    "deployment_executed": false,
+    "tasks": 40,
+    "acceptance_items": 120,
+    "meeting_scenarios": 24,
+    "public_sources": "SOURCES.md",
+    "previous_plan_preserved_outside_repo": true,
+    "raw_source_digests": {
+      "upstream-compare.json": "426d398c5e8f0f2124158e4cf724577b3ce4bb500eedb16886bf420d6f8cd0e3",
+      "upstream-commits.json": "d8c10bdc0be4ce59277893de296f82cff0950c95d9666e634ef21d10e9eb8f5f",
+      "upstream-releases.json": "52d7c7f1c85d9a46d2cba7b98e50a1352c54ddb7ae8a5a64a611c460f446bb15",
+      "organization-repositories.json": "2f487227908a636cbf88755cc693266dcc5f2729e615d07060e2ac8174e22030"
+    },
+    "validation": {
+      "status": "passed",
+      "tasks": 40,
+      "acceptance_items": 120,
+      "acyclic": true,
+      "release_dependency_closures": "passed",
+      "local_links": "passed",
+      "implementation_verified": false
+    },
+    "final_file_hashes": {
+      "README.md": "758e1822ea34bac5251351a3f635241fbf63838ea85276c381a46e5fb192fe12",
+      "MEETING-PREP.md": "43c8d2d160962696bb4847228f74b4abde32e28ff12adbe493119c1aa09bfa61",
+      "UPSTREAM-SYNC.md": "55a356d1604df40047b6755435bfabc1378eb2916b959eb16f355cb672fb8625",
+      "TASKS.md": "b4903826916a4a615e64628932d89da3bbd934b45277d8f5d5cdd3fcc72e876e",
+      "VALIDATION.md": "e650f48209bd2b5574b6227b7260c7b546f4166b0b9c29e40e962ac9ca0ae29d",
+      "DEPLOYMENT.md": "c138aefca0c96d6f42aab8caa1a7b940f98baa3ee47870162cb00c01eaa9fb20",
+      "COLLABORATION.md": "d660b5b42bcc3901643333e5c8609d8e998a31e5c0e496bbed89b83ff537b3af",
+      "DEVELOPMENT-START.md": "0befaa1e20f383305bc66d44166338d55e11eece9941d6965449ed0a4e9457f9",
+      "SOURCES.md": "d2a6e2ffb5d7c6c350b4c0a0da265d2e2574022cb86ad40e5369f2037793c9e3",
+      "backlog.json": "ab46aa2e1328821c419c877f3ebb589decb0aed3f238e220ff0e72b1cb56f40b",
+      "upstream-delta.json": "b0d8071f72fc404c05fd1933cb2ff5b7b70ed62a40f482459e0b916d4804cad6",
+      "validate_plan.py": "77930f042b41d499f2d39da9f34adb60b26efc57d5be98e9b48b430e577b9dc2"
+    },
+    "final_plan_hash": "569f90c4d1c239b1e6badfd61d68a5c175fa18f04bc1bfc1f98d0c4f2d80170c",
+    "fable_rounds": 2,
+    "last_verdict": "approved_for_planning",
+    "post_review_clarifications_by": "Codex, not rereviewed by Fable",
+    "whitespace": "passed"
+  },
+  "coding_execution": {
+    "record": "execution.json",
+    "narrative": "EXECUTION.md",
+    "code_commit": "c740aa250567e45546df3c97af6b9ceeb253b05e",
+    "scope": "A01 verified locally; no production release",
+    "historical_sections_remain_planning_snapshots": true
+  }
+}

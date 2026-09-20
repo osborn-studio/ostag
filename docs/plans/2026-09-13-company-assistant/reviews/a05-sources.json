@@ -1,0 +1,20 @@
+{
+  "retrieved": "2026-09-14",
+  "official_docs": [
+    "https://open.feishu.cn/document/server-docs/im-v1/message/create",
+    "https://open.feishu.cn/document/server-docs/im-v1/message/get"
+  ],
+  "docs_extraction": "create title only; get timed out; local locked official lark-oapi SDK provides structural fields, not platform acceptance",
+  "sdk_files_sha256": {
+    "create_message_request_body.py": "6c90376fc65655f6ccaa07675d84aa56ab5334e698c7528146aa1163b29d3c1f",
+    "create_message_request.py": "bd0ba6fba560c6ae2eb3dfa7b5dd24d28a132428124dd7a1f7c5b85184b4a854",
+    "create_message_response_body.py": "ee4a6236a44be653959813f14cca95a8a2362df7ed932b4b7c036467f630ce58",
+    "get_message_request.py": "6e26847c2b69f5b6c30377d56dedcf60ea536463e7fb882a9e935de4b887b335",
+    "get_message_response_body.py": "5d6339075c51477bd507b9a30f7cd373065b89ad4da3f56ab7b9c8276215c5d1",
+    "message.py": "2fbe278043cd035cb2077cf2c7554888640fe79bfbb18d19d8a98684fe32caae",
+    "sender.py": "3fe4e9fd66e5be87080960b2b348c263206785a48a872958b775e524876f9240",
+    "message_body.py": "71c753dfe1ee994b7aa6246e51b2a8e4e6ffd359c903c2e6b1c2655db9ac8f49"
+  },
+  "cli_schema": "im.message.* invalid resource; im.messages.create/get absent; use documented shortcuts or SDK. No live API calls performed.",
+  "limits": "No verified retention guarantee, read receipt, current remote identity, or client plain_text autolink guarantee."
+}

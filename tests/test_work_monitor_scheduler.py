@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
@@ -263,6 +264,38 @@ async def test_legacy_outbox_is_suppressed_and_audited(tmp_path):
     assert any(r["event_type"] == "notification_suppress" for r in scheduler.ledger._read_all())
 
 
+async def _await_real_lease_renewal(
+    store, owner: str, after: datetime, delivery: asyncio.Task, *, timeout: float = 5.0
+) -> datetime:
+    """Block until ``owner``'s heartbeat actually writes a lease beyond ``after``.
+
+    Observes the real ``notification_outbox`` row the running scheduler renews,
+    so the fencing assertion runs only once a genuine renewal by that owner has
+    been persisted, instead of assuming it landed inside an arbitrary sleep
+    window. Bounded by ``timeout``, and fails fast if the delivery it is
+    waiting on already ended.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        with store.connect() as db:
+            row = db.execute(
+                "SELECT lease_until FROM notification_outbox "
+                "WHERE lease_owner=? AND state='pending' ORDER BY rowid LIMIT 1",
+                (owner,),
+            ).fetchone()
+        if row is not None and row["lease_until"]:
+            renewed = datetime.fromisoformat(row["lease_until"])
+            if renewed > after:
+                return renewed
+        if delivery.done():
+            delivery.result()
+            raise AssertionError("delivery finished before the lease was renewed")
+        if loop.time() >= deadline:
+            raise AssertionError(f"owner {owner} did not renew the delivery lease")
+        await asyncio.sleep(0.002)
+
+
 @pytest.mark.asyncio
 async def test_lease_renewal_fences_second_owner_and_increments_cursor_once(tmp_path):
     store, identities = setup(tmp_path)
@@ -283,16 +316,25 @@ async def test_lease_renewal_fences_second_owner_and_increments_cursor_once(tmp_
     await first.tick(drain=False)
     with store.transaction() as db:
         db.execute("DELETE FROM notification_outbox WHERE payload LIKE '%digest.%'")
-    delivery = asyncio.create_task(first.drain_once())
-    await entered.wait()
-    now[0] += timedelta(minutes=1)
-    await asyncio.sleep(0.06)
     second = WorkMonitorScheduler(
         store, identities, {"feishu": sender}, clock=lambda: now[0], lease_seconds=0.15
     )
-    assert await second.drain_once() is False
-    release.set()
-    assert await delivery is True
+    delivery = asyncio.create_task(first.drain_once())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        now[0] += timedelta(minutes=1)
+        # The original claim lease has now expired on the shared clock; only a
+        # real heartbeat renewal can still fence the competing owner out.
+        renewed = await _await_real_lease_renewal(store, first.owner, now[0], delivery)
+        assert renewed > now[0]
+        assert await second.drain_once() is False
+        release.set()
+        assert await delivery is True
+    finally:
+        release.set()
+        delivery.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await delivery
     assert len(sender.sent) == 1
     with identities._connect() as db:
         assert db.execute("SELECT delivery_cursor FROM monitor_subscriptions").fetchone()[0] == 1

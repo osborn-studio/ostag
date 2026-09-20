@@ -1,0 +1,7 @@
+{
+  "finding": "Lost-ACK ready_to_apply recovery adopts an existing command rebound to another actor; applying replay checks alone are insufficient.",
+  "source_sha256": "9c624e1a43f15a19f1f17ad8a99c9f8e35d4b3993633ec7cd7a6d4832c6eb017",
+  "probe": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-monitor-replay/parent_monitor_probe.py",
+  "observed": "AssertionError: Lost-ACK ready receipt accepted a command rebound to another actor",
+  "required": "Validate the exact owned durable command on every reuse path, including ready_to_apply recovery, before publishing any new ledger event; preserve original valid lost-ACK recovery."
+}

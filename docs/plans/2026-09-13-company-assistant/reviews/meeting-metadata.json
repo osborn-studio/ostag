@@ -1,0 +1,82 @@
+[
+  {
+    "round": 1,
+    "requested_model": "claude-fable-5-1",
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 3151,
+        "outputTokens": 24,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.003271,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 4496,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 7415,
+        "webSearchRequests": 0,
+        "costUSD": 0.37312,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 2113,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "duration_ms": 85160,
+    "is_error": false,
+    "raw_response_sha256": "dfb02486835ecabdbfb9ec34feb98bfaa8c01eb68358a0d9ac1cfcc33f41a516",
+    "tools": "disabled",
+    "scope": "planning only; source facts provided by Codex"
+  },
+  {
+    "round": 2,
+    "requested_model": "claude-fable-5-1",
+    "model_usage": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 30288,
+        "outputTokens": 21,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.030393,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 6648,
+        "cacheReadInputTokens": 3956,
+        "cacheCreationInputTokens": 34488,
+        "webSearchRequests": 0,
+        "costUSD": 1.023169,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 4260,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "duration_ms": 106127,
+    "is_error": false,
+    "raw_response_sha256": "b5b43f3462079c794474eeecf7bfb26adae07bdf3dc78d4c98ac8fdffd78b25a",
+    "tools": "disabled",
+    "scope": "planning only; source facts provided by Codex",
+    "verdict": "approved_for_planning",
+    "reviewed_plan_hash": "6ca7ec537aaaf6ba680aa8103f66b0be5d95f7ffe53d4c3f312cc2c221027271"
+  }
+]

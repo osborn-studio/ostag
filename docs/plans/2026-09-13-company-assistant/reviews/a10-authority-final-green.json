@@ -1,0 +1,40 @@
+{
+  "expected_old_gap": false,
+  "results": [
+    {
+      "case": "original_expiry",
+      "private_return": false,
+      "original_samples": [
+        [
+          9,
+          false
+        ],
+        [
+          10,
+          false
+        ]
+      ],
+      "real_competing_writer": true
+    },
+    {
+      "case": "original_revocation",
+      "private_return": false,
+      "original_samples": [
+        [
+          9,
+          false
+        ],
+        [
+          9,
+          true
+        ]
+      ],
+      "real_competing_writer": true
+    },
+    {
+      "case": "retention_expires_during_final_original_callback",
+      "denied": true
+    }
+  ],
+  "status": "passed"
+}

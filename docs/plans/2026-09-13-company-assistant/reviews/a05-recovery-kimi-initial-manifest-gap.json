@@ -1,0 +1,34 @@
+{
+  "candidate_sha256": "6d2fb2d982c7ea2ed04dcf6148ce95fcaf05be2e06f9278584f450c0a51585cc",
+  "requested_model": "kimi-code/k3",
+  "configured_model": "k3",
+  "configured_provider": "managed:kimi-code",
+  "base": "686db7f76ed1ca203d6651d1ceefebbdddd899b5",
+  "files": [
+    "ostag/adapters/feishu.py",
+    "ostag/briefs/card_delivery.py",
+    "tests/test_brief_card_delivery.py",
+    "tests/test_brief_card_recovery.py"
+  ],
+  "events_file": "kimi-review-1789612162267727000.stdout",
+  "events_sha256": "f759e8a64bd8bd359a22c45e09260f9f73196f6814916e84404dcecaff408007",
+  "verdict": {
+    "candidate_sha256": "6d2fb2d982c7ea2ed04dcf6148ce95fcaf05be2e06f9278584f450c0a51585cc",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Scope/method: I read all listed packet chunks (manifest truncated at its single >2000-char line, but the visible portion confirms the candidate sha256 and per-file hashes matching tests-passed.json). I executed nothing myself; I cannot independently recompute hashes or run tests. All runtime claims below are supplied deterministic evidence, not my execution.",
+      "Static checks that passed review: (1) Authentication/binding — recover_preview re-derives job/revision/destination/tenant/app from the stored identity_json, requires private chat_type, exact original message_id, and re-runs load/binding/authorize mirrors; expected_epoch is CAS-consumed under BEGIN IMMEDIATE in the same transaction as token spend (recovery_step reservation), never rolled back on late failure (spend-only). (2) A10 ordering — retention check_guard plus original mirrors re-run after SQLite waits, after unlocked rendering, and again in a final read snapshot after all commits (card_delivery.py L895-908); retention never holds its transaction while acquiring the cards DB, so lock order is unidirectional (target -> retention). (3) Immutability — recovery never calls transport.send/check_ack; issued/expires/card_json/wire/digest/receipt/message_id untouched (tests compare row[:18]); navigation window lives in separate card_windows table, falling back to immutable send TTL. (4) expected_epoch replay/races — competing same-epoch and post-restart replay tests; MAX_EPOCH and strict bool/float rejection. (5) Fail-closed migration — initialize refuses actual schema1 without mutation; explicit migrate_v1 validates exact known v1 schema under lock and is atomic; foreign/view/trigger/future/unowned refused. (6) Final denial — both _navigate and recovery commit spend-only on late denial; cancelled/retired rows deny; retire_local wipes bodies/tokens and sets cancelled. (7) Time rollback — highwater fences in both ledgers, service _now monotonic guard, final snapshot clock-vs-highwater check; rollback-across-restart tests. (8) v1 compatibility — U01 text path untouched (full A04->A05 navigation test asserts original outbox/DeliveryIntent equality). (9) Changed tests — new tests confined to new test_brief_card_recovery.py; test_brief_card_delivery.py changes visible are only the two permitted literals (user_version 1->2 assertion, future marker 2->3).",
+      "Prior findings verified as addressed in supplied evidence: the early in-progress finding 'private response released after committed cancellation during final unlocked read' (different sha f73d...) is fixed by the final read-snapshot block; the final parent_recovery gate shows cancel_blocked_by_snapshot semantics with committed-cancel denial, matching the fixed parent probe's accept conditions. The prior candidate's test_two_processes flake (different timestamp 1789612000268925000) is followed by passing runs for this candidate.",
+      "Supplied evidence (not my execution): 2908 passed full suite on macOS arm64 and on native Linux aarch64 (Ubuntu 6.8 kernel/Debian 12 userspace, Python 3.11), 438 passed targeted suite, lint clean, 22 parent gates exit 0 including parent_recovery, parent_real_tls_egress (loopback TLS), parent_ack_credentials, clock-rollback validation with 0 backward steps.",
+      "Explicit limits: the Linux evidence is aarch64, NOT Ubuntu x86_64; tests-passed.json itself states 'Not Ubuntu x86_64 or Tencent production certification'; no live Feishu production acceptance is claimed or implied; all card sends used MockTransport or loopback TLS; recover_preview returns a prepared replacement card only and the code/docs never claim a client update, full-content verification, or human receipt.",
+      "Non-blocking observations: (a) begin() can commit an owner/token tombstone when the final clock check fails without returning custody — deliberate documented tradeoff, covered by test_expiry_during_begin_final_check_cannot_reopen_after_restart, no send occurs; (b) cancel committed strictly after the final durable read snapshot is a documented, honestly disclosed ordering boundary (retention.py docstring), consistent with the A10 contract rather than a regression; (c) manifest.json tail was unreadable due to line-length truncation, but its key fields corroborate tests-passed.json hashes."
+    ]
+  },
+  "read_coverage": {
+    "expected": 46,
+    "read": 46,
+    "missing": []
+  },
+  "scope": "actual independent static audit and supplied deterministic test evidence; Kimi did not run tests"
+}

@@ -1,0 +1,16 @@
+{
+  "code_commit": "2b5dc803d03704b41bf2261cb07d5bf3d1fb48ff",
+  "candidate_sha256": "ad32f55a9bf27e9b60161917b193d61d9792a851c48710095c1a9dbf28938d8d",
+  "files_sha256": {
+    "ostag/main.py": "648b68f3cac224bb9a368ee88185976dff2c89b8bdebeb630237be607edc959e",
+    "ostag/briefs/meeting_collect.py": "85bb480a52b6495037831331665a3df675ed8c8a71483392e50afa5a1ab92b81",
+    "ostag/briefs/meeting_io.py": "4971a593b30c1b4dc63fc8c3ba78bfd9be19d8a81a83c1c2717fa672af50961e",
+    "tests/test_meeting_collect.py": "799d9f1d3081d159480efb12b226aaef796c81eca7c0fda3fb13b273d1d12fe0",
+    "tests/test_meeting_io.py": "1e41384cb8850c3b7cd06573ed1fddfaef10d4835e89fc4fe8dd62b472895878",
+    "docs/ostag/meeting-collect.md": "8fa4a7a05766e1f2b3a4eb6125c0c2a1f29c16c6696bb72e32a08c3161a1a92b"
+  },
+  "task_id": "task_8b1304f6",
+  "historical_queue_files_unchanged": 13,
+  "frozen_meeting_evaluation_unchanged": true,
+  "raw_private_content_in_repository": false
+}

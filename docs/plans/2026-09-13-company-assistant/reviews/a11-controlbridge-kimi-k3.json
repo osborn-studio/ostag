@@ -1,0 +1,27 @@
+{
+  "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+  "requested_model": "kimi-code/k3",
+  "configured_model": "k3",
+  "configured_provider": "managed:kimi-code",
+  "base": "b42a1b2f335c2263eec5b33e9162f71dc879dd62",
+  "files": [
+    "ostag/briefs/lifecycle.py",
+    "ostag/briefs/runtime.py",
+    "tests/test_brief_control_bridge.py",
+    "tests/test_brief_control_bridge_integration.py"
+  ],
+  "events_file": "kimi-review-1789735499802316000.stdout",
+  "events_sha256": "23fd10bebb3297cdca643fb5a759a1f7a7734fa277748dcd4dedf9aa6e2de4a6",
+  "verdict": {
+    "candidate_sha256": "9a2dd46a88f131ef055144a2c5833d19f6abe574fc074a1bbaa875ea41b6d53e",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": "Read all 41 listed materials in full; static read-only audit only — parent ran tests, I did not, and I did not independently recompute any SHA256 (manifest, parent-gates.json and tests-passed.json hash claims are internally consistent and match the candidate). Verified statically: IPC envelope/generation/boot/request binding with stale-reply rejection; single lifetime file-control owner with epoch fencing; malformed/stale/wrong-boot/replay-changed fail-closed in both child and lifecycle; post-pause old-operation denial via epoch bump; 0.75s monotonic authority expiry evaluated at every begin/check/snapshot with no mutex held across IO/await and permanent clock-failure latch; off applied and admission sealed (including cleanup/cancel) from custody capture through exact in-lifetime ACK; pending-IPC reap-before-terminal-publish with no late reopen; uncertain receipts permanently counted and never cleared by finish/close/apply; attached v2 hardcodes drain_ack=false and always fails validate_drain_status (version==1 required); v1 legacy disabled mode byte-compatible and contention-safe; no private exception/source data crosses IPC or reaches status.json; no production flags, server composition, authority updater or deployment claims. Non-blocking: single-use owner permanently degrades after one child IO timeout (fail-closed, documented); child trusts parent-computed counts validated by shape/control echo only (documented trust boundary); v1 validator not gating on maintenance is pre-existing legacy contract."
+  },
+  "read_coverage": {
+    "expected": 38,
+    "read": 38,
+    "missing": []
+  },
+  "scope": "actual independent static audit and supplied deterministic test evidence; Kimi did not run tests"
+}

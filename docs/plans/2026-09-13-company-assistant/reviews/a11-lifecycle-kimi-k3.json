@@ -1,0 +1,36 @@
+{
+  "candidate_sha256": "2eae0337946e9a810e5dfe3ece556eb97f0d9e360d7612e6e8a4559a822f1429",
+  "requested_model": "kimi-code/k3",
+  "configured_model": "k3",
+  "configured_provider": "managed:kimi-code",
+  "base": "2cb0e95e0116d0eec48103c4ad28767d77fe660d",
+  "files": [
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/lifecycle.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_lifecycle.py",
+    "tests/test_brief_lifecycle_integration.py"
+  ],
+  "events_file": "kimi-review-1789692264469158000.stdout",
+  "events_sha256": "9527ca58bc0be58a14d99155c4b06fc02cc6821019cbc05fcc2f62a0d1bdcb56",
+  "verdict": {
+    "candidate_sha256": "2eae0337946e9a810e5dfe3ece556eb97f0d9e360d7612e6e8a4559a822f1429",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Scope: static read-only audit only. I did not run tests, execute code, or independently recompute any SHA256; the candidate hash and per-file hashes are taken from the supplied manifest/tests-passed.json, which are mutually consistent (all seven candidate file hashes match, and linux parent-gates.json binds the same candidate_sha256 to 25 passing parent probes).",
+      "Supplied (not independently reproduced) deterministic evidence: macOS full suite 3240 passed + ruff clean; native Linux aarch64 suite 3240 passed, target 469 passed, lint clean; parent custody/authority/retention/precommit/deadline probes all passed on both platforms, including the independent parent_lifecycle_custody.py probe asserting cancelled intake/stopped model Futures never report drained.",
+      "Verified statically: pause/resume epoch fencing after SQL waits and before actual IO (store precommit hook, _OwnedModel per-egress reauthorize, card op.clock/ledger check callbacks, _navigate post-commit re-verification); single worker ownership precedes thread creation; maintenance is read-only and denied with any custody; cleanup/cancel remain tracked and permitted while paused without clearing uncertainty; legacy lifecycle=None construction is behavior-preserving; A10 retention-before-mirror ordering is retained with the lifecycle check appended after the retention/mirror pass in authorize_current.",
+      "Non-blocking observations: (1) the worker 'idle' return after read-only recover/claim pre-check waits is not re-fenced (a stale-epoch 'idle' status can be published after pause+resume); it carries no custody, IO, or private content, and every mutation path is fenced, so impact is nil. (2) Permanently uncertain operations count against the lifecycle capacity forever, so a few unresolved exchanges can permanently exhaust the 64-slot budget for that composition; this is documented conservative behavior requiring a new reconciled composition. (3) Correct propagation of LifecycleDenied through card error paths relies on SchemaError being an Exception subclass, consistent with the passing supplied tests (e.g., handle_callback converting denial to CardDeliveryError while _execute re-raises LifecycleDenied at its return fence).",
+      "No production server, control-file, model, Feishu, or deployment acceptance is claimed by the packet, and none is implied by this approval."
+    ]
+  },
+  "read_coverage": {
+    "expected": 46,
+    "read": 46,
+    "missing": []
+  },
+  "scope": "actual independent static audit and supplied deterministic test evidence; Kimi did not run tests"
+}

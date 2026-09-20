@@ -1,0 +1,42 @@
+{
+  "candidate_sha256": "0f72c3b1ed02afa9db55816372ff07772014e0406f8271a0c01405ab3dc289a3",
+  "base": "a9360fbd2ae67e6931bc47c22bc4215e23c24b95",
+  "files": [
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/retention.py",
+    "ostag/briefs/revisions.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_retention.py",
+    "tests/test_brief_revocation.py"
+  ],
+  "reviewer": "independent actual Codex CLI",
+  "requested_model": "gpt-6-astra",
+  "events_file": "codex-review-1789564340376294000.stdout",
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/store.py: BriefStore.retire_local, _verify_retired, _cost_evidence",
+        "issue": "[P1] Cleanup leaves an unrestricted text field in cost records. mark_cost_unknown accepts any valid identifier as diagnostic, but retirement neither redacts nor validates brief_cost_calls.diagnostic. Cleanup can therefore report complete while private text remains in SQL and the owned file. The same API can write that text after retirement. Preserve numeric settlement and custody while restricting or redacting diagnostics.",
+        "reproduction": "Static reproduction, not executed: create a started reservation, call mark_cost_unknown with diagnostic='SYNTHETICPRIVATEA10SENTINEL713928', then revoke and clean its registered job. _verify_retired checks the cost profile but never diagnostic, so cleanup reports complete with the marker retained. Calling mark_cost_unknown with another identifier-shaped private marker after cleanup also succeeds."
+      },
+      {
+        "file": "ostag/briefs/store.py: BriefStore.delivery_unknown and _delivery_note",
+        "issue": "[P2] A late TEXT send failure invalidates completed cleanup. Retirement preserves started send custody and deletes observations, but delivery_unknown still accepts the original send token and inserts a new observation after retirement. _verify_retired rejects every observation row, so an ordinary in-flight failure changes cleanup from complete back to pending/partial. Keep late custody updates compatible with the retired invariant, without recreating observation rows.",
+        "reproduction": "Static reproduction, not executed: pause TEXT transport before before_egress, revoke the job, and finish cleanup. Resume transport: the egress check fails, DeliveryService._unknown calls delivery_unknown with the retained token, and _delivery_note inserts an observation despite intent_json being retired. A subsequent coordinator.status fails the primary retirement verification. The supplied awaited-egress test does not check observations or cleanup status after the task finishes."
+      }
+    ],
+    "notes": [
+      "Static review of the supplied candidate only; no tools, tests, external models, or hash verification were run.",
+      "The previous authorization-order finding is addressed by retention I/O preceding the original mirror and a final retention expiry fence.",
+      "Native Ubuntu validation remains unverified here. Linux launch requires libc statx and filesystem STATX_BTIME support; A11 composition and remote-platform acceptance remain separate gates."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a10-retention-02a92819",
+  "review_effort": "high",
+  "source_metadata_sha256": "66b92c3f15a4cf80dfcec1508dcef69b96ffde32388512f1964f5378939ffaad"
+}

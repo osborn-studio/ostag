@@ -1,0 +1,12 @@
+{
+  "candidate_sha256": "5f72711f1d0e7aa6947647bba4a767c865af8d06739dde2a6412e0067ac8f434",
+  "files_sha256": {
+    "ostag/work_monitor/service.py": "3a189ab3f57d2926fa1e337e4d813ed89ebcf5ede208649157224b6dfe952ec8",
+    "tests/test_monitor_apply_replay.py": "688ec606ca78a62f16952d575f40d47dc72711f009866584486385fa466491fe",
+    "tests/test_work_monitor_controls.py": "5ce40b3cc8e7a740c283b40819ac400bfc9233d1b41dcc5ef21fe04aef086b4a",
+    "tests/test_work_monitor_scheduler.py": "e15f1b662499a2b20987f176f32f276345b0574c1f34a2669989e062c7be721f"
+  },
+  "target_passed": 66,
+  "parent_gates_passed": 2,
+  "approval": "Independent Opus5 approved same candidate; receipt opus-1789535300328616000.receipt.json"
+}

@@ -1,0 +1,60 @@
+{
+  "code_commit": "b7fcca5eefaf6b0e360a0f57b6ce856485c3f791",
+  "candidate_sha256": "cdbf9f02b9d1472ba5c797eeb28ccd565df53be86cc826cd4861b268a71b2740",
+  "file_sha256": {
+    "ostag/briefs/runtime.py": "a55c644f33a2204900225c442958218a3adffbf63219ab9a3612f94d226874b1",
+    "tests/test_brief_startup_budget.py": "a523063f1490954e2f4a326fd33cf4a71d3cb500ecd958aaabcf2e6591107842"
+  },
+  "builder": "actual Codex gpt-6-astra via isolated osstack loop",
+  "osstack_task": "task_0c778094",
+  "osstack_outcome": "success, one iteration; automatically integrated and cleaned worktree",
+  "independent_review": {
+    "model": "claude-fable-5-1",
+    "mode": "static, tools disabled; both changed files and lifecycle supplied",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Readiness handshake is correctly separated from the IO clock: _bootstrap only writes the boot-id-bound marker and polls; writer.open()/_write run inside serve, which starts only after the parent's first request (sent inside _publish/_exchange with the 500ms deadline already running). Slow disk is not exempted.",
+      "750ms authority lease unchanged: sampled_at is taken immediately before the sample exchange (after readiness), _file_prepare/_file_ack untouched; _IO_TIMEOUT remains 0.5; lifecycle _ready stays False until first ACK so control cannot be admitted during readiness.",
+      "Marker validation is strict (prefix check per chunk, len+1 read to catch trailing bytes, EOF must equal full marker, partial markers time out). startup_timeout vs io_timeout is gated on _child_ready. Stop/cancel during first or terminal handshake reaps via _finish finally; no unbounded join/thread; endpoints closed on failed Process.start().",
+      "Uncertainty: existing failure-injection tests (test_brief_control_bridge*.py, test_brief_lifespan.py) were not supplied. Patched _serve/_serve_attached are still invoked with the same signature, but any existing test that measured time from process start (rather than from first request) would see shifted timing. Evidence only shows they pass (124 passed); semantic preservation could not be verified statically.",
+      "Uncertainty: test_writer_open_still_has_the_io_deadline uses wait_for(starting, .85) with a 0.5s IO budget measured from send; ~0.3s slack on a loaded CI runner may be flaky. Not a correctness defect in runtime.py.",
+      "Minor (pre-existing shape): stop()/cancel during the first handshake leaves health='degraded', reason='starting' rather than an explicit stopped/cancelled reason; last_status is None and lifecycle is shut down, so it is fail-closed. If _reap returns False (worker_unreaped) _connection is intentionally left for the second reap attempt; a truly unkillable child would leave that endpoint open, as before this change.",
+      "Design note: child-side connection.poll(_STARTUP_TIMEOUT) uses the child's unpatched 5s constant; a parent loop stall >5s between readiness and first request makes the child exit silently and the parent sees io_timeout followed by one bounded terminal recovery. Worst-case stop() latency is roughly io(0.5)+reap(≤1)+startup(5)+stopped(0.5)+reap(≤1) ≈ 8s; bounded but larger than before. Fixed 5s bootstrap budget is a judgment call for heavily loaded hosts."
+    ],
+    "raw_sha256": "faf7015aa2f68a7ac6ebb55f7cbe6a3124d9937e7940cfb51c3d4a29910bc2a0"
+  },
+  "validation": {
+    "target": {
+      "python": "3.11.15",
+      "passed": 124,
+      "new_tests": 29,
+      "ruff": "passed"
+    },
+    "release_check": {
+      "python": "3.13.13",
+      "passed": 3611,
+      "warnings": 11,
+      "seconds": 338.55,
+      "returncode": 0,
+      "compile": "passed",
+      "ruff": "passed",
+      "monitor_and_relay_smoke": "passed",
+      "compose_configs": "passed",
+      "secret_scan_matches": 0,
+      "external_osstack_cross_repo_smoke": "explicitly skipped, same as CI",
+      "container_smoke": "not run"
+    },
+    "original_failure": {
+      "python": "3.11.15",
+      "passed": 3577,
+      "failed": 5,
+      "retained": true
+    }
+  },
+  "limitations": [
+    "No production deployment or business activation",
+    "Final GitHub Linux Python 3.11 CI pending",
+    "D02 host lock/drain/installation prerequisites remain unmet"
+  ]
+}

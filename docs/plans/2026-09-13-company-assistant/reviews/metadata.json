@@ -1,0 +1,166 @@
+[
+  {
+    "round": 1,
+    "requested_model": "claude-fable-5-1",
+    "is_error": false,
+    "duration_ms": 102294,
+    "models": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 2490,
+        "outputTokens": 22,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.0026,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 5413,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 6689,
+        "webSearchRequests": 0,
+        "costUSD": 0.40445,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 3261,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "raw_response_sha256": "0454fbe725867acedd1d948bc35a17a9ca22bdc184b00f68842a99b5612cc77a",
+    "response_file": "fable-round1.md",
+    "tools": "disabled",
+    "scope": "planning_only; source facts supplied by Codex"
+  },
+  {
+    "round": 2,
+    "requested_model": "claude-fable-5-1",
+    "is_error": false,
+    "duration_ms": 234075,
+    "models": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 21067,
+        "outputTokens": 20,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.021167,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 14255,
+        "cacheReadInputTokens": 3952,
+        "cacheCreationInputTokens": 23355,
+        "webSearchRequests": 0,
+        "costUSD": 1.180858,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 11950,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "raw_response_sha256": "0ea44aed0b60c22e67d51b4e5bc1db388d8b033ba9b876004dc2ee1fe1395c44",
+    "response_file": "fable-round2.md",
+    "tools": "disabled",
+    "scope": "planning_only; source facts supplied by Codex"
+  },
+  {
+    "round": 3,
+    "requested_model": "claude-fable-5-1",
+    "is_error": false,
+    "duration_ms": 241582,
+    "models": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 37531,
+        "outputTokens": 26,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.037661,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 15792,
+        "cacheReadInputTokens": 3952,
+        "cacheCreationInputTokens": 42183,
+        "webSearchRequests": 0,
+        "costUSD": 1.634268,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 11166,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "raw_response_sha256": "b68b0124183864e6a211e823d39bac31562d19bc864f1201692eeb25747a3094",
+    "response_file": "fable-round3.json",
+    "verdict": "approved_for_planning",
+    "reviewed_plan_hash": "00acda5cd1daa686c8782829be15c9333023af653e3ed9be951e864ecf70a912",
+    "tools": "disabled",
+    "scope": "full planning text, not code or live review"
+  },
+  {
+    "round": 4,
+    "requested_model": "claude-fable-5-1",
+    "is_error": false,
+    "duration_ms": 121471,
+    "models": {
+      "claude-haiku-4-5-20251001": {
+        "inputTokens": 20948,
+        "outputTokens": 19,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 0,
+        "webSearchRequests": 0,
+        "costUSD": 0.021043000000000003,
+        "contextWindow": 200000,
+        "maxOutputTokens": 32000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-4-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-fable-5-1": {
+        "inputTokens": 2,
+        "outputTokens": 7847,
+        "cacheReadInputTokens": 3952,
+        "cacheCreationInputTokens": 23365,
+        "webSearchRequests": 0,
+        "costUSD": 0.8606579999999999,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 5918,
+        "canonicalModel": "claude-fable-5-1",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "raw_response_sha256": "21e8bd46c15272b95cb7bf7c0023fd78df4503f084447be47aa200af785e050b",
+    "response_file": "fable-round4.json",
+    "verdict": "approved_for_planning",
+    "reviewed_plan_hash": "865fd8f86c29adcff88aa2fb814d1965765b6e969513bfce35c85352841daddb",
+    "tools": "disabled",
+    "scope": "round3-to-round4 diff only; final Codex adoption of F7-F10 not rereviewed"
+  }
+]

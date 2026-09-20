@@ -1,0 +1,48 @@
+{
+  "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+  "base": "a9360fbd2ae67e6931bc47c22bc4215e23c24b95",
+  "files": [
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/card_transport.py",
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/feishu_transport.py",
+    "ostag/briefs/openai_transport.py",
+    "ostag/briefs/retention.py",
+    "ostag/briefs/revisions.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_retention.py",
+    "tests/test_brief_revocation.py"
+  ],
+  "reviewer": "independent actual Kimi Code CLI; same-session completion after evidence read-limit repair",
+  "requested_model": "kimi-code/k3",
+  "configured_provider": "managed:kimi-code",
+  "configured_model": "k3",
+  "events_file": "kimi-resume-1789572067641769000.stdout",
+  "events_sha256": "dfab4b6c0c28234b0a7aa4287836f2b096b11b862e949d48edccab64a25ac90a",
+  "preceding_events_file": "kimi-review-1789572067641769000.stdout",
+  "verdict": {
+    "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Static review of all 43 supplied packet files (manifest, 38 source/test chunks, evidence 01 via the 4 authorized contiguous supplement parts, evidence 02-05) plus the authorized supplement manifest; no tests executed, no hashes recomputed, no network \u2014 all pass/fail/hash claims are supplied deterministic evidence, not independent verification.",
+      "Prior P1 (pre-client.send authorization vs real TCP/TLS/body handoff) and P2 (card ACK credential check before retention SQL) blockers are fixed in current source: one-shot AsyncByteStream body gates plus http11 header trace reauthorize after connection/TLS waits for count and create (openai), before_body second boundary (feishu text + card), and check_ack composed inside mirrors after the retention read and before commit fences (card ACK). Supplied old-red vs new outputs corroborate the ordering change; pre-repair receipt shows the corrected tests were RED on the old product.",
+      "Focused-review U01 credential asymmetry resolved as distinct by design: FeishuTransport pins full CredentialSnapshot equality (including access_token) across the whole exchange and before proof release; U01 acceptance activates no future capability, unlike card navigation, which correctly adds the commit-time credential_digest recheck. Token never enters durable receipts.",
+      "Non-blocking observations: feishu_transport re-raises the original gate exception after cleanup whereas card_transport sanitizes to a fixed error \u2014 currently safe only because delivery.py's egress raises fixed DeliveryError codes; this contract should stay asserted. openai_transport compares provider token count against a byte budget (conservative direction; documented). Linux launch hard-requires libc statx + STATX_BTIME; identity pins are per host/interpreter-build and void on file replacement (fail-closed, documented).",
+      "Linux clock failure in evidence was environmental (VM guest NTP vs Lima SyncTime, denial-direction ClockError); after-fix observation is clean and the deadline recheck passed on the same clone.",
+      "Scope limits retained from supplied evidence: synthetic/local macOS + Linux aarch64 only; no Ubuntu x86_64 CI, no live Feishu/OpenAI acceptance, no production filesystem/backup acceptance; A11 composition/wiring and A05 preview recovery remain future gates; remote cards and already-handed socket bytes are documented as irrevocable, which the source states accurately."
+    ]
+  },
+  "packet": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-packet-1789572067641769000",
+  "supplement": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress/kimi-evidence-supplement-1789572067641769000",
+  "verification_stamp": "1789572067641769000",
+  "mode": "Full static source review and supplied deterministic evidence review; Kimi did not execute tests",
+  "parser_recovery": "Extracted the single valid JSON fenced object from actual final assistant message, which also had prose. Original CLI stream preserved unchanged.",
+  "parent_fact_corrections": {
+    "parent_gates": "21 actual Linux parent-gates.json exit0 entries, not20 in Kimi prose",
+    "read_materials": "44 original packet files fully covered via38sourcechunks+5evidencechunks+manifest, not43 in Kimi note; see mechanical read coverage"
+  }
+}

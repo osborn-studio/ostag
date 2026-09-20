@@ -1,0 +1,55 @@
+{
+  "status": "candidate_tests_passed_review_pending_not_integrated",
+  "candidate_sha256": "2732d4b2757aaf76dfb1f76939e14ce6f7cc2a9a23a66ef724e812013b890ca9",
+  "snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability/snapshot-1789524132894943000",
+  "files_sha256": {
+    "ostag/briefs/callbacks.py": "6d18f7f9584cb250bfb0c7e1c6d3d6d9777456c74b0d71b394ce219401f6ee92",
+    "ostag/briefs/card_delivery.py": "1a6bc2bb941940ee041ba3e71735a7a27f3d209b892fe9886c5e6c2cdf0fd6fe",
+    "ostag/briefs/delivery.py": "1d04913b29de40bc13546126bc16254ebfa4cccae71cfbd088697c98ffd738f6",
+    "ostag/briefs/retention.py": "1a8e409b04f66c25d0c2689ae4b6e0072d0f61320dc4bedd68f29b04b262e913",
+    "ostag/briefs/revisions.py": "0e7b9dcc5f66d2a2e4fe40c5a1a6c0eece33d9c56fc63d304322b1c20d4212c9",
+    "ostag/briefs/service.py": "b292a17e65536ba02d13168af7351b8720af3d9195c746ff6779fd0781046e6b",
+    "ostag/briefs/store.py": "1427f8c5365c4da46a2c81e19e85a752cf4eb8c0f028b12676304baa17370162",
+    "ostag/briefs/worker.py": "e38495773e084fd203d87d2f3452ddb2fb269b1b8c24735eece615c0df5c2aed",
+    "tests/test_brief_retention.py": "7b0a9c1f2222b27106435d759c6c48294004188f94ea5cfba7df80cfd040297e",
+    "tests/test_brief_revocation.py": "fadfa6f738c585d36b2ba95ce445b13990e966907147d0996a053965a66aa2ea"
+  },
+  "target_tests": {
+    "passed": 117,
+    "warnings": 1,
+    "seconds": 9.7
+  },
+  "full_tests": {
+    "passed": 2615,
+    "warnings": 11,
+    "seconds": 70.22
+  },
+  "independent_gates": 16,
+  "ruff": "passed",
+  "lock_check": "passed",
+  "fable": "required_not_available_429",
+  "code_commit": null,
+  "production": "not_run",
+  "linux_runtime_test": "not_run; host macOS; Docker daemon unavailable",
+  "native_runs": [
+    {
+      "loop_id": "loop_78e2f729-446f-41c8-9ed3-1ae98a46f9e2",
+      "outcome": "escalated",
+      "iterations": 2,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10"
+    },
+    {
+      "loop_id": "loop_66408a74-4178-435a-8ad7-2c11203ac17a",
+      "outcome": "escalated",
+      "iterations": 1,
+      "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-portability"
+    }
+  ],
+  "post_document_checks": {
+    "plan_validation": "40 tasks / 120 AC / acyclic / links passed; frozen implementation_verified=false",
+    "hygiene_script_tests": "4 passed in 3.34s",
+    "hygiene_scan": "pass; 0 matches",
+    "integrated_code_unchanged": true,
+    "candidate_sha256_verified": true
+  }
+}

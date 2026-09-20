@@ -1,0 +1,40 @@
+{
+  "candidate_sha256": "2eae0337946e9a810e5dfe3ece556eb97f0d9e360d7612e6e8a4559a822f1429",
+  "baseline_commit": "2cb0e95e0116d0eec48103c4ad28767d77fe660d",
+  "code_commit": "3a7e85dd9ce179c93aaf1f9d492616d265b64af1",
+  "mac_full": {
+    "passed": 3240,
+    "warnings": 11,
+    "seconds": 108.46
+  },
+  "linux_full": {
+    "passed": 3240,
+    "warnings": 11,
+    "seconds": 118.37
+  },
+  "target_tests": {
+    "passed": 469,
+    "warnings": 1,
+    "seconds": 48.71
+  },
+  "linux_target_tests": {
+    "passed": 469,
+    "warnings": 1,
+    "seconds": 58.57
+  },
+  "parent_gates": 25,
+  "linux_parent_gates": 25,
+  "ruff": "passed",
+  "lock_check": "passed",
+  "review_model": "kimi-code/k3",
+  "review_receipt": "a11-lifecycle-kimi-k3.json",
+  "scope": "A11c explicit local lifecycle, operation epoch fences and honest custody only; production owner/status bridge and trusted authority updater pending",
+  "linux_limit": "Linux ARM64 Ubuntu6.8 kernel/Debian12/Python3.11; cross-repo osstack smoke omitted (no sibling repos); not Ubuntu x86_64 CI or Tencent production certification",
+  "clock_validation": {
+    "samples": 148,
+    "first": 1789691229.6219761,
+    "last": 1789691259.4792664,
+    "backward_steps": []
+  },
+  "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a11-lifecycle"
+}

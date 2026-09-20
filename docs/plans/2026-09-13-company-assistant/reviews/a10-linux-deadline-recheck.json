@@ -1,0 +1,8 @@
+{
+  "candidate_sha256": "fe353029a10ba3926b606518b65f1642e73edc52dd6e299e24d9d2338f23eec0",
+  "test": "tests/test_brief_recovery.py::test_real_reader_held_past_wall_deadline_cannot_publish",
+  "result": "1 passed in 2.33s",
+  "scope": "single isolated rerun on same Linux clone; not substitute for fresh full suite",
+  "earlier_failure": "ClockError before publication; wall-clock rollback reason, VM mechanism not yet independently established",
+  "environment_root_cause": "Guest NTP offset +6.17 seconds fights Lima guestagent SyncTime every10seconds. 15second observation captured two negative wall steps ~6.17seconds with positive monotonic steps. Stopped systemd-timesyncd only for own running a10VM; kept Lima host sync; no OStag clock protection changed."
+}

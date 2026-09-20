@@ -1,0 +1,14 @@
+{
+  "id": "monitor-ack-publication-lifecycle",
+  "status": "pre-existing follow-up; not a blocker for bounded replay fix",
+  "evidence": "Independent Opus static review: command reservation can be polled before ledger applying publication completes; ACK path may move ready_to_apply directly to a terminal state. User apply already authorized the durable command; assess explicit publication/audit semantics in follow-up rather than implying unauthorized command creation.",
+  "next_step": "During runtime readiness review, reproduce lost-publication/poll/ACK ordering and define authoritative state/receipt repair contract without duplicate execution.",
+  "source": "monitor-opus-round-1.json",
+  "parent_reproduction": {
+    "before_poll_receipt": "ready_to_apply",
+    "commands_returned": 1,
+    "after_ack_receipt": "applied",
+    "scope": "Synthetic local fixture; no network or real execution",
+    "interpretation": "Confirmed pre-existing publication/projection gap. Initial user apply was authorized; no unauthorized action or duplicate command demonstrated."
+  }
+}

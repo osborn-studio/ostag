@@ -1,0 +1,56 @@
+[
+  {
+    "candidate_sha256": "6d2fb2d982c7ea2ed04dcf6148ce95fcaf05be2e06f9278584f450c0a51585cc",
+    "requested_model": "kimi-code/k3",
+    "configured_model": "k3",
+    "configured_provider": "managed:kimi-code",
+    "base": "686db7f76ed1ca203d6651d1ceefebbdddd899b5",
+    "files": [
+      "ostag/adapters/feishu.py",
+      "ostag/briefs/card_delivery.py",
+      "tests/test_brief_card_delivery.py",
+      "tests/test_brief_card_recovery.py"
+    ],
+    "events_file": "kimi-manifest-completion.stdout",
+    "events_sha256": "ffae86204ca7403f456ed9adc08d13481929294e7ccd6e5f04620caa92a44c86",
+    "verdict": {
+      "candidate_sha256": "6d2fb2d982c7ea2ed04dcf6148ce95fcaf05be2e06f9278584f450c0a51585cc",
+      "verdict": "approved",
+      "blockers": [],
+      "notes": [
+        "This supplement closes the manifest truncation gap: the pretty-printed JSON-value-identical manifest was read in full (127 lines, all under the Read tool limit), confirming candidate_sha256, the exact set of 4 builder-changed files, 6 unchanged context files, all chunk boundaries, and the evidence inventory. Every listed chunk was read in the prior review pass; no packet content was left unread.",
+        "Changed-file hashes in the manifest (feishu.py 86a5..., card_delivery.py 9964..., test_brief_card_delivery.py e36d..., test_brief_card_recovery.py b078...) match the supplied tests-passed.json files_sha256; I did not independently recompute any hash.",
+        "The manifest's explicit limits field ('Synthetic local macOS and Linux aarch64; fixed verifier ran tests, Kimi statically audits code and evidence. No live platform or production acceptance.') corroborates my review boundary: I reviewed supplied deterministic test/gate evidence (2908 passed full suite on macOS arm64 and Linux aarch64, 438 targeted, 22 parent gates exit 0, lint clean) rather than executing tests myself, and no Ubuntu x86_64 or live Feishu production acceptance is claimed.",
+        "My prior full substantive review stands unchanged: authentication/trusted-identity binding, original-message/requester/revision/source binding, A10 retention checks after DB waits/render/commit, immutable send history with no resend, separate navigation window vs immutable send TTL, expected_epoch CAS under BEGIN IMMEDIATE with permanent spend on late denial, fail-closed explicit migrate_v1 from actual schema1, unidirectional lock ordering, final denial paths, cancelled/retired denial, highwater time-rollback fences, U01 text compatibility, and confinement of test changes to the new recovery file plus the two permitted version literals.",
+        "Verdict confirmed: approved, zero blockers."
+      ]
+    },
+    "read_coverage": {
+      "expected": 46,
+      "read": 46,
+      "missing": [],
+      "historical_partial_reads": [
+        "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05-recovery/kimi-packet-1789612162267727000/manifest.json"
+      ],
+      "manifest_resolved_by": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a05-recovery/kimi-manifest-supplement/manifest-readable.json",
+      "method": "Actual line-by-line content equality; original manifest JSON equals complete pretty-printed supplement"
+    },
+    "scope": "actual independent static audit and supplied deterministic test evidence; Kimi did not run tests",
+    "preceding_events_file": "kimi-review-1789612162267727000.stdout",
+    "preceding_events_sha256": "f759e8a64bd8bd359a22c45e09260f9f73196f6814916e84404dcecaff408007",
+    "initial_verdict_receipt": "kimi-initial-approved-with-truncated-manifest.receipt.json",
+    "provider_retries": [
+      {
+        "role": "meta",
+        "type": "turn.step.retrying",
+        "failed_attempt": 1,
+        "next_attempt": 2,
+        "max_attempts": 10,
+        "delay_ms": 609.4814180217272,
+        "error_name": "APIEmptyResponseError",
+        "error_message": "The API returned a response containing only thinking content without any text or tool calls. This usually indicates the stream was interrupted or the output token budget was exhausted during reasoning. Provider: openai, model: k3"
+      }
+    ],
+    "coverage_correction": "Initial mechanical coverage checked tool success but missed silent per-line truncation. Same-session manifest supplement completed after native local integration; final evidence equality now verified for all original materials."
+  }
+]

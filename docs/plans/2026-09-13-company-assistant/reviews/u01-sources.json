@@ -1,0 +1,21 @@
+{
+  "checked_at": "2026-09-14",
+  "upstream_pinned_source": "meeting-upstream-review/upstream-pinned-files/apps/control-plane/src/modules/provider-delivery/reconciliation.ts",
+  "adaptation": "Python SQLite Feishu conceptual semantics; no copied Slack protocol",
+  "official_pages": [
+    {
+      "url": "https://open.feishu.cn/document/server-docs/im-v1/message/create",
+      "retrieval": "page title only; dynamic body unavailable; no uuid retention/lookup support asserted"
+    },
+    {
+      "url": "https://open.feishu.cn/document/server-docs/im-v1/message/get",
+      "retrieval": "page title only; dynamic body unavailable; no uuid retention/lookup support asserted"
+    },
+    {
+      "url": "https://open.feishu.cn/document/server-docs/im-v1/message/read_users",
+      "retrieval": "page title only; dynamic body unavailable; no uuid retention/lookup support asserted"
+    }
+  ],
+  "http_adapter_implemented": false,
+  "live_platform_validation": false
+}

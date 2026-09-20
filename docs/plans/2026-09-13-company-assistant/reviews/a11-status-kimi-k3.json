@@ -1,0 +1,40 @@
+{
+  "candidate_sha256": "52a8595cf15540df079dbba9da5398034b1474d287eba1463b976e75fcba2611",
+  "requested_model": "kimi-code/k3",
+  "configured_model": "k3",
+  "configured_provider": "managed:kimi-code",
+  "base": "fb7cb04cf9acabb7fae6e815946d607b45465d35",
+  "files": [
+    "ostag/briefs/runtime.py",
+    "ostag/config.py",
+    "ostag/work_monitor/server.py",
+    "tests/test_brief_flags.py",
+    "tests/test_brief_lifespan.py"
+  ],
+  "events_file": "kimi-review-1789687130170141000.stdout",
+  "events_sha256": "b7f14d5540c4df1c922d6597ab4b167877939fd285ec35606b3c851c03307f98",
+  "verdict": {
+    "candidate_sha256": "52a8595cf15540df079dbba9da5398034b1474d287eba1463b976e75fcba2611",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Read all listed manifest, source, test, verification-evidence, and evidence-provenance materials before approval.",
+      "Static review confirms the A11a scope remains default-off status/control only: all six Brief business flags default false, use strict parsing, and reject every enabled value until trusted composition exists.",
+      "No Brief business database, artifact, retention, runner, admission worker, external API, or CLI composition was found. The lifecycle composes only the isolated status owner.",
+      "The status implementation uses an existing directory, directory-fd traversal without symlink following, a lifetime owner flock, private 0600 temporary files, and atomic rename; malformed existing status files are not overwritten.",
+      "Control reads are bounded, regular-file-only, exact-schema, duplicate-key-safe, and fail closed for malformed, unknown, wrong-boot, lower-generation, or changed-same-generation control. Valid admission=on remains unsupported and never produces drain_ack.",
+      "Drain acknowledgement requires current boot, accepted generation, valid off control, zero business counters, running lifecycle, successful publication, and strict finite freshness validation.",
+      "Filesystem work is isolated in the spawned writer process with one outstanding request, bounded polling, timeout, termination/reaping, and a bounded terminal publication attempt, so delayed writer IO does not block the Monitor event loop or allow a delayed ready acknowledgement to overwrite shutdown under the reviewed design.",
+      "The legacy /healthz JSON remains exactly {\"status\":\"ok\"}; the only Brief addition is the bounded X-OStag-Brief-Status header and health lookup performs no filesystem IO.",
+      "Supplied deterministic verification evidence, not independently executed by this audit, reports 215 targeted tests and 3103 full tests passing with lint on macOS and native Linux aarch64 for this candidate, plus the fixed parent runtime-cancellation gate and listed parent gates passing.",
+      "The included historical early-cancellation failure is superseded by the final candidate's supplied passing cancellation evidence and the reviewed pending-request/reap logic.",
+      "Approval covers only the specified A11a foundation. It is not approval of enabled Brief services, production readiness, trusted mirrors, protected mounts, operation-level gates, recovery routes, or deployed preflight."
+    ]
+  },
+  "read_coverage": {
+    "expected": 29,
+    "read": 29,
+    "missing": []
+  },
+  "scope": "actual independent static audit and supplied deterministic test evidence; Kimi did not run tests"
+}

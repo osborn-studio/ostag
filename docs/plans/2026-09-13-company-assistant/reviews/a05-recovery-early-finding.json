@@ -1,0 +1,7 @@
+{
+  "finding": "Private recovery response released after committed cancellation during final unlocked read",
+  "source_sha256": "f73d046f7d7ddc24c931fec88ed4b28c146246e6d38b147e0769a4c9d9144e4c",
+  "proof": "parent-early-probe.stderr",
+  "baseline": "Unverified in-progress first builder, not final candidate",
+  "assertion": "If fixed parent hook successfully commits card cancellation before final authority/release, recovery must deny"
+}

@@ -1,0 +1,11 @@
+{
+  "files": {
+    "MEETING-PREP.md": "5abb67196681040790ac1a4e608539501f8341528e32e76a5bd54dec622b3e1d",
+    "UPSTREAM-SYNC.md": "77342985184b9a86a8c64c35f6c72318a090f372b39cfa697b4e29163f6c7701",
+    "SOURCES.md": "d2a6e2ffb5d7c6c350b4c0a0da265d2e2574022cb86ad40e5369f2037793c9e3",
+    "DEVELOPMENT-START.md": "0befaa1e20f383305bc66d44166338d55e11eece9941d6965449ed0a4e9457f9",
+    "backlog.json": "e02c21a4731ff6ddf0d3b7cfd2ccdf308efcfcd3699265dddc7ebffa8e073608",
+    "validate_plan.py": "3c2a6e3b31cede4f5b6f71211e5c252bd62f7bd3efca6d016e90d53cdec3884e"
+  },
+  "reviewed_plan_hash": "6ca7ec537aaaf6ba680aa8103f66b0be5d95f7ffe53d4c3f312cc2c221027271"
+}

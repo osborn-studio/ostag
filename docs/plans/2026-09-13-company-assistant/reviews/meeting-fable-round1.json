@@ -1,0 +1,80 @@
+{
+  "verdict": "方向可行，但按现稿会在窗口完整性、受众权限、部署判定、预算重启四处出可感知错误；先补下列最小改法再开发，不需新平台。",
+  "findings": [
+    {
+      "id": "F1",
+      "area": "时间窗完整性",
+      "counterexample": "某repo一周内dependabot开80个PR，按updated_at倒序拉取500条全局配额被吃光，人写的合并PR落在截断之后；系统只写'有gap'，但简报仍标meeting-ready。",
+      "patch": "配额改为每repo每类型(PR/Issue/commit/release)子预算+全局上限；截断时记录该repo该类型的cursor(最小已见updated_at)，若cursor>窗口起点则该repo标partial，partial的repo禁止进入'重要变化'，只进'未覆盖'。"
+    },
+    {
+      "id": "F2",
+      "area": "commit时间语义",
+      "counterexample": "rebase合并把两周前提交推到main，author/committer date都在窗口外，commits since/until漏掉；事件API 30天内也可能超300条。",
+      "patch": "默认分支变化不用日期过滤，用PR的merge_commit_sha+merged_at为锚；无PR的直推只在有上次观察HEAD时用compare(旧HEAD..新HEAD)，首次运行直推一律标unknown。"
+    },
+    {
+      "id": "F3",
+      "area": "受众与权限交集",
+      "counterexample": "查询身份能看12个private仓库，飞书群里有外包同事，草稿把私有Issue标题带进群发。",
+      "patch": "MeetingRequest增加shareable_repos子集(默认空=仅私聊)；每条事实带source_visibility；B阶段外发前若含非shareable来源则fail-closed需人工裁剪，不允许自动脱敏。"
+    },
+    {
+      "id": "F4",
+      "area": "部署误判",
+      "counterexample": "Vercel对PR分支的preview deployment状态success，被计为'已发布'；OStag腾讯CI workflow成功但deploy job因paths-ignore被skip。",
+      "patch": "deployed要求environment==配置的production名+平台receipt+deployed SHA可达main；只看workflow结论不算，必须取指定deploy job的conclusion与sha。release区分draft/prerelease/tag-only三类分别列出。"
+    },
+    {
+      "id": "F5",
+      "area": "飞书侧完整性",
+      "counterexample": "查询用户窗口中途被拉进群，前半段历史不可见；消息被撤回或编辑后内容与截图不符；500条全局配额被一个活跃群占满。",
+      "patch": "每群记录visible_since，早于该点标gap；记录消息edit/recall标记；每群子预算；引用消息保留message_id便于复核。"
+    },
+    {
+      "id": "F6",
+      "area": "预算/重启",
+      "counterexample": "180秒内20repo×PR timeline逐条REST调用≈300+请求不可能完成；job中途重启后重新计数，gh子进程挂起无kill。",
+      "patch": "GitHub reader不复用gh子进程，直接httpx+timeout+ETag条件请求；PR/Issue改GraphQL每repo一次(含timelineItems前50)；预算与cursor持久到job revision，重启续跑而非重跑。首版repo上限从20降到8。"
+    },
+    {
+      "id": "F7",
+      "area": "plan DAG",
+      "counterexample": "D07真实试点不依赖M05却要发布会议功能；M07评测由写M05的同一任务造情景，holdout失去意义；U03在OStag无仓库agent写路径时是空任务。",
+      "patch": "D07依赖加M05；M07拆为M07a(情景与期望在M05前冻结，私有)与M07b(评分在M05后)；U03标deferred，直到存在仓库写路径才排期。"
+    },
+    {
+      "id": "F8",
+      "area": "上游重复",
+      "counterexample": "U02新建effect journal与已有outbox/lease fence并存，两套真值；U04重做Presence时序与已有六态只读重叠。",
+      "patch": "U02只做词汇映射：outbox状态增加ambiguous且不重放，intent字段挂在现有outbox记录；U04限定为'状态不等于完成权限'的守卫测试，不改Presence模型。U01只加sent_unconfirmed态并禁止非幂等重发。"
+    },
+    {
+      "id": "F9",
+      "area": "会议价值",
+      "counterexample": "安静一周，简报输出'本周无变化'，实际是GH令牌过期全部失败；或3个议题按活动量选出全是bot噪音。",
+      "patch": "来源失败时首句必须写'来源X不可用'而非无变化；议题排序规则固定：待你决策>阻塞超N天PR>聊天与代码矛盾>发布缺变更记录，bot作者事实默认降权且不能单独成议题。"
+    }
+  ],
+  "acceptance_cases": [
+    "AC1 用户说'本周'，请求在周日晚Asia/Shanghai发起：回显周一00:00至下周一00:00本地及UTC，服务器TZ改为UTC结果不变。",
+    "AC2 PR窗口前开、窗口内合、窗口后再评论：进入合并事件，event_at=merged_at。",
+    "AC3 rebase合并旧日期提交：列入变化且不依赖commit日期；首次运行无旧HEAD的直推显示unknown。",
+    "AC4 某repo PR超子预算：该repo标partial并出现在'未覆盖'，不进重要变化，简报不得meeting-ready。",
+    "AC5 preview环境success且无production receipt：显示merged且deployed=no(preview only)。",
+    "AC6 CI workflow成功但deploy job skipped：不显示已部署。",
+    "AC7 草稿含非shareable私有repo事实，用户要求发群：拒绝并列出需删除条目。",
+    "AC8 GH令牌401、飞书正常：草稿生成，首句声明GH不可用，状态needs_input。",
+    "AC9 job在第二个repo中途被杀重启：不重复计费，从cursor续跑，总请求数不超预算。",
+    "AC10 同名飞书用户与GH用户：不合并身份，仅提示'可能同一人'。",
+    "AC11 请求会议模板但M05未实现：B04拒绝开启并说明原因。",
+    "AC12 outbox发送超时无回执：状态ambiguous，不自动重发，简报标'投递未确认'。"
+  ],
+  "priorities": [
+    "P0 F3受众权限fail-closed、F4部署判定、F9来源失败首句——发错内容比漏内容代价高",
+    "P0 F6 GraphQL+持久预算+去gh子进程——否则180秒预算根本跑不通",
+    "P1 F1/F2/F5窗口完整性与partial语义",
+    "P1 F7 DAG修正(D07←M05，M07拆分，U03延后)",
+    "P2 F8上游适配收缩为映射与守卫测试，不建第二套journal"
+  ]
+}

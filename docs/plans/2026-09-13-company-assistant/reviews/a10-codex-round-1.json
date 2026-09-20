@@ -1,0 +1,37 @@
+{
+  "candidate_sha256": "5cb7fdd16ea963feb6c4ce78e60fa53a54892558505d6414e534a092a9d00360",
+  "files": [
+    "ostag/briefs/callbacks.py",
+    "ostag/briefs/card_delivery.py",
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/retention.py",
+    "ostag/briefs/revisions.py",
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "tests/test_brief_retention.py",
+    "tests/test_brief_revocation.py"
+  ],
+  "reviewer": "independent Codex collaboration agent",
+  "review_task": "/root/a10_independent_review",
+  "review_mode": "static read-only",
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/callbacks.py:304-310",
+        "issue": "[P1] Recheck original current authority after the new blocking retention gate. BriefCallbackController._current calls _authorize(p) and then check_guard. The same ordering occurs in CardDeliveryService._current (card_delivery.py:643-646), RevisionService._fresh (revisions.py:469-473), DeliveryService._policy (delivery.py:464-480), and DeliveryService._retained_result (delivery.py:682-688). check_guard performs file identity reads plus a RetentionLedger BEGIN IMMEDIATE transaction and commit; it can wait for another connection for up to 50 ms before succeeding. It only revalidates retention authority, not the original source/grant/private-binding authority. Consequently a source grant can expire or its current mirror can be revoked during this deliberately introduced DB wait while retention remains authorized. The later checks cover retention expiry and operation/card time bounds, not the original grant; a private response, egress, ACK acceptance, or revision operation can then succeed using the stale original authorization. This contradicts A10 requirement 4 and the existing callback contract that the final source/grant/mapping check follows all DB waits and rendering. Generation already avoids this specific deadline gap by retaining and checking its source/grant bounds after retention IO. Arrange the bounded retention IO before the final nonblocking original-authority check, while preserving the final retention/time fence, or provide an equivalent combined validation that retains and checks all relevant bounds. Merely swapping two checks is not sufficient if the final original-authority callback introduces another wait or outlives the retained retention deadline: preserve its existing nonblocking mirror contract and define one coherent combined authorization fence for both authorities.",
+        "reproduction": "Static call-path reproduction, not an executed test: configure the real BriefCallbackController with a registered completed job whose retention expires at t=60 and an original-authority callback that returns None only while its grant is current before t=10. Start prepare_preview at t=9. At its LAST _current call (after render_private), let _authorize succeed, then make another SQLite connection hold BEGIN IMMEDIATE on the retention ledger. Wait until this final RetentionLedger.transaction attempts BEGIN IMMEDIATE, advance the trusted time to t=10 (or revoke the original grant mirror), and release the competing writer within the 50 ms busy limit. RetentionGuard._check succeeds because the job/snapshots remain authorized until t=60; _current does not call _authorize again, and prepare_preview returns the private card after the grant has expired. The same barrier on the final _policy/_current at the real TEXT/Card before_egress callback permits bytes to be handed off under stale original authority. Add deterministic real contention regression coverage where ORIGINAL authority changes inside the retention wait, separately from tests that revoke retention itself."
+      }
+    ],
+    "notes": [
+      "Reviewed the immutable 10-file candidate against baseline 84b49ef and the supplied A10 requirements, including necessary unchanged store, delivery, callback, revision, generation, and source contracts. Recomputed and matched the aggregate candidate SHA-256. No product code, tests, policy, repository instruction files, or deployed state were changed.",
+      "This is a static independent Codex review. I did not run the target/full/native-platform suites or parent regression gates, and do not claim their reported passes as my own test execution. The previous quota-exhausted Claude review produced no verdict and is not counted as approval.",
+      "The source/resource/grant tombstone keys, immutable minimum snapshot expiry, highwater rollback denial, typed fail-closed opt-in guards, primary-before-secondary cleanup ordering, verified cleanup receipts, and payload retirement preserving send/cost identity were inspected. No additional concrete blocker was established in these areas.",
+      "The finding concerns an intentional new retention database wait AFTER original authorization, not an infinite demand to recheck after every final instruction. Existing logical precommit acceptance points and their documented unbounded OS/fsync limitation were not independently promoted to another blocker.",
+      "A11 still must serialize admission/registration/dispatch, re-register the completed original revision before downstream use, compose every required guard and target, and provide authenticated RequesterContext plus current source/grant/private-binding mirrors. Scheduler/server wiring and real remote-platform acceptance are outside this candidate.",
+      "Cleanup is current owned local SQLite retirement, not RAM, external WAL/backups, filesystem snapshots, remote cards, or external-index erasure. Historical sends and conservative started/unknown spend remain facts. Retired content reads deny; hash-only evidence is not current content verification or human receipt.",
+      "File identity is fail-closed and intentionally tied to device/inode/birth-time representation. Linux requires libc statx and filesystem STATX_BTIME; missing capability, replaced files, and incompatible interpreter/platform identity representation require deliberate migration or prevent launch. Static ABI inspection is not deployment acceptance."
+    ]
+  }
+}

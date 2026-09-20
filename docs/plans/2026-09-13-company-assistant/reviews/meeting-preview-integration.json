@@ -1,0 +1,7 @@
+{
+  "code_commit": "3a4002dd0fe36afbb19ac24d3e3abb60ada9fd04",
+  "candidate_sha256": "bcb5dac1246c5ad080c66445a015e268d9936b02e675e034e746366252bea12c",
+  "integrated_cli": "passed; output identical to reviewed candidate",
+  "expected_exit": 3,
+  "stdout_sha256": "852fb3a0a934dca99248488a1e9f3e7e245eed73f1e2b30deeddaadba352ccb5"
+}

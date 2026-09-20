@@ -1,0 +1,7 @@
+{
+  "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+  "own_cli_pid": 72255,
+  "signal": "SIGINT",
+  "reason": "Actual auditor repeatedly rereads same >50k output-truncated evidence file;43/44materials read. Interrupt only own CLI call to resume same audit with exact small supplements. No approval inferred.",
+  "resume_session": "session_6eaf7619-fe6d-4218-aee9-27a586b2ae1b"
+}

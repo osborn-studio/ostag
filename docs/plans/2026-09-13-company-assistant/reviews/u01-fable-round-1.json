@@ -1,0 +1,61 @@
+{
+  "candidate_sha256": "45c816693f083055a18aa75e4ccd60608e45d0b24e93808df18463005b37b42a",
+  "base": "1d0778dad3c9dde10142097f55f6aa427f3153de",
+  "files": [
+    "ostag/briefs/delivery.py",
+    "ostag/briefs/store.py",
+    "tests/test_brief_delivery_observation.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 61998,
+      "outputTokens": 19,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.062092999999999995,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 26424,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 85211,
+      "webSearchRequests": 0,
+      "costUSD": 3.0255977499999998,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 24713,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/store.py",
+        "issue": "`BriefStore._cost_schema` still requires `PRAGMA user_version in (2, 3)`. After the new opt-in `enable_delivery()` moves the file to schema4, every cost-ledger operation (reserve_cost, start_cost, has_uncertain_cost, cost_record, settle/mark_unknown/release) raises BriefSchemaError. BriefWorker._execute calls has_uncertain_cost first on every run, so on a schema4 DB the A04 worker permanently quarantines with 'store_unavailable' and generation is dead. This contradicts 'preserve all old rows incl ... cost ledgers' and makes U01 unusable alongside the existing pipeline on one database. No new test exercises cost/generation AFTER enable_delivery (the migration test does cost ops before enabling; the `ready` fixture runs the worker before enabling; the unicode test only uses claim/start/complete).",
+        "reproduction": "store = BriefStore(tmp_path/'x.db'); store.enable_delivery(); store.has_uncertain_cost(WorkerContext('w'))  -> BriefSchemaError('cost operations require schema2...'). Equivalently with the fixture: briefs = Authority().service(BriefStore(p)); briefs.store.enable_delivery(); w = BriefWorker(briefs); briefs.submit(event()); assert w.run_once().result(2) == 'store_unavailable' and w.quarantined. Fix: accept schema 4 in _cost_schema (e.g. `< 2` / `not in (2,3,4)`) and add a RED->GREEN test that runs a full generation + cost reservation on a schema4 database."
+      }
+    ],
+    "notes": [
+      "Liveness (not safety) limitation: the synchronous `before_egress` recheck opens a nonwaiting BEGIN EXCLUSIVE; a concurrent SHARED read at that instant raises StoreBusy inside the transport, which is classified 'transport_error' and permanently fences a send that never happened. Spec permits conservative fencing, but a plain reader should not be able to poison a delivery; consider retrying only the pre-egress check asynchronously and documenting the residual risk.",
+      "When a direct response carries a candidate message_id but the accept transaction cannot commit before deadline/stop/cancel, the candidate is rolled back and `_unknown` does not persist it; the delivery is then unknown with no exact-ID lookup ever possible. Consider passing the candidate into the best-effort unknown write (still no resend).",
+      "Persisted user cancellation observed at the egress gate raises plain Conflict inside the transport and is recorded as first_failure 'transport_error' rather than a cancellation reason; misleading diagnostic only.",
+      "test_actual_pinned_old_binary_rejects_schema4 depends on `git show` of a hard-coded baseline SHA being resolvable in the verifier checkout; fragile if history is rewritten/gc'd, but acceptable as an explicit legacy-binary gate.",
+      "test_independent_processes_compete_for_one_opaque_claim uses a fixed child clock '2026-09-13T00:00:00Z'; it only passes because the Authority fixture clock precedes it (ClockError otherwise). Host runs confirm it passes today; note the coupling.",
+      "Honest limitations correctly stated in module docstring: no HTTP/Feishu implementation, no uuid retention/lookup-by-uuid claims, a lost response with no ID is unrecoverable automatically, provider_accepted is never human receipt, transport Protocol is trusted code not a credential.",
+      "No dependency changes; only the three permitted files touched; legacy _connection/_transaction paths and schema1->2 / enable_manual contracts appear byte-identical in behavior; READABLE_SCHEMA_MAX raised to 4 with exact DDL set comparison retained.",
+      "I did not run tests or Ruff; this is a static review."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-u01-227113da",
+  "source_metadata_sha256": "407801c84bf4917b93c9d559b407527902470ea4dca18195ddddcc4a32515ad0"
+}

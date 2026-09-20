@@ -1,0 +1,58 @@
+{
+  "candidate_sha256": "9ef70ccbbfccb1e4e494846d34381d1b93bcfa24b8e1d90449d555530ddf7943",
+  "baseline_commit": "a9360fbd2ae67e6931bc47c22bc4215e23c24b95",
+  "code_commit": "8812e8087f5b40d6ea8b0a7426202b00f5804608",
+  "mac_full": {
+    "passed": 2819,
+    "warnings": 11,
+    "seconds": 91.17
+  },
+  "linux_full": {
+    "passed": 2819,
+    "warnings": 11,
+    "seconds": 108.14
+  },
+  "target_tests": {
+    "passed": 304,
+    "warnings": 1,
+    "seconds": 33.7
+  },
+  "linux_target_tests": {
+    "passed": 304,
+    "warnings": 1,
+    "seconds": 49.6
+  },
+  "parent_gates": 21,
+  "linux_parent_gates": 21,
+  "ruff": "passed",
+  "lock_check": "passed",
+  "linux_limit": "OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE=1; no sibling repositories or host credentials mounted. Not Ubuntu x86_64 or Tencent production certification.",
+  "environment": "native Linux aarch64 Ubuntu6.8 kernel/Debian12 userspace/Python3.11",
+  "clock_setup": "Dedicated a10 VM guest NTP paused for this session; Lima host synchronization is sole clock authority; product rollback denial unchanged",
+  "clock_validation": {
+    "samples": 4238,
+    "backward_steps": [],
+    "minimum_wall_step_ns": 5044583,
+    "duration_seconds": 30,
+    "test_vm_only": "After settling: systemd-timesyncd stopped for own a10VM session; Lima host clock sole authority"
+  },
+  "artifacts": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-a10-k3-egress",
+  "files_sha256": {
+    "ostag/briefs/callbacks.py": "36907d13b96b9e9476b8ddaf6c0f149d7e035fa19273cfefad3388b170c0617d",
+    "ostag/briefs/card_delivery.py": "cecb213d73df7477938411f502ecce529efe1e367c7cb15edb346496316a30bf",
+    "ostag/briefs/card_transport.py": "69dbc90818eff78518da53a9dd8fd06173289959dabdd568eab53474e098f356",
+    "ostag/briefs/delivery.py": "0dc6e6660ae8380ce3bc098dda342807109ffc005baa8fc26623288b98e34f2f",
+    "ostag/briefs/feishu_transport.py": "0cf8fc52b4e517515d0e8e22f5d87a21a66c0ed092e56fa9fa5652de707a14ce",
+    "ostag/briefs/openai_transport.py": "d5954b24f1f6347e35d554f393ef6deb747bcd6e4294fe99e83eb4f73be87beb",
+    "ostag/briefs/retention.py": "63944e78561f9e9fa9e794085201a2d17bcf1e0d1965bca5f2cbb0a3bf0ebf28",
+    "ostag/briefs/revisions.py": "efc4a4105f2828c986baefed568b06c042caf5d2e919dbddf24ca8f640d243ae",
+    "ostag/briefs/service.py": "d19682dd87e3951a556398e87d33a098bfccfc3df566e112b042d8c9e77cb493",
+    "ostag/briefs/store.py": "0653f87736e215cd85c9803116a3d0b1f3bde8648a50fe1efd3012d604ec9a71",
+    "ostag/briefs/worker.py": "e38495773e084fd203d87d2f3452ddb2fb269b1b8c24735eece615c0df5c2aed",
+    "tests/test_brief_retention.py": "299703e521a8b96930c7ebc56b5359fb24f3fc8c6fb78626897f93bd44920c9f",
+    "tests/test_brief_revocation.py": "b6f29a0465b926649d7096afa3b6c07008086f64a1d0d432c8005fd169448389"
+  },
+  "review_receipt": "a10-kimi-k3-round-1.json",
+  "read_coverage": "reviews/a10-kimi-read-coverage.json",
+  "no_live_platform_or_production_acceptance": true
+}

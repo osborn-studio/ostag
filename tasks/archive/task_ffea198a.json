@@ -1,0 +1,7 @@
+{
+  "task_id": "task_ffea198a",
+  "capability": "ostag.meeting.local-preview",
+  "prompt": "Deliver a runnable synthetic dual-source meeting preparation CLI and source-linked Markdown; exact bounded specification at /Volumes/AIMATE_WORK/Developer/CodeX/OStag-runtime/project-unblock/DELIVERY-RESET.md",
+  "priority": 90,
+  "source": "task_queue"
+}

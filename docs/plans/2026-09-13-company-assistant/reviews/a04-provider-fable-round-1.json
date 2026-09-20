@@ -1,0 +1,59 @@
+{
+  "candidate_sha256": "a11fdd60e4f2836e37f6e7254a006d1938fd43738994100d837513e46ddc7974",
+  "base": "514ba315ae7e1623333c6629db592ddb48d93a42",
+  "files": [
+    "ostag/briefs/generation.py",
+    "ostag/briefs/openai_transport.py",
+    "pyproject.toml",
+    "tests/test_brief_openai_transport.py",
+    "uv.lock"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 50964,
+      "outputTokens": 20,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.051064000000000005,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 35594,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 70014,
+      "webSearchRequests": 0,
+      "costUSD": 3.18,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 33854,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Privacy repair verified by source inspection: the only state that crosses the sanitizing boundary is the string result of _authorization_reason (exact-type checks on _Stopped/LeaseLost/SchemaError, allowlisted reasons); the intermediate OpenAITransportError in post() is raised after the `except Exception as exc` block (no __context__), and the final _Stopped/LeaseLost/TimeoutError/CancelledError/OpenAITransportError are constructed outside all handlers, so no callback/network exception object, message, cause or traceback frame is retained. Network-hook text only survives via the fixed _DIAGNOSTICS allowlist and only for exact-type OpenAITransportError with a single str arg.",
+      "Seam ordering is correct in both files: prepare(per_egress=True) does store.assert_current (guard/DB) -> checkpoint (guard.assert_current + authorize_current) -> local_remaining (clock only) -> cancellation; the adapter calls reauthorize() inside the scheduled run() task after build_request/cookie clear with no await between the callback and client.send; fresh seconds only shrink via min() + timer.reschedule; outer _bounded_call deadline is never extended. Count and create share one monotonic deadline (asyncio.timeout_at + outer wait), cancellation Event is honored standalone, and late results are discarded by the post-wait check().",
+      "Cost arithmetic re-derived: ((i-cached)*4 + cached + o*16 + 1)//2 == ceil((i-cached)*2 + cached/2 + o*8); 100/3/50 -> 596, uncached -> 600, 101/3/50 -> 598, 100/3/40000 -> 320196, 9000/3/40000 -> 337996; overrun not clamped; absent cached detail is uncached (documented); any malformed/extra usage key, cached>input, nonzero reasoning, wrong model/object/tier -> usage None (conservative unknown spend).",
+      "Minor race (note, not blocker): in generation._bounded_call.invoke, `replace(current_request, remaining_seconds=min(..., deadline - loop.time()))` runs after check(); if the clock crosses the deadline between the two, TransportRequest.__post_init__ raises SchemaError which generate() records as transport_error instead of timeout. Consider clamping/raising _Stopped('timeout') when the computed value is <= 0.",
+      "Adapter maps any httpx.TimeoutException (connect/read/write/pool) to the A03 'timeout' status; acceptable because per-request httpx timeouts are set to the remaining whole-call deadline, but a very short remaining window can surface as ConnectTimeout->timeout rather than the overall deadline path. Behaviorally equivalent for the ledger.",
+      "Cleanup in generate()'s finally awaits asyncio.gather(call, cancelled) without its own bound; a second owner cancellation during that await re-raises CancelledError while run() finishes client/response closure in the background. Existing outer _bounded_call already refuses late results; note-level.",
+      "Injected AsyncBaseTransport hook is closed by the per-call AsyncClient __aexit__, so a real reusable transport injected for tests is single-use per adapter instance; fine for the Wire fakes and the None/production path which builds a fresh AsyncHTTPTransport per call.",
+      "Usage from an HTTP non-200 create response with a well-formed correct-profile envelope is settled (body forced empty); this is the requested 'retain valid usage on error response' behavior but relies on TLS origin trust of api.openai.com. Absurdly large token counts that exceed Usage/_cost_int bounds raise SchemaError inside run() and surface as generic transport_error (unknown spend), not as fabricated usage.",
+      "test_count_boundary_authorization_changes_block_create_and_draft[cancel] and the lease-loss journey depend on _GenerationStore.assert_current/guard.assert_current observing the persisted cancel without waiting for the 10 s default heartbeat; not verifiable from the supplied excerpts, left to the fixed verifier. Timing-margin tests (0.02/0.03 s gates, 0.1/0.15 s shared budget) may flake on a loaded host.",
+      "Dependency delta is minimal: httpx==0.28.1 added only to the openai extra; uv.lock diff touches only requires-dist/extra metadata with no resolution drift; compatible with openai 2.44.0 (httpx<1). Import of ostag.briefs.openai_transport stays httpx-free (TYPE_CHECKING only; import inside __init__/generate).",
+      "No live provider calls, credentials, billing invoice, semantic or platform acceptance are claimed; count endpoint cost is explicitly not asserted free, and pre-IO configuration/preflight failures leaving unknown spend/quarantine are documented as the operational limitation."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a04-provider-6feb1fba"
+}

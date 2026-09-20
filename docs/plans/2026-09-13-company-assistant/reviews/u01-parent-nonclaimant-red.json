@@ -1,0 +1,7 @@
+{
+  "source_snapshot": "/Users/osborn/.codex/visualizations/2026/09/13/01a09aef-9838-72c3-b5fa-9e65457ce215/ostag-restart/coding-u01-review/snapshot-1789395424642279000",
+  "source_candidate_sha256": "e8cf95546b279f8156aafa906c5b7056d90e0c8eff5a3c1738a857e53e61489b",
+  "method": "isolated Python subprocess imports exact old store/delivery modules from immutable prior candidate; current files not modified",
+  "exit_code": 1,
+  "expected_red": true
+}

@@ -1,0 +1,59 @@
+{
+  "candidate_sha256": "bdb2f398aa911634b5843aed0b087fd3c4e8d55caa79c9a14e8c9a7a9ee7e1ef",
+  "base": "aa6c89b88b300b485b1ed09c35840ea908d4525b",
+  "files": [
+    "ostag/briefs/generation.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/validation.py",
+    "tests/test_brief_generation.py",
+    "tests/test_brief_validation.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 51808,
+      "outputTokens": 22,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.051918,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 51505,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 71815,
+      "webSearchRequests": 0,
+      "costUSD": 4.01172775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 49898,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Authorization ordering verified against the parent probes: pre-IO path is start_cost -> remaining() -> [inside scheduled task] store.assert_current -> checked('before_io') -> local_remaining (clock only) -> transport.generate; accept path is settle_cost -> remaining() -> validate_output -> Provenance -> store.assert_current -> checked('before_accept') -> cancellation -> local_remaining -> return. No blocking store call follows the final checkpoint at either boundary, and test_no_blocking_lease_read_after_final_authorization would fail on either regression (armed read sets revoked; transport asserts; final assert).",
+      "Cost primitives: reserve_cost/start_cost run under _attempt (BEGIN EXCLUSIVE, clock sampled after lock, final _fresh_attempt) with a same-day wrapper on the last sample; job cap, namespace UTC-day cap, cumulative call count (<=3, non-released rows), overrun stop, profile first-use pin (Conflict on drift), call-id tombstone, fence/owner-bound single 'reserved'->'started' transition, settle idempotent/contradiction Conflict, unknown retains maximum, release only from 'reserved'. Fixture arithmetic checked: 1789257600 == 2026-09-13T00:00:00Z and APPLICATION_ID 0x42524653 == 1112688211; migration test compares DDL/rows before/after and refuses user_version=3 / foreign app id without byte changes.",
+      "Conservative-but-lossy path (not a blocker): when start_cost is denied (BudgetDenied on day change/lower daily cap, LeaseLost, or the reserve-then-cancel Conflict branch) generate returns without releasing the provably unstarted reservation and without reservation_id in the result; the row stays 'reserved', charging job cap and one call slot until A04 reconciles via cost_record(scope, job_id, call_id)/release_cost. Document this A04 duty.",
+      "generate's timeout branch in _bounded_call sets the caller-supplied cancellation Event as a cooperative stop signal; A04 must not read that event as an operator cancellation (result status is 'timeout').",
+      "Non-Conflict store failures after IO (StoreBusy/ClockError from settle_cost, mark_cost_unknown, assert_current; ClockError inside local_remaining at accept) propagate as exceptions rather than a GenerationResult; spend remains started/settled (safe), but A04 must treat any exception as unknown outcome. ClockError raised inside prepare() is labeled 'transport_error'.",
+      "settle_cost/mark_cost_unknown/release_cost validate the WorkerContext format only and do not bind it to the reservation's owner/fence; acceptable per the trusted-internal-capability docstring but A04 must not expose these to endpoint input.",
+      "_LINK is an escape-form filter with residual edges: false positives on '<name>' placeholders, '[ref]:' reference syntax, 'socket.io', 'node.js/x', 'Data:5'; false negatives on bare unlisted TLDs (e.g. 'evil.xyz' without slash). Acceptable given the mandatory plain-text/no-autolink rendering contract; it is not semantic verification, as documented.",
+      "All SQLite calls (including store.assert_current inside the scheduled prepare()) block the event loop, so asyncio.wait's timeout cannot preempt a slow DB wait; the subsequent local_remaining/remaining checks still reject expired deadlines. A04 should run generate off the loop or accept loop stalls.",
+      "test_duplicate_logical_call_has_at_most_one_provider_call relies on deterministic task scheduling rather than a true race; the actual guarantee is the exclusive-lock single 'reserved'->'started' transition in start_cost, which the concurrent reservation test and lock-wait clock test exercise. Cancellation test correctly distinguishes requested cancellation from proven termination.",
+      "A fully empty output (all sections empty) is rejected as invalid_output rather than needs_input; consistent with 'no usable claims' but worth noting for A04 retry policy.",
+      "Not verified here: Ruff line-length/import-order configuration and the full 1751-test regression; A02 tests asserting a fresh user_version==1 would need to have been updated. Tests use synthetic transports only; no real provider isolation, tokenization/pricing bound (including framing overhead), or semantic truth is proven, as the module docstrings state."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a03-review-b6c787e5"
+}

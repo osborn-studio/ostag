@@ -1,0 +1,69 @@
+{
+  "candidate_sha256": "5e12cb690983df2c91e84decc4952da54452b4e3500f76711dd1f8486ec6a580",
+  "base": "c74b772dfa53b4e0685283576584f4e7fd1e7ef5",
+  "files": [
+    "ostag/briefs/service.py",
+    "ostag/briefs/store.py",
+    "ostag/briefs/worker.py",
+    "ostag/core/runner.py",
+    "tests/test_brief_service.py",
+    "tests/test_brief_worker.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 74646,
+      "outputTokens": 19,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.074741,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 2,
+      "outputTokens": 39268,
+      "cacheReadInputTokens": 631,
+      "cacheCreationInputTokens": 101187,
+      "webSearchRequests": 0,
+      "costUSD": 3.98731775,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 35836,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "changes_requested",
+    "blockers": [
+      {
+        "file": "ostag/briefs/store.py",
+        "issue": "LeaseGuard busy grace is unbounded before the first confirmation. `_bounded_clock` only enforces wall/monotonic bounds once `_confirmed_until` is set, and `_confirmed_until` is set by `_confirm` only after a successful fenced transaction. In `__enter__` the first `assert_current` therefore runs `_database`'s `while True` StoreBusy loop with NO lease, deadline or elapsed-monotonic bound: `_check_open()` never fails (guard not lost, thread assigned), `_bounded_clock()` never raises, and the loop sleeps on `stop_requested`, which BriefWorker.stop() never sets (bridge only sets the asyncio cancellation Event). The claim already consumed an attempt/fence and the persisted lease/deadline keep running, yet the guard retries past both. The requirement was explicit: busy grace must be bounded by last CONFIRMED lease expiry/original deadline and elapsed monotonic time; here the pre-confirmation window has no bound at all, and worker.stop() returns 'local_stopping' with a thread that cannot exit until the foreign lock is released.",
+        "reproduction": "Use the `local` fixture, service.store.busy_timeout = 0.01, monkeypatch `ostag.briefs.store.monotonic` to a tick you control. Monkeypatch `service.store.assert_current` so its FIRST call (the one from LeaseGuard.__enter__, i.e. before any `_confirm`) signals an Event and waits until a test thread has executed `BEGIN EXCLUSIVE` on a second sqlite3 connection, then delegates to the original. submit(event()); future = worker.run_once(); wait for the signal; hold the EXCLUSIVE lock; set tick += 1e6 and authority.now = 10**6 (far past lease 30s and deadline 180s). Expected per requirement: guard latches loss within the bounded grace and the future resolves ('needs_input'/'store_unavailable') without waiting for the lock. Observed: `_database` keeps retrying (StoreBusy every 10 ms, `_bounded_clock` returns because `_confirmed_until is None`); future.result(2) raises TimeoutError; worker.stop(0.5) returns 'local_stopping' and `worker._thread.is_alive()` stays True until `holder.rollback()`. Contrast: the same contention injected on the second checkpoint (after `_confirm`) latches LeaseLost as soon as the bounds pass."
+      },
+      {
+        "file": "ostag/briefs/worker.py",
+        "issue": "The corrected transient-StoreBusy policy is applied only to calls routed through `LeaseGuard._database`; the direct store calls in `_execute` (`cost_record`, `start_generating` inside the guard block, and the whole tail `outbox`/`cancel`/`_fail`/`cost_record`/`get` reconciliation) still convert ordinary retryable contention into irreversible outcomes with no cost at risk. (a) A StoreBusy from `start_generating` or `cost_record` right after claim is swallowed by `except Exception: pass` with cause 'store_error' and `_fail` retires the healthy job to needs_input before any IO, consuming the requester's job on a lock blip. (b) A StoreBusy in the tail (e.g. `store.outbox`) hits `except (StoreError, SchemaError): self._quarantined = True` and permanently disables the worker even when no reservation exists (config_changed / load_job / checkpoint_denied-before-reserve paths), which is exactly the class Fable blocker 2 asked to remove (retryable read failure escalated to process-lifetime quarantine). The requirement asked to retry bounded safe DB work rather than convert on contention; those calls should go through the same bounded retry/CAS path or yield a retryable status when nothing paid is outstanding.",
+        "reproduction": "(b) `local` fixture, service.store.busy_timeout = 0.01. admitted = service.submit(event()); service.config = replace(authority.config, daily_limit_micros=999999) (pin mismatch, no reservation ever created). Monkeypatch `service.store.outbox` to signal an Event and wait until the test thread holds `BEGIN EXCLUSIVE` on a second connection, then call the original. future = worker.run_once(); when signalled, hold the lock ~50 ms and roll back. Observed: original outbox raises StoreBusy -> tail except -> `worker.quarantined is True`, future.result() == 'store_unavailable', and every later `worker.run_once().result()` == 'stopped' although `service.store.has_uncertain_cost(worker.context)` is False and `cost_record(SCOPE, admitted.job_id, 'manual-generation-1') is None`. (a) Same setup without the config change, patch `service.store.start_generating` to wait for the held lock: future.result() == 'needs_input', failure_cause == 'store_error', `service.transport.calls == []`, job attempt consumed (attempt == 1, state needs_input) despite a 50 ms lock."
+      }
+    ],
+    "notes": [
+      "Parent blocker (Future callbacks under internal lock) is resolved: `_dispatch`/`stop` only hand a (future,status) tuple to a single mailbox under `_lock`; `future.set_result` runs on the dedicated `brief-completion` thread with no lock held; a reentrant `run_once` returns 'busy', a callback calling `stop` from the notifier thread joins the worker thread (never itself), a stop issued on the owned execution thread skips self-join, cancel-vs-set_result is absorbed via InvalidStateError, and a blocking callback only pins the submission slot (documented) without blocking bounded stop. No new threads/executors are created per callback.",
+      "Fable blocker 1 resolved: the 20 ms `assert_current` polling is gone; `watch()` observes only in-process latches (guard.lost/_stop/operator cancel). `retry_busy` is explicit opt-in on LeaseGuard; default A02 sticky-loss behavior is unchanged (`_confirm` is a no-op, StoreBusy latches). Post-confirmation grace is bounded by min(confirmed lease, deadline) in wall time plus monotonic elapsed time; renewal only extends the bound by the delta actually persisted; backwards/invalid clocks latch ClockError/SchemaError loss. Heartbeat retries only itself and authorizes nothing.",
+      "Fable blocker 2 largely resolved on the idle path: `_dispatch` maps StoreBusy/ClockError/Conflict to 'store_unavailable' without quarantine; `has_uncertain_cost` now runs before recover_one/claim_one so unknown spend no longer consumes an unrelated attempt/fence. The residual quarantine/terminalization on the post-claim direct store calls is the second blocker above.",
+      "Contention gate reasoning: settle_cost/mark_cost_unknown go through `_database(evidence=True)` and retry StoreBusy while confirmed bounds hold; assert_current/complete retry with a fresh bounded clock sampled inside every transaction and precommit re-runs on each retry. Response received during lock wait therefore settles with actual usage and completes without re-sending; response after release is unaffected. Contention crossing the confirmed lease/deadline latches loss before any egress/commit (covered by the new lease/deadline/monotonic tests).",
+      "Freshness/identity/idempotency/precommit-ordering observations from the first review still hold (final single-clock recheck of all retained bounds; RequesterContext from NormalizedEvent.principal only; per-source exact SourceRef + grant + destination checks pre-lock and in precommit; get_by_event before clock; precommit after INSERTs/effect check/materialization with only the fenced clock and COMMIT following). store.cancel no longer records a 'cancelled' failure for a draft_ready job; load_job pin mismatch is 'config_changed'; reconciliation-required maps to 'recovery_required'. run_once now tolerates a closed loop and releases `_busy`; service.close() cancellation is sanitized to 'unavailable' while genuine caller cancellation (task.cancelling()) is preserved.",
+      "Minor: provenance stored at completion embeds the full SourceSet (up to 500 x 4000-char excerpts) on top of parameters/config; `_canonical`'s 1 MiB bound is checked only at commit, so a request that is valid at admission (its own dict <= 1 MiB and serialized input <= max_input_bytes) can pay for a model call and then fail 'commit_failed'. Bound the provenance envelope at admission or store sources by reference/hash.",
+      "Minor: a revocation detected by the complete-time precommit is persisted as 'commit_failed' (cause pre-set before guard.complete) rather than an authorization label; and when `_fail`'s CAS loses (row changed) the job is left 'generating' until lease expiry with no failure cause. Both are conservative but reduce diagnostic accuracy.",
+      "Bounded-shutdown caveat (documented, acceptable): if the loop is stopped/closed while a task is mid-await after a stuck synchronous transport returns, `_execute` never resumes, so the LeaseGuard heartbeat thread keeps renewing until the original deadline (<= 180 s) and the job/cost are left for recovery/operator reconciliation; the worker is quarantined so no second call or late commit occurs.",
+      "Limits: static review only; tests, Ruff, parent probes and the contention gate were not executed here. FakeTransport exercises the A03 generate contract, cost ledger, provenance and SQLite completion paths but proves nothing about provider read-only isolation, billing bounds or semantic quality; production ReadOnlyTransport certification remains an external gate. Ruff import-order conformance of the runner.py insertion could not be verified against the project config."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-a04-review-5bc69cb9"
+}

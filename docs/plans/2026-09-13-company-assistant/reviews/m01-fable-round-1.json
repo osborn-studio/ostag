@@ -1,0 +1,58 @@
+{
+  "candidate_sha256": "2e0fa8cc35f0b12f854f41fcc3266a4a43f6edbef058bf192f01ae49a3caff4a",
+  "base": "6bbb510046b6e73fcf24a44feaa627aec2746b9c",
+  "files": [
+    "ostag/briefs/meeting_models.py",
+    "ostag/briefs/project_mapping.py",
+    "tests/test_meeting_contracts.py",
+    "tests/test_meeting_preflight.py"
+  ],
+  "model_usage": {
+    "claude-haiku-4-5-20251001": {
+      "inputTokens": 42308,
+      "outputTokens": 19,
+      "cacheReadInputTokens": 0,
+      "cacheCreationInputTokens": 0,
+      "webSearchRequests": 0,
+      "costUSD": 0.042402999999999996,
+      "contextWindow": 200000,
+      "maxOutputTokens": 32000,
+      "thinkingTokens": 0,
+      "canonicalModel": "claude-haiku-4-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    },
+    "claude-fable-5-1": {
+      "inputTokens": 4,
+      "outputTokens": 25981,
+      "cacheReadInputTokens": 58377,
+      "cacheCreationInputTokens": 57115,
+      "webSearchRequests": 0,
+      "costUSD": 2.45598425,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 24225,
+      "canonicalModel": "claude-fable-5-1",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "verdict": {
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Blocker 1 (deadline anchor) is resolved: FrozenScope no longer derives any deadline; ExecutionTiming binds the frozen scope (content_hash equality via _execution_timing) to a trusted first_claimed_at >= intake_at and derives collection_deadline/hard_deadline from the pinned budget durations. CollectionSeal now requires first_claimed_at <= start <= finish <= sealed_at, finish <= collection_deadline (inclusive) and sealed_at < hard_deadline (exclusive); decide_result rejects now < first_claimed_at and fails closed at now >= hard_deadline. Module/BudgetProfile docstrings now state budgets are global per job across attempts. Traced by hand: the previous reproduction (claim 12:04:10, decide at 12:04:30) now yields DRAFT_READY (test_first_claim_excludes_confirmation_and_queue_wait_from_execution), and the 12:10:00 seal is rejected by the collection ceiling.",
+      "Blocker 2 (finished=True after deadline) is resolved: the hard-deadline check precedes all completion flags, so finished=True at 12:03:00Z/12:03:00.000001Z/13:00:00Z yields FAILED/deadline_exceeded, meeting_ready False, can_commit == lease&&fence (sanitized status only). Covered by test_finished_flag_cannot_authorize_a_new_ready_commit_at_or_after_deadline and the retry test at 12:07:09.999999Z vs 12:07:10Z.",
+      "Blocker 3 (ZoneInfo construction) is resolved: local_time_window wraps ZoneInfo() in the same (ValueError, ZoneInfoNotFoundError, OSError) -> SchemaError normalization as A01 TimeWindow, and test_timezone_construction_failures_are_schema_errors monkeypatches meeting_models.ZoneInfo for all three exception types before the TimeWindow constructor path is reached.",
+      "test_result_precedence now carries expected reasons in the parametrization and asserts them for every case; no dead conditional remains. Precedence cases (cancelled > revoked > stale > deadline) and can_commit expectations match the implementation table, including grant_current=False with lease_current=False -> NEEDS_INPUT with can_commit False.",
+      "Restored-record strictness verified by hand: ExecutionTiming.from_dict recomputes both deadlines from first_claimed_at and rejects overrides; FrozenScope.from_dict rejects the now-unknown hard_deadline key; CollectionSeal.from_dict re-derives scope_hash/observation_cutoff/historical_state and re-validates timing binding; test_all_public_records_reject_unknown_missing_and_null_wire_fields includes ExecutionTiming and CollectionSeal.",
+      "Non-blocking: tests/test_meeting_preflight.py now imports via `from tests.test_meeting_contracts import ...` while the prior passing candidate used a bare module import; this requires the repo root (not just tests/) on sys.path (e.g. `python -m pytest`, a root conftest.py, pythonpath config, or tests/__init__.py). Verify the verifier's invocation resolves it; a double import of the contracts module under two names would be harmless for these pure helpers.",
+      "Non-blocking: several lines sit at exactly 100 columns by my count (e.g. the `observations = _records(...)` line in CollectionSeal.__post_init__, the deferred `from ostag.briefs.meeting_models import ...` in freeze_meeting_scope, the `req = request(repo_ids=[\"42\"], chat_ids=[\"42\"], ...)` line in test_canonical_provider_ids_cannot_share_a_requester_acl_entry, and the repo_heads annotation line in seal_collection). Fine if the project's Ruff line-length is 100; confirm.",
+      "Non-blocking: ExecutionTiming can be constructed for a needs_input scope (tests do so for the requested_as_of case). decide_result still returns NEEDS_INPUT via intake_reasons, so this is safe, but the lifecycle (A02) should not claim jobs whose intake state is needs_input; consider documenting that expectation.",
+      "Non-blocking: ExecutionTiming normalizes calendar overflow only for overall_seconds; this is sufficient because BudgetProfile enforces collection_seconds + generation_reserve_seconds <= overall_seconds, but the reliance is implicit.",
+      "Prior notes addressed: CollectionSeal docstring now states that only one observation overall plus one head per selected repo is required; FrozenScope docstring documents that content_hash includes intake_at and identifies one intake snapshot rather than a request identity.",
+      "I did not run tests, Ruff, or Fable; the implementer must report exact RED/GREEN commands and the external verifier confirms the suite."
+    ]
+  },
+  "cwd": "/Volumes/AIMATE_WORK/Developer/CodeX/OStag-osstack-worktrees/ostag-m01-repair-6e4a0244"
+}

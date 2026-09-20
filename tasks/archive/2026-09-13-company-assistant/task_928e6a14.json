@@ -1,0 +1,7 @@
+{
+  "task_id": "task_928e6a14",
+  "capability": "ostag.a11.lifecycle",
+  "prompt": "A11c: shared local Brief lifecycle control, pause fences and honest in-flight custody; Codex implements and Kimi K3 audits",
+  "priority": 80,
+  "source": "task_queue"
+}
