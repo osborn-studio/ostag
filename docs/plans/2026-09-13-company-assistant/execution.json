@@ -399,7 +399,7 @@
     "A06 multi-user rendering/lock latency certification and production retention lifecycle integration",
     "A10 production retention/revocation lifecycle and cleanup scheduler",
     "Feishu business writes/platform interaction acceptance (read-only local collection already verified)",
-    "stage PR GitHub Linux Python 3.11 CI (pending creation)"
+    "updated PR head GitHub Linux Python 3.11 CI"
   ],
   "next_tasks": [
     "A07",
@@ -1971,6 +1971,13 @@
     "deployment": "blocked: trusted host deployment lock and brief drain preflight not installed; restricted wrapper has no installer",
     "inventory": "RELEASE-STATUS-2026-09-20.md",
     "code_commit": "b7fcca5eefaf6b0e360a0f57b6ce856485c3f791",
-    "receipt": "reviews/stage-release-startup.json"
+    "receipt": "reviews/stage-release-startup.json",
+    "pr": "https://github.com/osborn-studio/ostag/pull/13",
+    "ci_portability_fix": {
+      "code_commit": "21462676d67f6de6c3d6821a06fca46a73d6a5bf",
+      "receipt": "reviews/stage-ci-portability.json",
+      "status": "196 targeted tests and no-Git export probe passed; Fable approved; final CI pending"
+    },
+    "required_github_approval": "one approval by a non-last-pusher; enforce_admins=true; current author cannot self-approve"
   }
 }

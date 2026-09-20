@@ -75,3 +75,9 @@
 - 实际Claude Fable 5.1对同一候选静态审查：approved，0 blockers；完整不确定性/备注保存在[验证回执](reviews/stage-release-startup.json)。该审查限启动修复，不冒充整个4.55万行差异重新全审。
 - 新建隔离环境自动选用Python 3.13.13，完整 `scripts/release_check.sh` 通过：3611 tests / 11 warnings，338.55秒；Monitor/Relay模拟冒烟、Compose配置、dry-run与密钥扫描均通过。按CI同样设置跳过外部osstack跨仓库冒烟；目标生产镜像构建/容器冒烟未执行，不能把Compose配置检查当容器验证。
 - GitHub Linux Python 3.11最终CI待PR创建后验证。D02生产门槛仍阻断merge/deploy；发布证据没有替代该门槛。
+
+## PR与首次Linux CI反馈
+
+[PR #13](https://github.com/osborn-studio/ostag/pull/13)已创建为Draft。首次Linux/Python3.11.16 CI得到3609 passed / 2 failed：历史兼容性测试依赖浅克隆缺失的Git对象，以及异步超时测试仅剩1ms而未进入transport。测试修复提交 `21462676d67f6de6c3d6821a06fca46a73d6a5bf`：把字节完全相同的旧store作为固定哈希fixture，并保留真实schema3读取/schema4拒绝/文件字节不变验证；异步测试恢复完整1秒预算，保持真实挂起/超时和unknown费用检查，另设10秒测试外限，未改生产deadline。196项定向测试、脱离.git源码导出探针和Ruff通过，Fable5.1独立批准；见[回执](reviews/stage-ci-portability.json)。更新后PR的完整CI结果以GitHub检查及本轮外部发布回执为准。
+
+另已核实main保护：要求1位非最后推送者正式批准，且对管理员生效。当前提交账号不能自行满足审批；AI静态审查不等于GitHub正式批准。未合并、未部署。

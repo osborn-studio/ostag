@@ -1,0 +1,45 @@
+{
+  "code_commit": "21462676d67f6de6c3d6821a06fca46a73d6a5bf",
+  "candidate_sha256": "cd63303ecaff0186be2a3c6351d2e014d9da5de8f61465da4da50e940c5e671d",
+  "files": [
+    "tests/test_brief_delivery_observation.py",
+    "tests/test_brief_generation.py",
+    "tests/fixtures/briefs/store-before-u01-5e2e79b.py.txt"
+  ],
+  "all_fixture_files_tracked": true,
+  "task": "task_02930179",
+  "builder": "actual Codex gpt-6-astra via osstack",
+  "review": {
+    "candidate_sha256": "cd63303ecaff0186be2a3c6351d2e014d9da5de8f61465da4da50e940c5e671d",
+    "verdict": "approved",
+    "blockers": [],
+    "notes": [
+      "Fix 1: fixture read as bytes relative to __file__; SHA256 508ab3ea…d680 asserted before compile/exec with baseline commit provenance retained in the assertion message; no git subprocess, no shim, no skip; downstream schema3-readable/schema4-rejected/byte-unchanged assertions are untouched context.",
+      "Fix 1 uncertainty: the new tests/fixtures/briefs/store-before-u01-5e2e79b.py.txt is not shown as a hunk in the supplied diff. Parent evidence ('Exact legacy hash and no-Git source-export probe passed') implies it exists with the exact digest, but confirm it is tracked/staged in the commit, otherwise CI will fail with FileNotFoundError at the digest read.",
+      "Fix 2: removing now[0]=0.999 restores the full 1s production budget so the scheduled invoke() task can pass its in-task check() and enter transport.generate; the transport still hangs on asyncio.Event().wait(), so the 'timeout' result comes only from the real loop.time() deadline in _bounded_call.",
+      "Fix 2: asyncio.wait_for(timeout=10) is a suite-level guard only (10s >> 1s prod deadline); it neither weakens nor substitutes the production deadline and would surface a regressed/missing timeout as a test failure instead of a hang.",
+      "Fix 2 assertions retained and strengthened: status=='timeout', entered non-empty, record.state=='unknown' and charged_micros==10000. No xfail/skip; no production, config, or workflow files touched.",
+      "Static read only; supplied test/lint evidence (1 passed parent probe, 196 passed target, ruff clean) is consistent with the diff but was not treated as the basis for approval."
+    ]
+  },
+  "review_model": "claude-fable-5-1",
+  "raw_review_sha256": "2e17b820c17abffbfb689d39c74b385a815a50a3a3306cdc2da7403b15a40c26",
+  "validation": {
+    "target_passed": 196,
+    "python": "3.11.15",
+    "no_git_export_probe_passed": 1,
+    "ruff": "passed",
+    "fixture_sha256": "508ab3eadced9b87b570686bed9bb3be59927b4c9461c609eddcad474458d680"
+  },
+  "initial_ci": {
+    "run": 35522798288,
+    "passed": 3609,
+    "failed": 2,
+    "root_causes": [
+      "historical object missing from shallow checkout",
+      "1ms budget expired before transport entry"
+    ]
+  },
+  "production_source_changes": false,
+  "final_ci": "pending updated PR head"
+}
