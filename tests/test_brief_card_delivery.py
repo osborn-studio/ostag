@@ -44,6 +44,36 @@ def tokens(card):
             for e in card['elements'] for a in e.get('actions', []) if 'value' in a}
 
 
+async def _wait_for_card_entry(task, entered):
+    waiter = asyncio.create_task(entered.wait())
+    try:
+        done, _ = await asyncio.wait({task, waiter}, timeout=3,
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            task.result()
+            pytest.fail('card operation completed before held transport entry')
+        assert waiter in done, 'card transport did not reach entry'
+    finally:
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+
+
+async def _release_card(service, task, release, exchanges):
+    if not task.done():
+        service.stop()
+    release.set()
+    # Join the owner before its exchange: it may still be scheduling that task.
+    for tasks in ([task], exchanges):
+        if not tasks:
+            continue
+        done, pending = await asyncio.wait(set(tasks), timeout=3)
+        for completed in done:
+            if not completed.cancelled():
+                completed.exception()
+        assert not pending, 'released card operation did not finish'
+    assert service.active_operations == 0
+
+
 async def test_frozen_prepare_reopen_one_actual_send(tmp_path):
     path, calls, now = tmp_path/'cards.db', [], [1000]
     def handler(request):
@@ -107,8 +137,9 @@ async def test_capacity_and_expired_send_tombstone(tmp_path):
 
 async def test_two_claimants_loser_cannot_poison_winner(tmp_path):
     entered, finish = asyncio.Event(), asyncio.Event()
-    calls = []
+    calls, exchanges = [], []
     async def handler(request):
+        exchanges.append(asyncio.current_task())
         calls.append(request)
         entered.set()
         await finish.wait()
@@ -118,11 +149,15 @@ async def test_two_claimants_loser_cannot_poison_winner(tmp_path):
     c2 = make_service(path, handler=handler)
     first = await c.prepare(SCOPE, 'job', 'revision')
     task = asyncio.create_task(c.send(SCOPE, first.delivery_id))
-    await entered.wait()
-    assert (await c2.send(SCOPE, first.delivery_id)).state == 'started'
-    finish.set()
-    assert (await task).state == 'create_acknowledged'
-    assert len(calls) == 1
+    try:
+        await _wait_for_card_entry(task, entered)
+        assert (await c2.send(SCOPE, first.delivery_id)).state == 'started'
+        finish.set()
+        assert (await task).state == 'create_acknowledged'
+        assert len(calls) == 1
+    finally:
+        await _release_card(c, task, finish, exchanges)
+        c2.stop()
 
 
 @pytest.mark.parametrize('fail_refresh', [False, True])
@@ -248,12 +283,14 @@ async def test_ack_commit_failure_cannot_separately_activate(tmp_path, monkeypat
 @pytest.mark.parametrize('mode', ['timeout', 'cancel', 'stop'])
 async def test_abandoned_hostile_transport_keeps_capacity_and_cannot_activate(tmp_path, mode):
     entered, release, exited = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    exchanges = []
     class Hostile:
         def check_ack(self, attempt, ack):
             pass
 
         async def send(self, attempt, *, before_egress):
             from ostag.briefs.card_delivery import CardCreateAck
+            exchanges.append(asyncio.current_task())
             await before_egress()
             entered.set()
             try:
@@ -263,27 +300,71 @@ async def test_abandoned_hostile_transport_keeps_capacity_and_cannot_activate(tm
             exited.set()
             return CardCreateAck(attempt.owner, attempt.token, attempt.intent.digest,
                 'om_message_123', BINDING, 'oc_private', 'actual_sender', 'app_id')
-    c = make_service(tmp_path/'cards.db', transport=Hostile(), timeout=0.04)
+    c = make_service(tmp_path/'cards.db', transport=Hostile(),
+                     timeout=0.04 if mode == 'timeout' else 5)
     first = await c.prepare(SCOPE, 'job', 'revision')
     task = asyncio.create_task(c.send(SCOPE, first.delivery_id))
-    await entered.wait()
-    if mode == 'cancel':
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-    else:
-        if mode == 'stop':
-            c.stop()
-        assert (await task).state == 'unknown'
-    assert c.active_operations == 1
-    with pytest.raises(CardDeliveryError):
-        await c.send(SCOPE, first.delivery_id)
-    release.set()
-    await exited.wait()
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
+    try:
+        await _wait_for_card_entry(task, entered)
+        if mode == 'cancel':
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            if mode == 'stop':
+                c.stop()
+            assert (await task).state == 'unknown'
+        assert c.active_operations == 1
+        with pytest.raises(CardDeliveryError):
+            await c.send(SCOPE, first.delivery_id)
+    finally:
+        await _release_card(c, task, release, exchanges)
+    assert exited.is_set()
     assert c.active_operations == 0
     assert c.ledger.status(SCOPE, first.delivery_id).state == 'unknown'
+
+
+@pytest.mark.parametrize('case', ['claimants', 'hostile'])
+async def test_card_entry_failure_terminates_wrapper_and_retrieves_task(tmp_path, monkeypatch, case):
+    import gc
+    import sys
+    module, original = sys.modules[__name__], make_service
+    services, errors = [], []
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+    before = asyncio.all_tasks()
+
+    def stopped(*args, **kwargs):
+        service = original(*args, **kwargs)
+        services.append(service)
+        send = service.send
+        async def fail_before_entry(*args, **kwargs):
+            service.stop()
+            return await send(*args, **kwargs)
+        service.send = fail_before_entry
+        return service
+
+    monkeypatch.setattr(module, 'make_service', stopped)
+    loop.set_exception_handler(lambda loop, context: errors.append(context))
+    task = asyncio.create_task(test_two_claimants_loser_cannot_poison_winner(tmp_path)
+        if case == 'claimants' else
+        test_abandoned_hostile_transport_keeps_capacity_and_cannot_activate(tmp_path, 'stop'))
+    try:
+        done, _ = await asyncio.wait({task}, timeout=3)
+        assert done, 'wrapper kept waiting after the service failed'
+        with pytest.raises(CardDeliveryError):
+            task.result()
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        for service in services:
+            service.stop()
+        gc.collect()
+        await asyncio.sleep(0)
+        loop.set_exception_handler(previous)
+    assert not errors
+    assert not (asyncio.all_tasks() - before)
+    assert all(service.active_operations == 0 for service in services)
 
 
 async def test_cross_instance_cancel_during_response_blocks_activation(tmp_path):
