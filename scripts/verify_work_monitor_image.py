@@ -45,8 +45,14 @@ print(json.dumps(dict(uid=os.getuid(),flags={k:getattr(s,k) for k,_ in BRIEF_FLA
 """
 
 
-def command(args, *, timeout=30):
-    return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT, timeout=timeout)
+def command(args, *, timeout=30, merge_stderr=False):
+    result = subprocess.run(args, text=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
+                            timeout=timeout)
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    result.check_returncode()
+    return result.stdout
 
 
 def validate_observation(value, expected):
@@ -170,7 +176,7 @@ def verify(image, source_sha, output):
                         ['docker', 'stop', '--time', '10', container] if action == 'stop' else
                         ['docker', 'rm', '--force', container])
                 try:
-                    result = command(args)
+                    result = command(args, merge_stderr=action == 'logs')
                     if action == 'logs':
                         (output / 'container.log').write_text(result)
                 except Exception as error:

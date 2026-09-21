@@ -13,7 +13,7 @@ on:
         type: string
 
 permissions:
-  checks: read
+  actions: read
   contents: read
 
 concurrency:
@@ -72,12 +72,15 @@ jobs:
             exit 1
           }
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            gh api "/repos/$GITHUB_REPOSITORY/commits/$candidate/check-runs" > "$RUNNER_TEMP/check-runs.json"
-            jq -e '[.check_runs[] | select(.name == "release-check" and .conclusion == "success")] | length > 0' \
-              "$RUNNER_TEMP/check-runs.json" >/dev/null || {
-                echo "The selected main commit has no successful release-check." >&2
-                exit 1
-              }
+            gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/ostag-ci.yml/runs?head_sha=$candidate&branch=main&event=push&per_page=100" > "$RUNNER_TEMP/ci-runs.json"
+            jq -e --arg sha "$candidate" '
+              [.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push")]
+              | max_by(.id)
+              | .status == "completed" and .conclusion == "success"
+            ' "$RUNNER_TEMP/ci-runs.json" >/dev/null || {
+              echo "The selected main commit requires its latest complete OS Tag CI run to succeed." >&2
+              exit 1
+            }
           fi
           echo "sha=$candidate" >> "$GITHUB_OUTPUT"
           echo "short_sha=${candidate:0:12}" >> "$GITHUB_OUTPUT"

@@ -611,7 +611,9 @@ test volume unless `OSTAG_CONTAINER_SMOKE_CLEANUP_VOLUME=1` is explicitly set.
 ### Native production-image CI
 
 The `image-smoke` job is part of **OS Tag CI**, so its failure prevents that
-workflow from succeeding and triggering automatic production deployment. It builds
+workflow from succeeding and triggering automatic production deployment. Manual redeploy
+also requires the latest matching main-push run of that complete workflow to have
+succeeded; an older success, PR-only run or isolated release-check is insufficient. It builds
 `deploy/work-monitor/Dockerfile` from the exact checkout's Git archive on the
 native Linux/amd64 runner, without repository credentials in the build context.
 
