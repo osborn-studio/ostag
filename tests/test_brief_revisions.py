@@ -1,9 +1,13 @@
 """A06 trusted local contracts; no live card, platform or authenticated HTTP proof."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError, replace
 import json
+from pathlib import Path
 import sqlite3
-from threading import Barrier, Event
+import subprocess
+import sys
+from threading import Event
 
 import pytest
 
@@ -262,70 +266,183 @@ def test_revocation_after_render_cannot_release_pages(tmp_path, monkeypatch):
 
 
 def test_lock_wait_then_revocation_is_seen_before_commit(tmp_path):
-    allowed, entered = [True], Event()
-    s = service(tmp_path/'r.db')
-    s.register(SCOPE, 'job')
-    before = dump(s.ledger.path)
+    _revision_subprocess(tmp_path, '_lock_wait_then_revocation')
+
+
+def _lock_wait_then_revocation(tmp_path):
+    allowed = [True]
     def authorize(p):
         if not allowed[0]:
             raise RuntimeError('revoked')
-        entered.set()
-    s._authorize = authorize
-    with sqlite3.connect(s.ledger.path) as blocker, ThreadPoolExecutor(1) as pool:
-        blocker.execute('BEGIN IMMEDIATE')
-        task = pool.submit(correct, s)
-        assert entered.wait(1)
+    path = tmp_path/'r.db'
+    one, two = service(path), service(path, authorize=authorize)
+    one.register(SCOPE, 'job')
+    before = dump(path)
+
+    def revoke_after_contention():
+        one.register(SCOPE, 'job')
         allowed[0] = False
-        blocker.rollback()
+
+    def denied_correction():
         with pytest.raises(RevisionDenied):
-            task.result(timeout=2)
-    assert dump(s.ledger.path) == before
+            correct(two)
+
+    _contended_pair(one, two, revoke_after_contention, denied_correction)
+    assert dump(path) == before
 
 
-@pytest.mark.parametrize('same_request', [False, True])
-def test_two_connections_serialize_head_and_deduplicate_event(tmp_path, same_request):
+def _revision_subprocess(tmp_path, scenario, *args):
+    # A future timeout alone cannot bound ThreadPoolExecutor.__exit__. Killing
+    # this child also closes its SQLite connections if a synchronization fails.
+    result = subprocess.run([sys.executable, '-c',
+        'import json, sys; from pathlib import Path; '
+        'sys.path.insert(0, sys.argv[1]); import test_brief_revisions as tests; '
+        'getattr(tests, sys.argv[2])(Path(sys.argv[3]), *json.loads(sys.argv[4]))',
+        str(Path(__file__).resolve().parent), scenario, str(tmp_path), json.dumps(args)],
+        capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _contended_pair(one, two, first, second):
+    """Overlap real calls without assuming either completes inside 50 ms.
+
+    Both callers pass preflight before the first owns BEGIN EXCLUSIVE. The
+    second proves real SQLite contention with an extra, unsuccessful BEGIN,
+    then waits for the first call to finish before normal transaction admission.
+    This is test scheduling, not a retry of a public operation/storage error;
+    the production busy timeout and transaction implementation stay untouched.
+    """
+    ready, held, probed, finished = Event(), Event(), Event(), Event()
+    transaction, verify = one.ledger._transaction, two.ledger._verify
+
+    @contextmanager
+    def hold_transaction():
+        assert ready.wait(5), 'contender did not finish preflight'
+        with transaction() as db:
+            held.set()
+            assert probed.wait(5), 'contender did not prove contention'
+            yield db
+
+    def probe_before_admission(db):
+        result = verify(db)
+        if not db.in_transaction:
+            assert db.execute('PRAGMA busy_timeout').fetchone()[0] == 50
+            ready.set()
+            assert held.wait(5), 'holder did not acquire transaction'
+            with pytest.raises(sqlite3.OperationalError) as caught:
+                db.execute('BEGIN EXCLUSIVE')
+            assert caught.value.sqlite_errorcode == sqlite3.SQLITE_BUSY
+            assert not db.in_transaction
+            probed.set()
+            assert finished.wait(5), 'holder did not finish'
+        return result
+
+    def run_first():
+        try:
+            return first()
+        finally:
+            finished.set()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(one.ledger, '_transaction', hold_transaction)
+        patch.setattr(two.ledger, '_verify', probe_before_admission)
+        with ThreadPoolExecutor(2) as pool:
+            a, b = pool.submit(run_first), pool.submit(second)
+            try:
+                return a.result(timeout=7), b.result(timeout=7)
+            finally:
+                # Release every gate even if an assertion/future failed.
+                ready.set()
+                held.set()
+                probed.set()
+                finished.set()
+
+
+def _serialize_head_and_deduplicate_event(tmp_path, same_request):
     path = tmp_path/'r.db'
     one, two = service(path), service(path)
-    barrier = Barrier(2)
-    def register(s):
-        barrier.wait()
-        return s.register(SCOPE, 'job')
-    with ThreadPoolExecutor(2) as pool:
-        roots = list(pool.map(register, (one, two)))
+    roots = _contended_pair(one, two,
+        lambda: one.register(SCOPE, 'job'), lambda: two.register(SCOPE, 'job'))
     assert roots[0].root_digest == roots[1].root_digest
-    def run(args):
-        s, request = args
-        barrier.wait()
-        try:
-            return correct(s, request=request)
-        except RevisionConflict:
-            return None
-    with ThreadPoolExecutor(2) as pool:
-        results = list(pool.map(run, ((one, 'edit1'), (two, 'edit1' if same_request else 'edit2'))))
-    assert sum(r is not None for r in results) == (2 if same_request else 1)
+
+    def second():
+        if same_request:
+            return correct(two)
+        with pytest.raises(RevisionConflict):
+            correct(two, request='edit2')
+
+    results = _contended_pair(one, two, lambda: correct(one), second)
+    assert not results[0].replayed
     if same_request:
         assert results[0].event == results[1].event
-        assert sorted(r.replayed for r in results) == [False, True]
+        assert results[1].replayed
     reopened = service(path)
-    assert len(reopened.read(SCOPE, 'job').corrections) == 1
+    view = reopened.read(SCOPE, 'job')
+    assert view.corrections == (results[0].event,)
+    assert view.state.head_revision_id == results[0].event.revision_id
     with sqlite3.connect(path) as db:
         assert db.execute('SELECT count(*) FROM revision_roots').fetchone()[0] == 1
         assert db.execute('SELECT count(*) FROM revision_events').fetchone()[0] == 1
 
 
-def test_distinct_adoptions_serialize_and_same_withdraw_deduplicates(tmp_path):
+@pytest.mark.parametrize('same_request', [False, True])
+def test_two_connections_serialize_head_and_deduplicate_event(tmp_path, same_request):
+    _revision_subprocess(tmp_path, '_serialize_head_and_deduplicate_event', same_request)
+
+
+def _distinct_adoptions_and_same_withdraw(tmp_path):
     path = tmp_path/'r.db'
     one, two = service(path), service(path)
     one.register(SCOPE, 'job')
-    with ThreadPoolExecutor(2) as pool:
-        receipts = list(pool.map(lambda args: adopt(args[0], 'revision', args[1]),
-                                ((one, 'a1'), (two, 'a2'))))
+    receipts = _contended_pair(one, two,
+        lambda: adopt(one, 'revision', 'a1'), lambda: adopt(two, 'revision', 'a2'))
     assert len({r.event.event_id for r in receipts}) == 2
-    with ThreadPoolExecutor(2) as pool:
-        receipts = list(pool.map(lambda s: withdraw(s, 'revision'), (one, two)))
+    receipts = _contended_pair(one, two,
+        lambda: withdraw(one, 'revision'), lambda: withdraw(two, 'revision'))
     assert receipts[0].event == receipts[1].event
     assert sorted(r.replayed for r in receipts) == [False, True]
     assert len(one.read(SCOPE, 'job').events) == 3
+
+
+def test_distinct_adoptions_serialize_and_same_withdraw_deduplicates(tmp_path):
+    _revision_subprocess(tmp_path, '_distinct_adoptions_and_same_withdraw')
+
+
+def _lock_exhaustion(tmp_path, lock, operation):
+    path, now = tmp_path/'r.db', [1000]
+    s = service(path, now=now)
+    s.register(SCOPE, 'job')
+    if operation == 'withdraw':
+        adopt(s, 'revision')
+    before, before_bytes = dump(path), path.read_bytes()
+    now[0] = 1001  # Detect an accidental highwater write, too.
+    calls = {
+        'register': lambda: s.register(SCOPE, 'job'),
+        'correct': lambda: correct(s),
+        'adopt': lambda: adopt(s, 'revision'),
+        'withdraw': lambda: withdraw(s, 'revision'),
+        'read': lambda: s.read(SCOPE, 'job'),
+        'render': lambda: s.render(SCOPE, 'job'),
+    }
+    # EXCLUSIVE blocks preflight reads; IMMEDIATE permits them but fences BEGIN.
+    with s.ledger._connection() as blocker:
+        assert blocker.execute('PRAGMA busy_timeout').fetchone()[0] == 50
+        blocker.execute('BEGIN ' + lock)
+        try:
+            with pytest.raises(RevisionStorageError) as caught:
+                calls[operation]()
+            assert str(caught.value) == 'revision storage unavailable'
+            assert caught.value.__cause__ is caught.value.__context__ is None
+        finally:
+            blocker.rollback()
+    assert path.read_bytes() == before_bytes
+    assert dump(path) == before
+
+
+@pytest.mark.parametrize('lock', ['IMMEDIATE', 'EXCLUSIVE'])
+@pytest.mark.parametrize('operation', ['register', 'correct', 'adopt', 'withdraw', 'read', 'render'])
+def test_lock_exhaustion_fails_closed_without_mutation(tmp_path, lock, operation):
+    _revision_subprocess(tmp_path, '_lock_exhaustion', lock, operation)
 
 
 @pytest.mark.parametrize('kind', ['foreign', 'future', 'wrong_app', 'extra_table', 'trigger',
