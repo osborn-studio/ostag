@@ -113,3 +113,22 @@ def test_process_warnings_do_not_corrupt_machine_json(capsys):
         'import sys; print("{\\"status\\":\\"ok\\"}"); print("diagnostic warning", file=sys.stderr)'])
     assert json.loads(raw) == {'status': 'ok'}
     assert 'diagnostic warning' in capsys.readouterr().err
+
+
+def test_deployed_rebuild_is_verified_before_packaging_and_ssh():
+    workflow = yaml.load(Path('.github/workflows/deploy-production.yml').read_text(), Loader=yaml.BaseLoader)
+    steps = workflow['jobs']['deploy']['steps']
+    names = [step['name'] for step in steps]
+    position = names.index('Verify exact production image')
+    assert names.index('Build immutable production image') < position
+    assert position < names.index('Package immutable release')
+    assert position < names.index('Configure production SSH identity')
+    step = steps[position]
+    assert 'if' not in step and 'continue-on-error' not in step
+    assert step['env'] == {'DEPLOY_SHA': '${{ steps.release.outputs.sha }}',
+                           'IMAGE': '${{ steps.release.outputs.image }}'}
+    assert '--image "$IMAGE" --source-sha "$DEPLOY_SHA"' in step['run']
+    assert 'verify_work_monitor_image.py' in step['run']
+    assert 'set -euo pipefail' in step['run']
+    assert steps[position + 1]['if'] == 'always()'
+    assert steps[position + 1]['uses'] == 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'

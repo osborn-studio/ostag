@@ -358,7 +358,7 @@ an incompatible migration requires it.
 The production workflow in `.github/workflows/deploy-production.yml` runs only
 after `OS Tag CI` succeeds on `main`, or by an explicit manual dispatch of the
 current `main` commit. It refuses malformed SHAs, stale commits, and manual
-deployments without a successful `release-check` for the exact commit.
+deployments unless the latest main-push run of the complete `OS Tag CI` workflow succeeds for the exact commit.
 
 Configure the GitHub `production` environment with these values:
 
@@ -630,3 +630,10 @@ can hit the status subprocess's existing startup deadline; that failure must be
 recorded rather than weakening the production timeout or silently accepting a
 warm restart. This image check does not enable Brief, prove provider permissions,
 install host tools, exercise multistore rollback or replace D02/live acceptance.
+
+The production workflow rebuilds its image after CI. It therefore runs the same
+isolated native image verifier against that exact rebuilt image and release SHA
+before packaging or configuring SSH. Automatic and manual deployments both stop
+on verification failure; evidence is retained as a GitHub Actions artifact. This
+closes the gap where mutable base images or dependency resolution could make the
+image uploaded to production differ from the earlier CI-tested image.
