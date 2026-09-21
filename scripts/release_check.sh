@@ -23,7 +23,7 @@ if [[ -n "$missing_tests" ]]; then
   echo "$missing_tests" >&2
   exit 1
 fi
-uv run pytest
+uv run pytest -vv
 scripts/work_monitor_smoke.sh
 scripts/copilot_relay_smoke.sh
 scripts/secret_hygiene_check.sh

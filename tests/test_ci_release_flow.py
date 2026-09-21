@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ RELEASE_COMMANDS = [
     "uv run --locked python -m compileall ostag",
     "uv run ruff check ostag tests",
     "uv run pytest --collect-only -q",
-    "uv run pytest",
+    "uv run pytest -vv",
     "work_monitor_smoke.sh",
     "copilot_relay_smoke.sh",
     "secret_hygiene_check.sh",
@@ -62,7 +63,9 @@ def test_ci_keeps_required_setup_and_one_unconditional_gate():
     assert workflow["on"] == {"push": {"branches": ["main", "ostag/**"]}, "pull_request": ""}
     job = workflow["jobs"]["release-check"]
     assert job["runs-on"] == "ubuntu-latest"
-    assert job["env"] == {"OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE": "1"}
+    assert job["timeout-minutes"] == "15"
+    assert job["env"] == {"OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE": "1",
+                          "PYTEST_ADDOPTS": "-o faulthandler_timeout=60"}
     setup = next(s for s in job["steps"] if s.get("uses") == "actions/setup-python@v5")
     assert setup["with"]["python-version"] == "3.11"
     assert [s["run"] for s in job["steps"] if "run" in s] == [
@@ -74,7 +77,7 @@ def test_ci_keeps_required_setup_and_one_unconditional_gate():
 
 
 @pytest.mark.parametrize("entry", ["workflow", "ci_release_gates.sh", "deploy_preflight.sh"])
-@pytest.mark.parametrize("fail_command", ["", "uv run pytest", RELEASE_COMMANDS[-1]])
+@pytest.mark.parametrize("fail_command", ["", "uv run pytest -vv", RELEASE_COMMANDS[-1]])
 def test_release_flow_runs_once_and_stops_at_failure(tmp_path, entry, fail_command):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -152,3 +155,17 @@ esac
             expected += EVIDENCE_COMMANDS
             assert "ci release gates passed" in result.stdout
         assert observed == expected
+
+
+def test_real_collection_nodeids_survive_workflow_diagnostics():
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q",
+         "tests/test_ci_release_flow.py"], cwd=ROOT,
+        env={"PATH": os.defpath, **_workflow()["jobs"]["release-check"]["env"]},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    nodes = [line for line in result.stdout.splitlines()
+             if line.startswith("tests/test_ci_release_flow.py::")]
+    assert len(nodes) == 11
+    assert "tests/test_ci_release_flow.py::test_real_collection_nodeids_survive_workflow_diagnostics" in nodes
