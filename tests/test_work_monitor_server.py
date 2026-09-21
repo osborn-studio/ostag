@@ -228,16 +228,26 @@ def test_command_poll_is_single_consumer_and_ack_is_instance_scoped(tmp_path: Pa
         "expires_at": "2099-07-14T00:00:00+00:00",
     }
     ledger = WorkMonitorService(store, IdentityStore(store.path)).ledger
-    ledger.record_receipt(
-        ActionReceipt(
-            action_id="action-1",
-            run_id="run-1",
-            title="Cancel",
-            target_system="work_monitor",
-            target_object="runner-1/task-1",
-            mutation_type="cancel",
-            state="applying",
-        )
+    receipt = ActionReceipt(
+        action_id="action-1",
+        run_id="run-1",
+        title="Cancel",
+        target_system="work_monitor",
+        target_object="runner-1/task-1",
+        mutation_type="cancel",
+        state="ready_to_apply",
+        principal=Principal("feishu", "alice"),
+        apply_payload={
+            key: command[key]
+            for key in ("instance_id", "task_id", "expected_version", "expected_lifecycle")
+        },
+    )
+    ledger.record_receipt(receipt)
+    ledger.record_receipt_state(
+        receipt.with_state("applying"),
+        previous_state="ready_to_apply",
+        actor_id="feishu:alice",
+        detail=json.dumps({"command_id": "cmd-1"}),
     )
     with store.connect() as db:
         db.execute(
@@ -285,10 +295,13 @@ def test_store_claims_pending_commands_once_with_caller_clock(tmp_path: Path) ->
             ),
         )
     fixed = datetime.fromisoformat("2026-07-13T01:02:03+00:00")
-    service = WorkMonitorService(store, IdentityStore(store.path), clock=lambda: fixed)
-    claimed = service.poll_commands("runner-1")
+    claim_times = {
+        "claimed_at": fixed.isoformat(),
+        "lease_until": (fixed + timedelta(seconds=30)).isoformat(),
+    }
+    claimed = store.claim_pending_commands("runner-1", **claim_times)
     assert claimed == ({"command_id": "cmd-1", "expires_at": "2026-07-14T00:00:00+00:00"},)
-    assert service.poll_commands("runner-1") == ()
+    assert store.claim_pending_commands("runner-1", **claim_times) == ()
     with store.connect() as db:
         assert (
             db.execute("SELECT consumed_at FROM commands").fetchone()["consumed_at"]
@@ -324,11 +337,17 @@ def test_command_lease_can_be_reclaimed_but_expired_command_is_never_delivered(
                 "INSERT INTO commands(command_id,instance_id,task_id,status,payload) VALUES (?,?,?,?,?)",
                 (command_id, "runner-1", "task-1", "pending", payload),
             )
-    service = WorkMonitorService(store, IdentityStore(store.path), clock=lambda: now[0])
-    assert [item["command_id"] for item in service.poll_commands("runner-1")] == ["live"]
-    assert service.poll_commands("runner-1") == ()
+    def claim():
+        return store.claim_pending_commands(
+            "runner-1",
+            claimed_at=now[0].isoformat(),
+            lease_until=(now[0] + timedelta(seconds=30)).isoformat(),
+        )
+
+    assert [item["command_id"] for item in claim()] == ["live"]
+    assert claim() == ()
     now[0] += timedelta(seconds=31)
-    assert [item["command_id"] for item in service.poll_commands("runner-1")] == ["live"]
+    assert [item["command_id"] for item in claim()] == ["live"]
 
 
 def test_health_router_hook_and_no_placeholder_webhooks(tmp_path: Path) -> None:

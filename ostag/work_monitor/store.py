@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -369,16 +370,25 @@ class MonitorStore:
         return None if row is None else StoredTask(**dict(row))
 
     def claim_pending_commands(
-        self, instance_id: str, *, claimed_at: str, lease_until: str
+        self,
+        instance_id: str,
+        *,
+        claimed_at: str,
+        lease_until: str,
+        eligible: Callable[[sqlite3.Connection, sqlite3.Row], bool] | None = None,
     ) -> tuple[dict[str, Any], ...]:
-        """Atomically return each pending command to one authenticated consumer."""
+        """Claim pending commands, evaluating optional eligibility under the write lock."""
         with self.transaction() as connection:
             rows = connection.execute(
-                "SELECT command_id,payload FROM commands WHERE instance_id=? AND status='pending' "
+                "SELECT command_id,action_id,payload FROM commands "
+                "WHERE instance_id=? AND status='pending' "
                 "AND (lease_until='' OR lease_until<=?) "
-                "AND json_extract(payload,'$.expires_at')>? ORDER BY rowid",
+                "AND CASE WHEN json_valid(payload) THEN json_extract(payload,'$.expires_at') "
+                "END > ? ORDER BY rowid",
                 (instance_id, claimed_at, claimed_at),
             ).fetchall()
+            if eligible is not None:
+                rows = [row for row in rows if eligible(connection, row)]
             connection.executemany(
                 "UPDATE commands SET consumed_at=?,lease_until=? WHERE command_id=?",
                 [(claimed_at, lease_until, row["command_id"]) for row in rows],
