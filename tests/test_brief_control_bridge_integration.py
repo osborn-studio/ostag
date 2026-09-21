@@ -99,13 +99,36 @@ async def test_real_worker_model_custody_survives_pause_and_owner_stop(tmp_path)
         service.close()
 
 
-async def test_real_card_send_uncertainty_survives_seal_stop_and_manual_apply(tmp_path):
+@pytest.mark.parametrize('publication', ['seal', 'io_timeout'])
+async def test_real_card_send_uncertainty_survives_seal_stop_and_manual_apply(
+        tmp_path, monkeypatch, publication):
     life = BriefLifecycle()
     owner = owner_at(tmp_path, life)
     entered, release, suppressed, returned = (asyncio.Event() for _ in range(4))
+    boundary = asyncio.Lock()
+    publish = owner._publish
+    send_tasks = []
+    timeouts = []
+    task = None
+
+    async def ordered_publish(lifecycle):
+        async with boundary:
+            try:
+                return await publish(lifecycle)
+            except TimeoutError:
+                timeouts.append(lifecycle)
+                raise
+
+    # Control replacement during sample/publish is deliberately fatal. Also,
+    # synchronous card SQLite work must not consume an outstanding IPC budget.
+    # Order these test actions between complete, real child publications.
+    monkeypatch.setattr(owner, '_publish', ordered_publish)
+    if publication == 'io_timeout':
+        writing, finish_write = child_barrier(monkeypatch)
 
     class Transport:
         async def send(self, attempt, *, before_egress):
+            send_tasks.append(asyncio.current_task())
             await before_egress()
             entered.set()
             try:
@@ -124,30 +147,61 @@ async def test_real_card_send_uncertainty_survives_seal_stop_and_manual_apply(tm
     try:
         with pytest.raises(LifecycleDenied):
             await service.prepare(CARD_SCOPE, 'job', 'revision')
-        control(owner, 1, 'on')
+        async with boundary:
+            control(owner, 1, 'on')
         await generation(owner, 1)
-        task = asyncio.create_task(service.deliver(CARD_SCOPE, 'job', 'revision'))
-        await asyncio.wait_for(entered.wait(), 2)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        await asyncio.wait_for(suppressed.wait(), 2)
-        control(owner, 2)
-        status = await generation(owner, 2)
-        assert status['custody']['send'] == 1 and status['uncertain']
-        assert not status['local_drained']
-        await owner.stop()
+        async with boundary:
+            task = asyncio.create_task(service.deliver(CARD_SCOPE, 'job', 'revision'))
+            await asyncio.wait_for(entered.wait(), 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            await asyncio.wait_for(suppressed.wait(), 2)
+            control(owner, 2)
+        if publication == 'seal':
+            status = await generation(owner, 2)
+            assert status['custody']['send'] == 1 and status['uncertain']
+            assert not status['local_drained']
+            await owner.stop()
+            assert not timeouts
+        else:
+            process = owner._process
+            await wait_event(writing)
+            # Withhold the child write until the REAL 500 ms IPC budget expires.
+            # Waiting for a later running generation would be unsound: this
+            # single-use owner shuts down permanently and reaps the child.
+            await asyncio.wait_for(asyncio.shield(owner._task), 3)
+            assert timeouts == ['running']
+            assert process._closed and owner._process is None
+            assert life.snapshot().shutdown
+        status = json.loads((owner.status_dir / 'status.json').read_text())
+        assert status == owner.last_status
+        assert status['lifecycle'] == 'stopped' and status['control_generation'] == 2
+        assert not status['control_valid'] and not status['drain_ack']
+        assert status['custody']['send'] == status['custody']['card'] == 1
+        assert status['uncertain'] and not status['local_drained']
         with pytest.raises(LifecycleDenied):
             life.apply(3, 'on', False)
         release.set()
         await asyncio.wait_for(returned.wait(), 2)
+        assert await asyncio.wait_for(asyncio.gather(*send_tasks), 2) == [None]
         assert life.snapshot().uncertain
         assert life.snapshot().custody['card'] == 1  # Abandoned operation stays unknown.
         assert owner.last_status['custody']['send'] == 1
     finally:
         release.set()
         service.stop()
-        await owner.stop()
+        if publication == 'io_timeout':
+            finish_write.release()
+        try:
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, *send_tasks, return_exceptions=True), 2)
+        finally:
+            await owner.stop()
+        assert owner._process is None
+        assert service.active_operations == 0
 
 
 @pytest.mark.parametrize('mode', ['replacement', 'failure', 'stale'])
