@@ -607,3 +607,146 @@ docker compose -f deploy/work-monitor/docker-compose.yml down  # volume retained
 Run `scripts/work_monitor_container_smoke.sh` to build, verify Feishu/Crypto
 imports, health, SQLite write, restart, and persistence. It retains its unique
 test volume unless `OSTAG_CONTAINER_SMOKE_CLEANUP_VOLUME=1` is explicitly set.
+
+## Explicit Brief host composition and production observation v3
+
+The A11 lifespan integration supports an explicit authenticated application API;
+it does not install a host preflight, activate a provider, or change production
+pins. All six business flags still default off. Environment flags alone cannot
+supply a trusted issuer or construct a functioning business runtime.
+
+Host application code constructs `TrustedBriefComposition` from independently
+verified local adapters and passes it to
+`ostag.work_monitor.server.create_app(settings=..., brief_composition=...)`.
+Required fields are `directory`, `image_sha256`, `authority`, `model_transport`,
+`generation`, `authenticate`, `resolve_binding`, `card_transport`, `owners`, and
+`policy`. `inventory` pins the current schemas and capacities. `initialize_new`
+defaults false; explicitly setting it true permits a wholly absent five-store set,
+under the acquired persistence lock, in a precreated mode-0700 directory. It never
+repairs partial sets or migrates existing databases. Business files must be owned
+by the process UID, regular, single-link and mode 0600. Symlink paths, aliases,
+WAL/SHM/journal recovery and incompatible schemas fail closed. Do not copy a live
+store or clear a lock file to make startup succeed.
+
+Orphan recovery sidecars block even a wholly absent database set, before any file
+reservation or schema initialization. Store permissions must be exactly 0600;
+read-only or executable database files are not accepted as ready. Inventory
+capacities and budgets are validated before construction.
+
+During the running FastAPI lifespan, the verified adapter uses:
+
+```python
+application = app.state.brief_application
+await application.submit(verified_context, normalized_manual_event)
+await application.submit_meeting(verified_context, event_id, durable_meeting_request)
+await application.status(verified_context, job_id)
+await application.private_export(verified_context, job_id)
+await application.cancel(verified_context, job_id)
+```
+
+`verified_context` is opaque to this module. The supplied `authenticate` callback
+must derive a current `RequesterContext` from an already authenticated adapter
+session; no fabricated default user is provided. Manual event principal/namespace
+must match it. Meeting requests must be present in the independent current
+`TrustedBriefAuthority`. There is no public HTTP grant, control or bearer endpoint.
+The module-level default server supplies no host composition and therefore stays
+closed if BRIEF is enabled. Deploying a reviewed provider issuer and connecting its
+verified ingress are still explicit outstanding work, not implied by this API.
+
+Trusted host/operator code controls the live owner, with fresh boot and identities:
+
+```python
+owner = app.state.brief_owner
+await owner.request_control(
+    boot_id=owner.status.boot_id, generation=1, admission="on",
+    **owner.control_identity(),
+)
+# Later: a strictly higher generation closes admission immediately.
+await owner.request_control(
+    boot_id=owner.status.boot_id, generation=2, admission="off",
+    **owner.control_identity(),
+)
+```
+
+This API is not exposed to application callers. The protected control parent must
+be mode 0700. It atomically writes control **version 2**, binding boot, generation,
+admission, maintenance, image digest, config digest and persistence identity. It
+serializes with publication. Direct external file replacements are still checked
+but a replacement during publication may fail Brief closed. New boots reject old
+controls. Submitted generations are reserved immediately, so even two writes before
+the next sample cannot reuse a generation. The existing 250ms sampling, 500ms status IO budget, 5s child bootstrap
+budget and 750ms authority lease are unchanged. On an unchanged production ON
+renewal, operations can use only the original unexpired authority until ACK;
+OFF and changed controls seal admission before observation.
+
+Production **status version 3** (`brief-production/3`) includes the same local
+custody observation plus image/config/persistence and reconciliation identities.
+`drain_ack` requires current OFF control, zero local custody, no uncertainty and a
+fresh successful five-store reconciliation under exclusion. A pending queue of
+unclaimed registered jobs is allowed: it has no active lease/remote effect and is
+preserved for an authorized restart. Reconciliation never uses a caller-provided
+ready boolean. Persisted job generation configuration must match the host's pinned
+configuration; mismatches quarantine startup. During active work the durable counts refer to the last completed
+scan; only `production.reconciled=true` marks current all-store drain evidence.
+Legacy attached **v2 continues to have `drain_ack=false`**; disabled v1 retains its
+existing compatibility contract.
+
+`validate_production_drain(owner, observation, boot_id=..., generation=...,
+image_sha256=..., config_sha256=..., persistence=...)` requires the current live
+owner observation sealed from the acknowledged IPC result, matching
+identities/generation and freshness. Mutated, copied or stale JSON
+cannot satisfy it. A future host preflight needs a live challenge to this owner;
+reading saved `status.json` is insufficient. This protocol alone does not install
+D02's preflight, authorize activation, or establish global atomicity against
+noncooperating database writers.
+
+For read-only maintenance, construct the same-image trusted composition with
+`maintenance=True, initialize_new=False`; no service/worker/card runner is
+constructed. Request OFF with `maintenance=True`. All five business stores remain
+unchanged. Missing/incompatible schemas and unresolved effects remain blockers.
+This is not a downgrade migration. Older images that cannot read these schemas
+must not open them; supported multistore restore/repinning and downgrade procedures
+still require an explicit reviewed rehearsal. Unknown remote effects forbid drain
+until independent verified reconciliation exists; do not clear them or kill
+unrelated processes.
+
+Runnable synthetic server-lifespan and fixed regression commands (no credentials,
+external collection, model service or external messages):
+
+```bash
+.venv/bin/python -m pytest -q tests/test_brief_production_owner.py tests/test_brief_startup_reconciliation.py
+.venv/bin/python -m pytest -q tests/test_brief_*.py tests/test_meeting_*.py
+pandoc --from=commonmark --to=html docs/ostag/architecture.md --output=/tmp/ostag-architecture.html
+pandoc --from=commonmark --to=html docs/ostag/deployment.md --output=/tmp/ostag-deployment.html
+```
+
+The current meeting suites still require installed Pandoc; keep those parser
+assertions and the real loopback TCP/TLS revocation tests. Required macOS and
+isolated Linux evidence, the actual final Claude CLI Opus5 audit, and all original
+A11/D02/provider/live gates must be recorded separately. Synthetic passes never
+close the frozen 31+9 scope or all120AC.
+
+
+Production Brief construction has a separate bounded allowance of five seconds
+for setup plus `0.5 + 2 * sum(store_scan_budget_ms) / 1000` seconds for the two
+five-store reconciliation passes (at most 55.5 seconds total with the supported
+per-store limits). This does not change the status child's five-second bootstrap,
+500 ms IPC deadline, or 750 ms authority lease. Invalid composition types degrade
+Brief without preventing Monitor startup. A v3 drain consumer must challenge the
+current owner through `await owner.challenge_drain(...)`: a new pending reconciliation
+immediately invalidates the preceding proof, and the 750 ms freshness limit is
+measured from scan completion as well as status publication, without adding the
+two windows together. Detached JSON remains insufficient.
+
+
+Business construction now runs as an application-owned startup task after the
+bounded status-child handshake; the Monitor lifespan does not await its database
+scan. Brief intake stays denied until startup completes. Shutdown seals the task
+and retains the business future and persistence lock until the actual constructor
+and finalizer return, including a worker created concurrently with shutdown.
+Trusted host consumers should use `await owner.challenge_drain(...)`: it samples
+and validates the current observation under the control/publication lock. False
+while a scan is pending is retryable observation, not permission to bypass it.
+This is a point-in-time challenge, not a lease for a later mutation or saved JSON.
+The current paused implementation performs periodic two-pass reconciliation;
+its IO cost and remaining host preflight/backup integration are not live-accepted.

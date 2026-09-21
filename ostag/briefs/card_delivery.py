@@ -1050,6 +1050,10 @@ class CardDeliveryService:
                     self._active -= 1
                 task.add_done_callback(released)
             else:
+                if task is not None and not task.cancelled():
+                    # A policy/deadline failure may occur after exchange finished
+                    # but before result(). Retrieve its failure on that path too.
+                    task.exception()
                 self._active -= 1
         if result is None and attempt is not None:
             if op.custody is not None:

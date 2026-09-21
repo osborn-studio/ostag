@@ -10,6 +10,7 @@ import multiprocessing
 import os
 import stat
 import time
+from functools import partial
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -29,6 +30,7 @@ _ATTACHED_FIELDS = {
     "updated_at", "lifecycle", "component", "drain_ack",
 }
 _CONTROL_FIELDS = {"version", "boot_id", "generation", "admission", "maintenance"}
+_PRODUCTION_CONTROL_FIELDS = _CONTROL_FIELDS | {'image_sha256', 'config_sha256', 'persistence'}
 _STATUS_FIELDS = {
     "version",
     "boot_id",
@@ -78,6 +80,8 @@ def _uuid(value):
 
 
 def _status_shape(value):
+    if type(value) is dict and value.get('version') == 3:
+        return _production_shape(value)
     if type(value) is dict and type(value.get("version")) is int and value["version"] == 2:
         return _attached_shape(value)
     return _disabled_shape(value)
@@ -85,6 +89,8 @@ def _status_shape(value):
 
 def _attached_shape(value):
     """Exact local observation, with no durable queue/remote/startup assertions."""
+    if type(value) is dict and value.get('version') == 3:
+        return _production_shape(value)
     if type(value) is not dict or set(value) != _ATTACHED_FIELDS:
         return False
     counts, component = value["custody"], value["component"]
@@ -125,6 +131,31 @@ def _attached_shape(value):
             "control_missing", "control_invalid", "control_wrong_boot", "control_stale",
             "control_denied"})
     )
+
+
+def _production_shape(value):
+    if (type(value) is not dict or set(value) != _ATTACHED_FIELDS | {'production'}
+            or type(value['version']) is not int or value['version'] != 3):
+        return False
+    local = {k: v for k, v in value.items() if k != 'production'}
+    local.update(version=2, protocol=_PROTOCOL, drain_ack=False)
+    p = value['production']
+    if (not _attached_shape(local) or value['protocol'] != 'brief-production/3'
+            or type(p) is not dict or set(p) != {'image_sha256', 'config_sha256', 'persistence',
+                'reconciliation', 'reconciled', 'ready', 'active_leases', 'unknown_effects', 'reason'}):
+        return False
+    import re
+    return bool(all(p[k] is None or (type(p[k]) is str and re.fullmatch('[0-9a-f]{64}', p[k]))
+        for k in ('image_sha256', 'config_sha256', 'persistence', 'reconciliation'))
+        and all(type(p[k]) is bool for k in ('reconciled', 'ready'))
+        and all(p[k] is None or (type(p[k]) is int and 0 <= p[k] <= 100000)
+                for k in ('active_leases', 'unknown_effects'))
+        and type(p['reason']) is str and re.fullmatch('[a-z_]{1,64}', p['reason'])
+        and type(value['drain_ack']) is bool
+        and value['drain_ack'] == (value['local_drained'] and value['lifecycle'] == 'running'
+            and p['ready'] and p['reconciled'] and p['active_leases'] == 0
+            and p['unknown_effects'] == 0 and all(p[k] is not None for k in
+                ('image_sha256', 'config_sha256', 'persistence', 'reconciliation'))))
 
 
 def _disabled_shape(value):
@@ -272,6 +303,7 @@ class _StatusWriter:
         self.directory = self.lock = None
         self.accepted = None
         self.control_identity = None
+        self.production = False
 
     def open(self):
         try:
@@ -314,9 +346,9 @@ class _StatusWriter:
             finally:
                 os.close(directory)
             if (
-                set(value) != _CONTROL_FIELDS
+                set(value) != (_PRODUCTION_CONTROL_FIELDS if self.production else _CONTROL_FIELDS)
                 or type(value["version"]) is not int
-                or value["version"] != 1
+                or value["version"] != (2 if self.production else 1)
                 or not _positive_int(value["generation"])
                 or value["admission"] not in ("off", "on")
                 or type(value["maintenance"]) is not bool
@@ -451,7 +483,7 @@ def _observation(snapshot, boot, request, lifecycle, reason):
     }
 
 
-def _serve_attached(connection, status_dir, control_path, boot_id):
+def _serve_attached(connection, status_dir, control_path, boot_id, *, production=False):
     """Bounded two-phase child protocol; no caller-provided custody API.
 
     Only the parent reads the concrete lifecycle. Child rechecks the sampled
@@ -460,6 +492,7 @@ def _serve_attached(connection, status_dir, control_path, boot_id):
     are detected on the next bounded sample/lease, not instantaneously.
     """
     writer = _StatusWriter(status_dir, control_path, boot_id)
+    writer.production = production
     request, sampled, identity, reason = 0, None, None, "control_missing"
     phase = None
     try:
@@ -617,6 +650,7 @@ class BriefStatusOwner:
     def __init__(self, status_dir: Path, control_path: Path, *, lifecycle: BriefLifecycle | None = None):
         check_binding(lifecycle)
         self._lifecycle = lifecycle
+        self._production = None  # Bound only by the concrete production owner.
         if lifecycle is not None:
             lifecycle._bind_file_owner(self)
         self.status_dir, self.control_path = status_dir, control_path
@@ -642,7 +676,8 @@ class BriefStatusOwner:
             os.set_blocking(self._readiness.fileno(), False)
             self._process = context.Process(
                 target=_bootstrap,
-                args=(child, ready_child, _serve if self._lifecycle is None else _serve_attached,
+                args=(child, ready_child, _serve if self._lifecycle is None else
+                      partial(_serve_attached, production=True) if self._production is not None else _serve_attached,
                       self.status_dir, self.control_path, self.boot_id),
                 daemon=True,
             )
@@ -731,6 +766,12 @@ class BriefStatusOwner:
         return result["data"]
 
     async def _publish_attached(self, lifecycle):
+        if self._production is not None:
+            async with self._production.control_lock:
+                return await self._publish_attached_locked(lifecycle)
+        return await self._publish_attached_locked(lifecycle)
+
+    async def _publish_attached_locked(self, lifecycle):
         life = self._lifecycle
         self._request += 1
         request = self._request
@@ -748,8 +789,9 @@ class BriefStatusOwner:
                     raise _Fault("ipc_invalid")
                 control, reason = sample["control"], sample["reason"]
                 if control is not None and (
-                    type(control) is not dict or set(control) != _CONTROL_FIELDS
-                    or type(control["version"]) is not int or control["version"] != 1
+                    type(control) is not dict or set(control) != (
+                        _PRODUCTION_CONTROL_FIELDS if self._production is not None else _CONTROL_FIELDS)
+                    or type(control["version"]) is not int or control["version"] != (2 if self._production is not None else 1)
                     or control["boot_id"] != self.boot_id or not _positive_int(control["generation"])
                     or type(control["admission"]) is not str or control["admission"] not in ("on", "off")
                     or type(control["maintenance"]) is not bool
@@ -758,6 +800,10 @@ class BriefStatusOwner:
                     raise _Fault("ipc_invalid")
                 if self._stop.is_set():
                     raise _Fault("stopped")
+                if (self._production is not None and control is not None
+                        and not self._production.can_open(control)):
+                    control = None
+                    reason = 'control_denied'
                 try:
                     epoch, snapshot = life._file_prepare(self, None if control is None else (
                         control["generation"], control["admission"], control["maintenance"]), sampled_at)
@@ -767,6 +813,15 @@ class BriefStatusOwner:
                     reason = "control_denied"
                 phase = "publish"
             expected = _observation(snapshot, self.boot_id, request, lifecycle, reason)
+            if self._production is not None:
+                production = await self._production.evidence(snapshot)
+                # Reconciliation IO may have failed or control may have expired.
+                snapshot = life.snapshot()
+                expected = _observation(snapshot, self.boot_id, request, lifecycle, reason)
+                expected.update(version=3, protocol='brief-production/3', production=production)
+                expected['drain_ack'] = bool(snapshot.drained and lifecycle == 'running'
+                    and production['ready'] and production['reconciled']
+                    and production['active_leases'] == 0 and production['unknown_effects'] == 0)
             if not _attached_shape(expected):
                 raise _Fault("status_invalid")
             result = await self._exchange(request, phase, expected)
@@ -780,6 +835,8 @@ class BriefStatusOwner:
                 if self._stop.is_set():
                     raise _Fault("stopped")
                 life._file_ack(self, epoch, sampled_at)
+            if self._production is not None:
+                self._production.record_observation(result)
             self.health = "stopped" if lifecycle == "stopped" else "ok"
             self.reason = result["component"]["reason"]
             return True

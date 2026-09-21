@@ -9,6 +9,7 @@ import pytest
 
 from ostag.briefs.lifecycle import BriefLifecycle, LifecycleDenied
 from ostag.briefs.worker import BriefWorker
+from brief_process_helpers import _controlled_child
 from test_brief_control_bridge import control, generation, observed, owner_at
 from test_brief_lifecycle_integration import briefs, cards
 from test_brief_cards import SCOPE as CARD_SCOPE
@@ -19,38 +20,6 @@ async def wait_event(event):
     async with asyncio.timeout(4):
         while not event.is_set():
             await asyncio.sleep(.01)
-
-
-def _controlled_child(connection, status_dir, control_path, boot_id, *, entered, release, mode):
-    """Spawn-safe barrier AFTER temp write, BEFORE final identity recheck/rename."""
-    from ostag.briefs import runtime
-
-    write = runtime.os.write
-    send = runtime._send
-    held = False
-
-    def controlled_write(fd, raw):
-        nonlocal held
-        value = json.loads(raw)
-        result = write(fd, raw)
-        if not held and value['lifecycle'] == 'running' and value['control_generation'] == 2:
-            held = True
-            entered.set()
-            if not release.acquire(timeout=4):
-                raise TimeoutError
-            if mode == 'failure':
-                raise PermissionError('private source exception must never escape')
-        return result
-
-    def controlled_send(pipe, value):
-        if (mode == 'stale' and value['phase'] == 'publish'
-                and value['data']['control_generation'] == 2):
-            value = value | {'request_id': value['request_id'] + 1}
-        send(pipe, value)
-
-    runtime.os.write = controlled_write
-    runtime._send = controlled_send
-    runtime._serve_attached(connection, status_dir, control_path, boot_id)
 
 
 def child_barrier(monkeypatch, mode='hold'):
@@ -252,6 +221,7 @@ async def test_off_is_applied_before_child_write_and_counts_cannot_grow(tmp_path
     owner = owner_at(tmp_path, life)
     await owner.start()
     try:
+        assert owner.health == 'ok', (owner.reason, owner._child_ready, owner.last_status)
         control(owner, 1, 'on')
         await generation(owner, 1)
         op = life.begin('cleanup')
@@ -283,6 +253,7 @@ async def test_pending_publication_reaped_before_terminal_and_no_late_reopen(tmp
     owner = owner_at(tmp_path, life)
     await owner.start()
     try:
+        assert owner.health == 'ok', (owner.reason, owner._child_ready, owner.last_status)
         control(owner, 1, 'on')
         await generation(owner, 1)
         op = life.begin('model')
@@ -360,6 +331,7 @@ async def test_invalid_and_unsafe_controls_close_actual_admission(tmp_path):
     owner = owner_at(tmp_path, life)
     await owner.start()
     try:
+        assert owner.health == 'ok', (owner.reason, owner._child_ready, owner.last_status)
         control(owner, 1, 'on')
         await generation(owner, 1)
         owner.control_path.write_bytes(b'x' * 4097)

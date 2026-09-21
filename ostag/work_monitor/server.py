@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Respons
 from fastapi.responses import HTMLResponse
 
 from ostag.briefs.runtime import BriefStatusOwner
+from ostag.briefs.production_owner import BriefProductionOwner, TrustedBriefComposition
 from ostag.config import Settings, load_settings
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
@@ -144,6 +145,7 @@ def create_app(
     outbox: LifespanOwner | None = None,
     telegram_client: object | None = None,
     supervisor_backoff: tuple[float, ...] = (1, 2, 5, 15, 30),
+    brief_composition: TrustedBriefComposition | None = None,
 ) -> FastAPI:
     """Build an inert app; databases and background owners start only in lifespan."""
     if outbox is not None:
@@ -357,11 +359,15 @@ def create_app(
             )
             if owner is not None
         )
+        # Flags are authoritative even when trusted host code supplies a composition.
+        brief_owner = (BriefProductionOwner(configured, brief_composition) if configured.brief_enabled
+                       else BriefStatusOwner(configured.brief_status_dir, configured.brief_control_path))
+        app.state.brief_owner = brief_owner
+        app.state.brief_status_owner = (brief_owner.status if configured.brief_enabled else brief_owner)
+        app.state.brief_application = brief_owner.application if configured.brief_enabled else None
         tasks = [
             asyncio.create_task(_supervise(owner, stop, supervisor_backoff)) for owner in owners
         ]
-        brief_owner = BriefStatusOwner(configured.brief_status_dir, configured.brief_control_path)
-        app.state.brief_status_owner = brief_owner
         try:
             await brief_owner.start()
             yield
@@ -612,7 +618,7 @@ def create_app(
     @app.get("/healthz")
     async def health(response: Response) -> dict[str, str]:
         dependencies()
-        owner = getattr(app.state, "brief_status_owner", None)
+        owner = getattr(app.state, "brief_owner", None)
         response.headers["X-OStag-Brief-Status"] = owner.health if owner else "stopped"
         return {"status": "ok"}
 

@@ -70,10 +70,10 @@ async def test_private_worker_does_not_block_shared_loop(tmp_path):
 
 
 @pytest.fixture
-def local(tmp_path):
+def local(tmp_path, request):
     authority = Authority()
     service = authority.service(BriefStore(tmp_path / "brief.db", busy_timeout=1))
-    worker = BriefWorker(service, heartbeat_interval=0.02)
+    worker = BriefWorker(service, heartbeat_interval=0.02, supervised=getattr(request, "param", False))
     yield service, authority, worker
     worker.stop()
     service.close()
@@ -413,7 +413,28 @@ def test_unexpected_precommit_exception_is_sanitized_and_cause_persisted(local, 
     assert service.store.failure_cause(SCOPE, admitted.job_id) == "commit_failed"
 
 
-def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(local):
+@pytest.mark.parametrize("local", [False, True], indirect=True)
+@pytest.mark.parametrize("delayed_watcher_join", [False, True])
+def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(
+    local, monkeypatch, delayed_watcher_join
+):
+    joined = Event()
+    if delayed_watcher_join:
+        original_gather = asyncio.gather
+        def gather(*tasks, **kwargs):
+            result = original_gather(*tasks, **kwargs)
+            if any(isinstance(task, asyncio.Task) and
+                   task.get_coro().__qualname__.endswith('.watch') for task in tasks):
+                async def delayed():
+                    joined.set()
+                    await result
+                    # Cancellation acknowledgement can take longer than the
+                    # bounded local stop deadline. It must not erase failure
+                    # bookkeeping once the blocking transport has returned.
+                    await asyncio.sleep(.05)
+                return delayed()
+            return result
+        monkeypatch.setattr(asyncio, 'gather', gather)
     service, _, worker = local
     entered, release, returned = Event(), Event(), Event()
     async def blocking(_):
@@ -436,6 +457,7 @@ def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(
     assert not worker._thread.is_alive()
     assert service.store.outbox(SCOPE, admitted.job_id) is None
     assert service.store.failure_cause(SCOPE, admitted.job_id) == "stopped"
+    assert joined.is_set() == (delayed_watcher_join and worker._supervised)
 
 
 def test_guard_loss_retires_by_maintenance_cas_not_owner_finish(local, monkeypatch):
@@ -1197,3 +1219,37 @@ def test_optin_guard_without_claim_snapshot_never_retries_unconfirmed_busy(local
         assert guard.lost
         holder.rollback()
     assert not service.transport.calls
+
+
+def test_supervised_stop_does_not_join_blocked_future_callback(tmp_path):
+    from threading import Thread
+    service = Authority().service(BriefStore(tmp_path / "callback-stop.db"))
+    worker = BriefWorker(service, supervised=True)
+    executing, release_execution, callback, release_callback, stopped = (Event() for _ in range(5))
+
+    async def execute():
+        executing.set()
+        while not release_execution.is_set():
+            await asyncio.sleep(0.001)
+        return "idle"
+
+    worker._execute = execute
+    future = worker.run_once()
+    assert executing.wait(1)
+    future.add_done_callback(lambda _: (callback.set(), release_callback.wait(3)))
+    release_execution.set()
+    assert callback.wait(1)
+    stopper = Thread(target=lambda: (worker.stop(timeout=1), stopped.set()), daemon=True)
+    stopper.start()
+    try:
+        # The execution loop is idle: the caller must not spend its budget
+        # joining arbitrary callback code. Production owner retains its custody.
+        assert stopped.wait(.4)
+        assert worker._notifier.is_alive()
+    finally:
+        release_callback.set()
+        stopper.join(2)
+        worker.stop()
+        worker._notifier.join(1)
+        service.close()
+    assert not worker._notifier.is_alive()
