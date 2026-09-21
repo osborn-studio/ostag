@@ -356,7 +356,8 @@ class TrustedBriefAuthority:
                     or actual.__func__ is not method):
                 raise _denied()
 
-    def create_service(self, *, store, transport, config, retention=None, max_intake=8):
+    def create_service(self, *, store, transport, config, retention=None, max_intake=8,
+                       lifecycle=None):
         """Explicit initialized store + audited read-only transport/config only.
 
         No path creation, lifecycle enablement, routing or retention ownership.
@@ -369,4 +370,4 @@ class TrustedBriefAuthority:
         return BriefService(store=store, transport=transport, config=config,
             settings=self.settings, grants=self.grants, sources=self.sources,
             destination=self.destination, clock=self.clock, retention=retention,
-            max_intake=max_intake, authority=self)
+            max_intake=max_intake, authority=self, lifecycle=lifecycle)
