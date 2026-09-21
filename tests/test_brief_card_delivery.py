@@ -1,8 +1,11 @@
 """Independent card-v1 outbox; never mutate or reuse U01 delivery."""
 import asyncio
+from contextlib import contextmanager
 from dataclasses import replace
 import json
+from queue import Empty
 import sqlite3
+from time import monotonic, sleep
 
 import httpx
 import pytest
@@ -302,14 +305,19 @@ async def test_cross_instance_cancel_during_response_blocks_activation(tmp_path)
         invoke(c, token)
 
 
-def _process_delivery(path, queue, start, claims, loser_finished):
+def _process_delivery(path, queue, start, claims, loser_finished, deadline, index,
+                      fail_initialization=False):
     async def run():
         def handler(r):
-            queue.put('sent', timeout=3)
+            queue.put((index, 'sent'), timeout=3)
             # Keep the winning send in flight until the competing claim returns.
             assert loser_finished.wait(3)
             return httpx.Response(200, json=ack())
-        c = make_service(path, handler=handler)
+        if fail_initialization:
+            sleep(2.5)  # Startup cost exceeds the separate 2 s failure-detection budget.
+        # The fixture deliberately blocks for the 3 s claim/loser handshakes.
+        # This operation budget does not change CardLedger's 50 ms busy bound.
+        c = make_service(path, handler=handler, timeout=10)
         begin = c.ledger.begin
         first_claim = True
 
@@ -322,54 +330,153 @@ def _process_delivery(path, queue, start, claims, loser_finished):
 
         c.ledger.begin = competing_claim
         try:
-            queue.put('initialized', timeout=3)
-            assert start.wait(5)
+            queue.put((index, 'initialized'), timeout=3)
+            if fail_initialization:
+                raise RuntimeError('synthetic child initialization failure')
+            # Both children use the parent's deadline, including serial startup.
+            assert start.wait(max(0, deadline - monotonic())), 'parent startup deadline'
             result = await c.deliver(SCOPE, 'job', 'revision')
             if result.state == 'started':
                 loser_finished.set()
-            queue.put(result.state, timeout=3)
+            queue.put((index, result.state), timeout=3)
         finally:
             c.stop()
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    except BaseException:
+        queue.put((index, 'failed'), timeout=3)
+        raise
+    finally:
+        queue.close()
+        queue.join_thread()
 
 
-def test_two_processes_prepare_send_exactly_one(tmp_path):
+def _process_message(queue, processes, deadline, *, starting=False):
+    """Poll lifecycle, not delivery: a dead child cannot produce a later result."""
+    while True:
+        remaining = deadline - monotonic()
+        assert remaining > 0, 'child coordination deadline expired'
+        try:
+            index, message = queue.get(timeout=min(0.05, remaining))
+        except Empty:
+            started = [p for p in processes if p.pid is not None]
+            failed = [p for p in started if p.exitcode is not None
+                      and (starting or p.exitcode != 0)]
+            assert not failed, f'child exited before result: {[p.exitcode for p in failed]}'
+            assert not all(p.exitcode is not None for p in started), 'children exited without result'
+        else:
+            assert message != 'failed', f'child {index} failed'
+            return index, message
+
+
+@contextmanager
+def _delivery_processes(path, *, startup_budget=15, fail_child=None):
     import multiprocessing
     context = multiprocessing.get_context('spawn')
-    path = tmp_path/'cards.db'
     queue, start = context.Queue(maxsize=8), context.Event()
     claims, loser_finished = context.Barrier(2), context.Event()
+    deadline = monotonic() + startup_budget
     processes = [context.Process(target=_process_delivery,
-                                 args=(path, queue, start, claims, loser_finished))
-                 for _ in range(2)]
+                                 args=(path, queue, start, claims, loser_finished,
+                                       deadline, index, index == fail_child))
+                 for index in range(2)]
     try:
-        for process in processes:
+        yield processes, queue, start, deadline
+    finally:
+        # No release of the start gate on failure: cleanup must not initiate sends.
+        try:
+            for process in processes:
+                if process.pid is None:
+                    continue
+                if process.is_alive():
+                    process.terminate()
+                process.join(1)
+                if process.is_alive():
+                    process.kill()
+                    process.join(3)
+            assert all(p.pid is None or not p.is_alive() for p in processes), 'child not reaped'
+        finally:
+            try:
+                for process in processes:
+                    if process.pid is None or not process.is_alive():
+                        process.close()
+            finally:
+                queue.close()
+                queue.join_thread()
+
+
+@pytest.mark.parametrize('second_delay', [0, 0.2], ids=['normal', 'delayed_second_child'])
+def test_two_processes_prepare_send_exactly_one(tmp_path, second_delay):
+    path = tmp_path/'cards.db'
+    with _delivery_processes(path) as (processes, queue, start, deadline):
+        for index, process in enumerate(processes):
+            if index == 1 and second_delay:
+                # A controlled startup delay, while child 1 is already waiting.
+                sleep(second_delay)
+                assert processes[0].is_alive() and not start.is_set()
             process.start()
             # Initialization has a real 50 ms busy bound; it is not the race
             # under test. Each child initializes before either can prepare/send.
-            assert queue.get(timeout=5) == 'initialized'
+            assert _process_message(queue, processes, deadline,
+                                    starting=True) == (index, 'initialized')
         start.set()
-        results = [queue.get(timeout=5) for _ in range(3)]
-        assert sorted(results) == ['create_acknowledged', 'sent', 'started']
+        result_deadline = monotonic() + 12
+        results = [_process_message(queue, processes, result_deadline) for _ in range(3)]
+        assert sorted(message for _, message in results) == [
+            'create_acknowledged', 'sent', 'started']
+        sender = next(index for index, message in results if message == 'sent')
+        assert (sender, 'create_acknowledged') in results
+        assert (1 - sender, 'started') in results
         for process in processes:
             process.join(5)
             assert process.exitcode == 0
         with sqlite3.connect(path) as db:
             assert db.execute('SELECT count(*) FROM cards').fetchone()[0] == 1
             assert db.execute('SELECT state FROM cards').fetchone()[0] == 'create_acknowledged'
-    finally:
-        for process in processes:
-            if process.pid is None:
-                continue
-            if process.is_alive():
-                process.terminate()
-                process.join(3)
-            if process.is_alive():
-                process.kill()
-                process.join(3)
-            assert not process.is_alive()
-            process.close()
-        queue.close()
+
+
+@pytest.mark.parametrize('failure', ['parent_setup', 'child_initialization',
+                                    'child_exit', 'expired_deadline'])
+def test_process_startup_failure_reaps_children_and_closes_queue(tmp_path, failure):
+    import multiprocessing
+    previous_children = {child.pid for child in multiprocessing.active_children()}
+    with _delivery_processes(
+            tmp_path/'cards.db',
+            fail_child=1 if failure == 'child_initialization' else None) as resources:
+        processes, queue, start, deadline = resources
+        processes[0].start()
+        assert _process_message(queue, processes, deadline, starting=True) == (0, 'initialized')
+        if failure == 'child_initialization':
+            processes[1].start()
+            # Spawn/import and the injected 2.5 s startup cost use the same
+            # generous deadline as normal serial initialization, not detection time.
+            assert _process_message(queue, processes, deadline, starting=True) == (1, 'initialized')
+        reason = {
+            'parent_setup': 'synthetic setup failure',
+            'child_initialization': 'child 1 failed|child.*exited',
+            'child_exit': 'child.*exited',
+            'expired_deadline': 'child coordination deadline expired',
+        }[failure]
+        failed_at = monotonic()
+        with pytest.raises((RuntimeError, AssertionError), match=reason):
+            if failure == 'parent_setup':
+                raise RuntimeError('synthetic setup failure')
+            if failure == 'child_exit':
+                processes[0].terminate()  # No failure message: observe the child exit.
+            # An expired shared deadline must fail now, not start a new 5 s wait.
+            detection_deadline = failed_at - 1 if failure == 'expired_deadline' else failed_at + 2
+            _process_message(queue, processes, detection_deadline, starting=True)
+        assert monotonic() - failed_at < 3
+        cleanup_at = monotonic()
+    # Cleanup permits join(1) + kill/join(3) per child, independently of detection.
+    assert monotonic() - cleanup_at < 10
+    assert not start.is_set()
+    assert {child.pid for child in multiprocessing.active_children()} <= previous_children
+    for process in processes:
+        with pytest.raises(ValueError, match='closed'):
+            process.is_alive()
+    with pytest.raises(ValueError, match='closed'):
+        queue.get_nowait()
 
 
 def test_initialize_busy_is_bounded_and_does_not_retry(tmp_path, monkeypatch):

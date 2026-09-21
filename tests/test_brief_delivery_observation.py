@@ -67,6 +67,38 @@ def delivery(ready, transport=None, authorize=None, **kwargs):
                            **kwargs)
 
 
+async def _wait_for_entry(task, entered, timeout=2):
+    """Entry is impossible after the service exits; retrieve its failure first."""
+    waiter = asyncio.create_task(entered.wait())
+    try:
+        done, _ = await asyncio.wait({task, waiter}, timeout=timeout,
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if task in done:
+            task.result()
+            pytest.fail("delivery completed before the held operation was ready")
+        assert waiter in done, "delivery did not reach the held operation"
+    finally:
+        waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+
+
+async def _release_delivery(service, task, release, exchanges=()):
+    """Release even failed setup, then join the owner and any abandoned exchange."""
+    if not task.done():
+        service.stop()
+    release.set()
+    # Join the owner first: it may still be creating or abandoning its exchange.
+    for tasks in ([task], exchanges):
+        if not tasks:
+            continue
+        done, pending = await asyncio.wait(set(tasks), timeout=2)
+        for completed in done:
+            if not completed.cancelled():
+                completed.exception()
+        assert not pending, "released delivery tasks did not finish"
+    assert service.active_operations == 0
+
+
 async def test_journey_and_exact_replay(ready):
     briefs, _, intent = ready
     briefs.store.enable_delivery()
@@ -267,12 +299,15 @@ async def test_two_handles_one_send(ready):
         return SendResponse(attempt.token, MESSAGE_ID, (proof(attempt.intent),))
     one.transport.send_effect = hold
     first = asyncio.create_task(one.send(SCOPE, intent.delivery_id))
-    await entered.wait()
-    second = await two.send(SCOPE, intent.delivery_id)
-    assert second.state == "started"
-    release.set()
-    assert (await first).state == "provider_accepted"
-    assert len(one.transport.sends) == 1
+    try:
+        await _wait_for_entry(first, entered)
+        second = await two.send(SCOPE, intent.delivery_id)
+        assert second.state == "started"
+        release.set()
+        assert (await first).state == "provider_accepted"
+        assert len(one.transport.sends) == 1
+    finally:
+        await _release_delivery(one, first, release)
 
 
 async def test_pending_restart_can_send_started_restart_cannot(ready):
@@ -397,17 +432,20 @@ async def test_actual_egress_after_adapter_await_rechecks_authority(ready, chang
             return SendResponse(attempt.token, MESSAGE_ID, (proof(attempt.intent),))
     service.transport = Deferred()
     task = asyncio.create_task(service.send(SCOPE, ready[2].delivery_id))
-    await entered.wait()
-    if change == "revocation":
-        allowed = False
-    else:
-        service.store.cancel(SCOPE, ready[2].job_id, clock=service.clock)
-    release.set()
-    if change == "revocation":
-        with pytest.raises(DeliveryError, match="authorization_denied"):
-            await task
-    else:
-        assert (await task).state == "unknown"
+    try:
+        await _wait_for_entry(task, entered)
+        if change == "revocation":
+            allowed = False
+        else:
+            service.store.cancel(SCOPE, ready[2].job_id, clock=service.clock)
+        release.set()
+        if change == "revocation":
+            with pytest.raises(DeliveryError, match="authorization_denied"):
+                await task
+        else:
+            assert (await task).state == "unknown"
+    finally:
+        await _release_delivery(service, task, release)
     assert not actual_io
     assert service.store.delivery_snapshot(WORKER, SCOPE, ready[2].delivery_id).receipt_json is None
 
@@ -422,7 +460,9 @@ async def test_no_late_observation_confirmation(ready, change):
             raise RuntimeError("PRIVATE revoked during observe")
     service, initial = await candidate_ready(ready, authorize=authorize)
     entered, release = asyncio.Event(), asyncio.Event()
+    exchanges = []
     async def read(intent):
+        exchanges.append(asyncio.current_task())
         entered.set()
         try:
             await release.wait()
@@ -431,25 +471,26 @@ async def test_no_late_observation_confirmation(ready, change):
         return (proof(intent),)
     service.transport.read_effect = read
     task = asyncio.create_task(service.observe(SCOPE, ready[2].delivery_id))
-    await entered.wait()
-    if change == "revocation":
-        allowed = False
-    elif change == "generation":
-        current_binding = replace(BINDING, generation=2)
-    elif change == "cancel":
-        service.store.cancel(SCOPE, ready[2].job_id, clock=service.clock)
-    else:
-        task.cancel()
-    if change == "caller_cancel":
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert service.active_operations == 1
-        release.set()
-        await asyncio.sleep(0.01)
-    else:
-        release.set()
-        with pytest.raises(DeliveryError):
-            await task
+    try:
+        await _wait_for_entry(task, entered)
+        if change == "revocation":
+            allowed = False
+        elif change == "generation":
+            current_binding = replace(BINDING, generation=2)
+        elif change == "cancel":
+            service.store.cancel(SCOPE, ready[2].job_id, clock=service.clock)
+        else:
+            task.cancel()
+        if change == "caller_cancel":
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert service.active_operations == 1
+        else:
+            release.set()
+            with pytest.raises(DeliveryError):
+                await task
+    finally:
+        await _release_delivery(service, task, release, exchanges)
     result = service.store.delivery_snapshot(WORKER, SCOPE, ready[2].delivery_id)
     assert result.state == "unknown" and result.receipt_json is None
     assert result.uncertainty == initial.uncertainty
@@ -460,10 +501,13 @@ async def test_no_late_observation_confirmation(ready, change):
 async def test_hostile_async_transport_has_bounded_custody_and_retains_capacity(ready, action):
     from ostag.briefs.delivery import DeliveryError
     ready[0].store.enable_delivery()
-    service = delivery(ready, timeout=0.12)
+    # Cancellation/stop test custody, independently of startup overhead.
+    service = delivery(ready, timeout=0.12 if action == "timeout" else 5)
     await service.prepare(ready[2])
     entered, release = asyncio.Event(), asyncio.Event()
+    exchanges = []
     async def hostile(attempt):
+        exchanges.append(asyncio.current_task())
         entered.set()
         while not release.is_set():
             try:
@@ -473,14 +517,16 @@ async def test_hostile_async_transport_has_bounded_custody_and_retains_capacity(
         return SendResponse(attempt.token, MESSAGE_ID, (proof(attempt.intent),))
     service.transport.send_effect = hostile
     task = asyncio.create_task(service.send(SCOPE, ready[2].delivery_id))
-    await entered.wait()
-    if action == "stop":
-        service.stop()
-    elif action == "cancel":
-        task.cancel()
-    started = asyncio.get_running_loop().time()
     try:
-        with pytest.raises(asyncio.CancelledError if action == "cancel" else DeliveryError):
+        await _wait_for_entry(task, entered)
+        if action == "stop":
+            service.stop()
+        elif action == "cancel":
+            task.cancel()
+        started = asyncio.get_running_loop().time()
+        with pytest.raises(asyncio.CancelledError if action == "cancel" else DeliveryError,
+                           match={"cancel": None, "stop": "^stopped$",
+                                  "timeout": "^timeout$"}[action]):
             await asyncio.wait_for(task, 0.6)
         assert asyncio.get_running_loop().time() - started < 0.6
         assert service.active_operations == 1
@@ -491,10 +537,98 @@ async def test_hostile_async_transport_has_bounded_custody_and_retains_capacity(
         result = service.store.delivery_snapshot(WORKER, SCOPE, ready[2].delivery_id)
         assert result.state == "unknown" and result.receipt_json is None
     finally:
-        release.set()
-        await asyncio.sleep(0.02)
+        await _release_delivery(service, task, release, exchanges)
     assert service.active_operations == 0
     assert service.store.delivery_snapshot(WORKER, SCOPE, ready[2].delivery_id) == result
+
+
+@pytest.mark.parametrize("fault", ["timeout", "denial", "readiness_timeout",
+                                   "setup_before", "setup_after"])
+async def test_hostile_test_failure_cleanup_is_bounded(ready, monkeypatch, fault):
+    """Run the real test wrapper through failures on both sides of readiness."""
+    import gc
+    import sys
+    from ostag.briefs.delivery import DeliveryError
+    from ostag.briefs.store import StoreBusy
+
+    module = sys.modules[__name__]
+    original_delivery, original_wait = delivery, _wait_for_entry
+    services, exchanges, errors = [], [], []
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    baseline = asyncio.all_tasks()
+
+    def make_delivery(*args, **kwargs):
+        if fault == "timeout":
+            kwargs["timeout"] = 0.12
+        service = original_delivery(*args, **kwargs)
+        services.append(service)
+        begin = service.store.begin_delivery
+
+        def denied(_):
+            raise PermissionError("synthetic denial")
+
+        def begin_with_fault(*args, **kwargs):
+            if fault == "timeout":
+                sleep(0.2)  # The exact pre-entry deadline overrun from the root repro.
+            elif fault == "denial":
+                service.authorize = denied
+            elif fault == "readiness_timeout":
+                raise StoreBusy("synthetic stalled claim")
+            return begin(*args, **kwargs)
+
+        monkeypatch.setattr(service.store, "begin_delivery", begin_with_fault)
+        send = service.transport.send
+
+        async def tracked_send(*args, **kwargs):
+            exchanges.append(asyncio.current_task())
+            return await send(*args, **kwargs)
+
+        service.transport.send = tracked_send
+        return service
+
+    async def entry_with_fault(task, entered):
+        if fault == "setup_before":
+            raise RuntimeError("synthetic setup failure")
+        await original_wait(task, entered, timeout=0.05 if fault == "readiness_timeout" else 2)
+        if fault == "setup_after":
+            raise RuntimeError("synthetic setup failure")
+
+    monkeypatch.setattr(module, "delivery", make_delivery)
+    monkeypatch.setattr(module, "_wait_for_entry", entry_with_fault)
+    loop.set_exception_handler(lambda loop, context: errors.append(context))
+    task = asyncio.create_task(
+        test_hostile_async_transport_has_bounded_custody_and_retains_capacity(ready, "cancel"))
+    try:
+        # Include fixture preparation and FULL SQLite commits in the watchdog;
+        # the injected operation deadline itself remains 120 ms.
+        done, _ = await asyncio.wait({task}, timeout=3)
+        assert task in done, "test wrapper hung during failed setup"
+        expected = (RuntimeError if fault.startswith("setup") else
+                    AssertionError if fault == "readiness_timeout" else DeliveryError)
+        reason = {"timeout": "^timeout$", "denial": "^authorization_denied$",
+                  "readiness_timeout": "delivery did not reach"}.get(fault, "synthetic setup failure")
+        with pytest.raises(expected, match=reason):
+            task.result()
+        assert services[0].active_operations == 0
+        assert len(exchanges) == int(fault == "setup_after")
+        assert all(exchange.done() for exchange in exchanges)
+        assert asyncio.all_tasks() <= baseline
+    finally:
+        try:
+            if not task.done():
+                task.cancel()
+            done, pending = await asyncio.wait({task}, timeout=2)
+            for completed in done:
+                if not completed.cancelled():
+                    completed.exception()
+            assert not pending, "fault check did not clean up its test wrapper"
+            del task, done, completed
+            exchanges.clear()
+            gc.collect()
+            assert errors == []
+        finally:
+            loop.set_exception_handler(previous_handler)
 
 
 @pytest.mark.parametrize("action", ["timeout", "cancel", "stop"])
@@ -889,7 +1023,7 @@ async def test_busy_after_send_retries_only_persistence_and_reauthorizes(ready):
     service.transport.send_effect = respond
     task = asyncio.create_task(service.send(SCOPE, ready[2].delivery_id))
     try:
-        await locked.wait()
+        await _wait_for_entry(task, locked)
         await asyncio.sleep(0.025)
         assert not task.done() and len(service.transport.sends) == 1
         allowed = False
@@ -897,7 +1031,9 @@ async def test_busy_after_send_retries_only_persistence_and_reauthorizes(ready):
         with pytest.raises(DeliveryError, match="authorization_denied"):
             await task
     finally:
+        holder.rollback()
         holder.close()
+        await _release_delivery(service, task, asyncio.Event())
     result = service.store.delivery_snapshot(WORKER, SCOPE, ready[2].delivery_id)
     assert result.state == "unknown" and result.receipt_json is None
     assert result.first_failure.reason == "authorization_denied"
@@ -1073,7 +1209,7 @@ async def test_failed_loser_cannot_mutate_winning_operation(ready, monkeypatch, 
         winner, _ = await candidate_ready(ready)
     loser = DeliveryService(store=BriefStore(briefs.store.path), worker=WorkerContext("loser"),
                             transport=Transport(), authorize=lambda _: None, clock=briefs.clock,
-                            timeout=0.15)
+                            timeout=0.15 if action == "timeout" else 5)
     contended, entered, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
     fail_status = False
     original_snapshot = loser.store.delivery_snapshot
@@ -1112,10 +1248,11 @@ async def test_failed_loser_cannot_mutate_winning_operation(ready, monkeypatch, 
     monkeypatch.setattr(loser.store, "delivery_snapshot", snapshot)
     operation = "send" if sending else "observe"
     losing = asyncio.create_task(getattr(loser, operation)(SCOPE, intent.delivery_id))
-    await asyncio.wait_for(contended.wait(), 1)
-    winning = asyncio.create_task(getattr(winner, operation)(SCOPE, intent.delivery_id))
+    winning = None
     try:
-        await asyncio.wait_for(entered.wait(), 1)
+        await _wait_for_entry(losing, contended)
+        winning = asyncio.create_task(getattr(winner, operation)(SCOPE, intent.delivery_id))
+        await _wait_for_entry(winning, entered)
         before = winner.store.delivery_snapshot(WORKER, SCOPE, intent.delivery_id)
         if sending:
             assert before.state == "started" and before.first_failure is None
@@ -1128,9 +1265,15 @@ async def test_failed_loser_cannot_mutate_winning_operation(ready, monkeypatch, 
         after = winner.store.delivery_snapshot(WORKER, SCOPE, intent.delivery_id)
         assert after == before
         assert not loser.transport.sends and not loser.transport.reads
-    finally:
         release.set()
         result = await asyncio.wait_for(winning, 1)
+    finally:
+        # Either readiness check can fail before both tasks have been created.
+        try:
+            if winning is not None:
+                await _release_delivery(winner, winning, release)
+        finally:
+            await _release_delivery(loser, losing, release)
     assert result.state == "provider_accepted"
     assert len(winner.transport.sends) == int(sending)
     assert len(winner.transport.reads) == int(not sending)
