@@ -1,0 +1,30 @@
+name: Brief owner candidate verification
+
+on:
+  push:
+    branches: ["codex/ostag-production-owner-repair"]
+
+permissions:
+  contents: read
+
+jobs:
+  macos-owner:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: uv sync --all-extras --locked
+      - name: Verify exact candidate and full macOS owner gate
+        run: uv run --locked python scripts/engineering/a11_candidate_ci.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: brief-owner-macos-${{ github.sha }}
+          path: .a11-verification/
+          if-no-files-found: error
