@@ -18,9 +18,12 @@ count is supported only as an exact integer page row count. Other matrix keys
 (including undocumented scope/count/revision metadata) fail closed. This is a
 deliberately conservative fixture-tested subset, not remote contract acceptance.
 The version probe accepts only 'lark-cli version 1.0.69' (optional final LF).
-The supplied record sources do not establish the version probe's wire format;
-deployment must validate this supported Cobra-style output. Host 1.0.56 is NOT
-contract proof and is rejected. No host CLI or real table is needed for tests.
+Supplied runtime evidence from the pinned linux/amd64 production image (uid10001,
+no network or credentials) confirms '--profile ostag-contract --version' exits 0
+with that exact output plus LF; placing the profile after --version fails.
+This validates only the version probe, not live matrix/envelope acceptance.
+Host 1.0.56 is NOT contract proof and is rejected. No host CLI or real table is
+needed for tests.
 
 Columns come exclusively from returned fields, with no status/name inference.
 Resource binding comes from our exact request, NOT an independent provider echo.
@@ -151,8 +154,10 @@ class _Observation:
         self.guard()
         _require(self.accepted_bytes < TOTAL_BYTES)
         end = min(self.deadline, self.tick() + COMMAND_SECONDS)
+        # v1.0.69 requires the profile before --version; IO keeps its binding.
+        profile_args = ["--profile", self.config.profile]
         result = self.config.runner(
-            ["lark-cli", *args, "--profile", self.config.profile],
+            ["lark-cli", *(profile_args + args if version else args + profile_args)],
             deadline=end, clock=self.tick,
         )
         self.guard()

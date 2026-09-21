@@ -42,9 +42,8 @@ class FakeCLI:
     def __call__(self, argv, *, deadline, clock):
         self.calls.append(list(argv))
         assert 0 < deadline - clock() <= 15
-        assert argv[-2:] == ["--profile", PROFILE]
-        if argv[1] == "--version":
-            assert argv == ["lark-cli", "--version", "--profile", PROFILE]
+        if "--version" in argv:
+            assert argv == ["lark-cli", "--profile", PROFILE, "--version"]
             value = self.version
         elif argv[1] == "api":
             assert argv == ["lark-cli", "api", "GET", "/open-apis/authen/v1/user_info",
@@ -52,6 +51,7 @@ class FakeCLI:
                             "--profile", PROFILE]
             value = envelope({"open_id": self.identities.pop(0)})
         else:
+            assert argv[-2:] == ["--profile", PROFILE]
             assert argv[:3] == ["lark-cli", "base", "+record-list"]
             assert argv[3:13] == ["--base-token", KEY.base_id, "--table-id", KEY.table_id,
                                   "--as", "user", "--format", "json", "--offset",
@@ -154,6 +154,21 @@ def test_empty_matrix_and_completely_blank_rows_are_preserved():
     assert snapshot.records[0].fields == {"A": None, "B": "", "C": []}
 
 
+@pytest.mark.parametrize("version", [VERSION, VERSION.rstrip(b"\n")])
+def test_version_probe_places_explicit_profile_before_version(version):
+    fake, calls = FakeCLI(), []
+    def runner(argv, **kwargs):
+        calls.append(list(argv))
+        if "--version" in argv:
+            return version, len(version)
+        return fake(argv, **kwargs)
+    snapshot = reader(runner).snapshot(KEY)
+    assert len(snapshot.records) == 1
+    assert calls[0] == ["lark-cli", "--profile", PROFILE, "--version"]
+    assert len(calls) == 4
+    assert all(argv[-2:] == ["--profile", PROFILE] for argv in calls[1:])
+
+
 @pytest.mark.parametrize("version", [b"lark-cli version 1.0.56\n", b"1.0.69",
     b"lark-cli version 1.0.690\n", b"lark-cli version 1.0.69-dev\n",
     b"lark-cli version 1.0.69\nSECRET", b'{"version":"1.0.69"}'])
@@ -240,7 +255,7 @@ def test_no_progress_duplicates_and_column_drift_deny(pages):
 def test_strict_json_and_provider_denial_are_redacted(raw):
     fake = FakeCLI()
     def runner(argv, **kwargs):
-        if argv[1] == "--version":
+        if "--version" in argv:
             return fake(argv, **kwargs)
         return raw, len(raw)
     denied(lambda: reader(runner).snapshot(KEY))
