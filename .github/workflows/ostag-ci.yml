@@ -8,8 +8,10 @@ on:
 jobs:
   release-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE: "1"
+      PYTEST_ADDOPTS: "-o faulthandler_timeout=60"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
