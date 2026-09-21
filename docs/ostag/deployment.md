@@ -409,6 +409,77 @@ Run a non-mutating server check at any time:
 /usr/local/sbin/ostag-deploy-work-monitor preflight
 ```
 
+### Host deployment mutex (D02 prerequisite, repository support only)
+
+The repository deploy script takes one exclusive, nonblocking Python 3
+`fcntl.flock` lock at `/run/ostag-work-monitor-deploy.lock`. Valid `preflight`
+and `deploy` calls use the same host-wide lock, independent of release SHA,
+Compose project, and `OSTAG_RELEASE_ROOT`. Argument count, command, SHA and
+checksum syntax are checked before locking or runtime access. Acquisition
+precedes the first Docker call and production environment/database reads.
+The lock covers the whole preflight or deployment, including archive checks,
+backup, image switch, health/image verification, every receipt, cleanup, and
+internal rollback. Rollback runs under the original lock without reacquiring it.
+
+A concurrent call exits immediately with status 1 and exactly
+`production deploy refused: deployment lock is busy`, before Docker, curl,
+database access, or rollback. Unsafe/unavailable lock paths also fail closed
+with status 1 and the fixed message
+`production deploy refused: deployment lock is unavailable or unsafe`;
+neither error includes paths, exception details, or environment values.
+
+Python acquires the lock once, then replaces itself with the Bash continuation
+in the same parent PID, carrying the open descriptor. There is no skip-lock
+argument or environment marker. The kernel releases ownership when the last
+inherited descriptor closes on success, failure, or process exit. Runtime
+children inherit the descriptor: killing only the parent does not unlock while
+an in-flight child still holds it. A leftover file is normal and reusable;
+never unlink, replace, or truncate it to clear a lock, since that can create
+independent inode owners. This is an advisory lock for cooperating invocations
+of the updated script; direct Docker commands and older installed scripts do
+not participate.
+
+Lock path components must be real directories owned by root or the effective
+deploy UID, with no group/other write permission. Root-owned sticky ancestors
+(such as `/tmp`) are allowed only above a protected immediate parent. The
+script walks directory descriptors without following symlinks. The lock itself
+must be a regular file owned by the effective UID, exactly mode `0600`, with
+one link; symlinks, hardlinks, special files, and permissive files are refused.
+The default `/run` location assumes the existing trusted root host invocation.
+
+`OSTAG_DEPLOY_LOCK_PATH` is an explicit absolute path override solely for trusted
+isolated tests or host administration. Tests must choose a private local temp
+directory and share that one path across all competing invocations, even when
+their release roots differ. An empty or unsafe override fails; it never disables
+locking. The launcher, its environment/PATH, script, and lock directory owners
+are trusted: allowing an untrusted caller to choose a different safe lock path
+would defeat coordination. Do not accept this override from release artifacts,
+SSH command arguments, or untrusted environment forwarding; production callers
+must share the default identity. No wrapper or Actions changes are part of this
+prerequisite.
+
+This is **repository support only**, not evidence of a production installation
+or a completed D02. Trusted host installation of the reviewed script and the
+corresponding `PRODUCTION_DEPLOY_SCRIPT_SHA256` hash update remain future gates.
+The full A11 drain, multistore backup, and rollback rehearsal/evidence also remain
+future gates. The mutex does not expand the existing single-SQLite backup schema
+or implement that procedure. Nothing in this slice installs, deploys, changes
+production credentials/control flags, or marks D02 done.
+
+Local verification uses subprocesses and real kernel locks with fake Docker,
+curl, and local archives; it never opens a production database. Run:
+
+```bash
+python -m pytest -q tests/test_production_deploy.py tests/test_production_deploy_lock.py
+ruff check tests/test_production_deploy.py tests/test_production_deploy_lock.py
+bash -n scripts/deploy_work_monitor_release.sh
+```
+
+Contention, unsafe-path, malformed-input, and process-exit tests run on macOS
+as well. Full deploy/receipt/rollback tests require Linux because the existing
+runtime uses GNU `stat -c` and Bash `mapfile`; their macOS skips are not Linux
+deployment evidence. Run those tests on real Linux before advancing the gate.
+
 Rotate the GitHub deployment identity independently of developer SSH keys.
 Install the replacement public key first, update the environment secret, prove
 one preflight/deploy connection, and only then remove the previous key.
