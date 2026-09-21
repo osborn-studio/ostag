@@ -72,9 +72,10 @@ from ostag.core.identity import Principal
 # A04 explicitly calls enable_manual() for the additive schema3 migration.
 CURRENT_SCHEMA_VERSION = 2
 READABLE_SCHEMA_MIN = 1
-READABLE_SCHEMA_MAX = 4
+READABLE_SCHEMA_MAX = 5
 MANUAL_SCHEMA_VERSION = 3
 DELIVERY_SCHEMA_VERSION = 4
+EFFECT_SCHEMA_VERSION = 5
 APPLICATION_ID = 0x42524653  # BRFS; deliberately different from unmarked Monitor SQLite.
 MAX_JSON_BYTES = 1024 * 1024
 MAX_QUEUED = 20
@@ -604,9 +605,40 @@ _DELIVERY_SCHEMA = (
         PRIMARY KEY(delivery_id, ordinal)
     )""",
 )
+_EFFECT_SCHEMA = (
+    """CREATE TABLE brief_effect_meta (
+        id INTEGER PRIMARY KEY CHECK(id=1), epoch TEXT NOT NULL, ledger_epoch TEXT NOT NULL,
+        highwater INTEGER NOT NULL CHECK(highwater >= 0)
+    )""",
+    """CREATE TABLE brief_action_intents (
+        action_id TEXT PRIMARY KEY, job_id TEXT NOT NULL REFERENCES brief_jobs(job_id),
+        namespace TEXT NOT NULL, platform TEXT NOT NULL, actor_id TEXT NOT NULL,
+        resource_key TEXT NOT NULL UNIQUE, kind TEXT NOT NULL CHECK(kind='brief.field.update'),
+        intent_json TEXT NOT NULL CHECK(length(CAST(intent_json AS BLOB)) <= 131072),
+        intent_digest TEXT NOT NULL, ledger_epoch TEXT NOT NULL, created_us INTEGER NOT NULL
+    )""",
+    """CREATE TABLE brief_effect_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        action_id TEXT NOT NULL UNIQUE REFERENCES brief_action_intents(action_id),
+        owner_id TEXT NOT NULL, fence INTEGER NOT NULL UNIQUE CHECK(fence > 0),
+        permit_json TEXT NOT NULL CHECK(length(CAST(permit_json AS BLOB)) <= 131072),
+        permit_digest TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('begun','unknown')),
+        issued_us INTEGER NOT NULL, expires_us INTEGER NOT NULL, begun_us INTEGER NOT NULL,
+        CHECK(issued_us <= begun_us AND begun_us < expires_us)
+    )""",
+    """CREATE TABLE brief_effect_observations (
+        attempt_id TEXT NOT NULL REFERENCES brief_effect_attempts(attempt_id),
+        ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 1 AND 32),
+        kind TEXT NOT NULL CHECK(kind IN ('transport_response','transport_error','independent_readback')),
+        evidence_sha256 TEXT NOT NULL, observed_us INTEGER NOT NULL,
+        PRIMARY KEY(attempt_id, ordinal)
+    )""",
+)
 _SCHEMAS = {1: _SCHEMA, 2: _SCHEMA + _COST_SCHEMA,
             3: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA,
-            4: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA + _DELIVERY_SCHEMA}
+            4: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA + _DELIVERY_SCHEMA,
+            5: _SCHEMA + _COST_SCHEMA + _MANUAL_SCHEMA + _DELIVERY_SCHEMA + _EFFECT_SCHEMA}
 
 # Fixed public-domain causes only: never exception strings, excerpts or provider errors.
 FAILURE_CAUSES = frozenset({
@@ -829,13 +861,21 @@ class BriefStore:
         if any(r[0] != _retired_cost_diagnostic(r[0]) for r in db.execute(
                 'SELECT diagnostic FROM brief_cost_calls WHERE job_id=?', (job_id,))):
             raise StoreError("retirement incomplete")
-        if db.execute('PRAGMA user_version').fetchone()[0] == DELIVERY_SCHEMA_VERSION:
+        if db.execute('PRAGMA user_version').fetchone()[0] >= DELIVERY_SCHEMA_VERSION:
             if (db.execute('SELECT 1 FROM brief_deliveries WHERE job_id=? AND '
                            '(intent_json!=? OR receipt_json IS NOT NULL)',
                            (job_id, _RETIRED)).fetchone()
                     or db.execute('SELECT 1 FROM brief_delivery_observations WHERE delivery_id IN '
                                   '(SELECT delivery_id FROM brief_deliveries WHERE job_id=?)',
                                   (job_id,)).fetchone()):
+                raise StoreError("retirement incomplete")
+
+        if db.execute('PRAGMA user_version').fetchone()[0] >= EFFECT_SCHEMA_VERSION:
+            if (db.execute('SELECT 1 FROM brief_action_intents WHERE job_id=? AND intent_json!=?',
+                           (job_id, _RETIRED)).fetchone()
+                    or db.execute('SELECT 1 FROM brief_effect_attempts WHERE action_id IN '
+                        '(SELECT action_id FROM brief_action_intents WHERE job_id=?) '
+                        "AND (permit_json!=? OR state!='unknown')", (job_id, _RETIRED)).fetchone()):
                 raise StoreError("retirement incomplete")
 
     @_retirement_method
@@ -870,11 +910,17 @@ class BriefStore:
                 if safe_diagnostic != call['diagnostic']:
                     db.execute('UPDATE brief_cost_calls SET diagnostic=? WHERE reservation_id=?',
                                (safe_diagnostic, call['reservation_id']))
-            if db.execute('PRAGMA user_version').fetchone()[0] == DELIVERY_SCHEMA_VERSION:
+            if db.execute('PRAGMA user_version').fetchone()[0] >= DELIVERY_SCHEMA_VERSION:
                 db.execute('UPDATE brief_deliveries SET intent_json=?,receipt_json=NULL '
                            'WHERE job_id=?', (_RETIRED, job_id))
                 db.execute('DELETE FROM brief_delivery_observations WHERE delivery_id IN '
                            '(SELECT delivery_id FROM brief_deliveries WHERE job_id=?)', (job_id,))
+            if db.execute('PRAGMA user_version').fetchone()[0] >= EFFECT_SCHEMA_VERSION:
+                db.execute('UPDATE brief_action_intents SET intent_json=? WHERE job_id=?',
+                           (_RETIRED, job_id))
+                db.execute("UPDATE brief_effect_attempts SET permit_json=?,state='unknown' WHERE "
+                    'action_id IN (SELECT action_id FROM brief_action_intents WHERE job_id=?)',
+                    (_RETIRED, job_id))
             self._verify_retired(db, scope, job_id)
 
     def enable_manual(self) -> None:
@@ -906,6 +952,11 @@ class BriefStore:
                 for statement in _DELIVERY_SCHEMA:
                     db.execute(statement)
                 db.execute(f"PRAGMA user_version={DELIVERY_SCHEMA_VERSION}")
+
+    def enable_effects(self, *, backup_path):
+        """Explicit schema4->5 with a durable snapshot; never constructor driven."""
+        from ostag.briefs.effect_migration import enable_effects
+        return enable_effects(self, backup_path)
 
     @contextmanager
     def _delivery_transaction(self, *, write=True):
@@ -946,7 +997,7 @@ class BriefStore:
         _worker(worker)
         params = _scope(scope)
         _identifier(delivery_id, "delivery_id")
-        if db.execute("PRAGMA user_version").fetchone()[0] != DELIVERY_SCHEMA_VERSION:
+        if db.execute("PRAGMA user_version").fetchone()[0] < DELIVERY_SCHEMA_VERSION:
             raise BriefSchemaError("delivery requires explicit schema4 enablement")
         return db.execute("SELECT * FROM brief_deliveries WHERE namespace=? AND platform=? "
                           "AND actor_id=? AND delivery_id=?", (*params, delivery_id)).fetchone()
