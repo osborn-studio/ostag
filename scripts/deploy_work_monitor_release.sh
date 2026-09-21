@@ -18,14 +18,6 @@ command_name="${1:-}"
 [[ -n "$command_name" ]] || usage
 shift
 
-release_root="${OSTAG_RELEASE_ROOT:-/opt/ostag-releases}"
-production_env_file="${OSTAG_PRODUCTION_ENV_FILE:-/opt/ostag-work-monitor/deploy/work-monitor/.env}"
-compose_project="${OSTAG_COMPOSE_PROJECT:-work-monitor}"
-service_name="work-monitor"
-local_health_url="${OSTAG_LOCAL_HEALTH_URL:-http://127.0.0.1:8000/healthz}"
-database_path="/var/lib/ostag/work_monitor.sqlite3"
-backup_dir="/var/lib/ostag/backups"
-
 fail() {
   echo "production deploy refused: $*" >&2
   exit 1
@@ -267,13 +259,11 @@ rollback_previous_release() {
 }
 
 deploy_release() {
-  [[ "$#" -eq 5 ]] || usage
   local release_sha="$1"
   local source_archive="$2"
   local source_sha256="$3"
   local image_archive="$4"
   local image_sha256="$5"
-  [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || fail "release SHA must be 40 lowercase hex characters"
 
   runtime_preflight
   verify_archive "$source_archive" "$source_sha256" source
@@ -359,15 +349,98 @@ deploy_release() {
   echo "receipt=$receipt_path"
 }
 
+# Only this continuation is handed to Bash after acquisition. There is no reentry
+# argument or environment marker that can bypass the lock on a fresh invocation.
+locked_main() {
+  release_root="${OSTAG_RELEASE_ROOT:-/opt/ostag-releases}"
+  production_env_file="${OSTAG_PRODUCTION_ENV_FILE:-/opt/ostag-work-monitor/deploy/work-monitor/.env}"
+  compose_project="${OSTAG_COMPOSE_PROJECT:-work-monitor}"
+  service_name="work-monitor"
+  local_health_url="${OSTAG_LOCAL_HEALTH_URL:-http://127.0.0.1:8000/healthz}"
+  database_path="/var/lib/ostag/work_monitor.sqlite3"
+  backup_dir="/var/lib/ostag/backups"
+
+  local command_name="$1"
+  shift
+  case "$command_name" in
+    preflight) runtime_preflight ;;
+    deploy) deploy_release "$@" ;;
+  esac
+}
+
+# Validate syntax before acquiring the lock or inspecting any production state.
 case "$command_name" in
   preflight)
     [[ "$#" -eq 0 ]] || usage
-    runtime_preflight
     ;;
   deploy)
-    deploy_release "$@"
+    [[ "$#" -eq 5 ]] || usage
+    [[ "$1" =~ ^[0-9a-f]{40}$ ]] || fail "release SHA must be 40 lowercase hex characters"
+    [[ "$3" =~ ^[0-9a-f]{64}$ ]] || fail "source checksum is malformed"
+    [[ "$5" =~ ^[0-9a-f]{64}$ ]] || fail "image checksum is malformed"
     ;;
-  *)
-    usage
-    ;;
+  *) usage ;;
 esac
+
+require_command python3
+# exec preserves the parent PID across Python -> Bash. The inheritable descriptor
+# owns the kernel lock throughout the continuation and its runtime children,
+# including internal rollback. Never unlink or truncate this file.
+exec python3 - "$BASH" -c "$(declare -f)
+set -euo pipefail
+locked_main \"\$@\"" "$0" "$command_name" "$@" <<'PY'
+import fcntl
+import os
+import stat
+import sys
+
+try:
+    path = os.environ.get("OSTAG_DEPLOY_LOCK_PATH", "/run/ostag-work-monitor-deploy.lock")
+    parts = path.split("/")
+    if not path.startswith("/") or any(part in ("", ".", "..") for part in parts[1:]):
+        raise ValueError("invalid path")
+    uid = os.geteuid()
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    # Walk pinned directory descriptors, never following a symlink. Root-owned
+    # sticky ancestors allow a private test directory under /tmp; the immediate
+    # parent must still be protected from group/other writes.
+    for index, part in enumerate(parts[1:]):
+        metadata = os.fstat(directory)
+        sticky_ancestor = (
+            index < len(parts) - 2
+            and metadata.st_uid == 0
+            and metadata.st_mode & stat.S_ISVTX
+        )
+        if metadata.st_uid not in (0, uid) or (
+            metadata.st_mode & 0o022 and not sticky_ancestor
+        ):
+            raise ValueError("untrusted directory")
+        if index == len(parts) - 2:
+            descriptor = os.open(
+                part, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                0o600, dir_fd=directory,
+            )
+        else:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=directory)
+            os.close(directory)
+            directory = child
+    os.close(directory)
+    metadata = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_uid != uid
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise ValueError("untrusted lock file")
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise SystemExit("production deploy refused: deployment lock is busy")
+    os.set_inheritable(descriptor, True)
+    os.execv(sys.argv[1], sys.argv[1:])
+except Exception:
+    # Do not disclose paths, environment values, or exception details.
+    raise SystemExit("production deploy refused: deployment lock is unavailable or unsafe")
+PY
