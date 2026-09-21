@@ -1366,10 +1366,13 @@ class BriefStore:
             raise _invalid("destination must be explicitly requester-private")
         _identifier(destination.address, "destination")
         encoded = _canonical(payload)
+        meeting_payload = isinstance(payload, dict) and payload.get("kind") == "meeting-brief-v1"
+        if meeting_payload and meeting_scope_hash is None:
+            raise _invalid("meeting payload requires its frozen scope binding")
         if meeting_scope_hash is not None:
             _hash(meeting_scope_hash, "meeting scope hash")
-            if (not isinstance(payload, dict) or payload.get("kind") != "meeting-brief-v1"
-                    or payload.get("request", {}).get("confirmed_scope_hash") != meeting_scope_hash
+            if (not meeting_payload or type(payload.get("request")) is not dict
+                    or payload["request"].get("confirmed_scope_hash") != meeting_scope_hash
                     or request_hash != meeting_scope_hash):
                 raise _invalid("meeting identity must bind the frozen payload")
         # Encode content separately from its bounded payload, allowing an exact
