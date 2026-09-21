@@ -64,6 +64,29 @@ def test_projection_parses_only_immutable_digest_custody():
     assert not hasattr(parsed, "intent_json")
 
 
+@pytest.mark.parametrize('action_id', ['action_legacy', 'action_frozen' + 'a' * 64])
+@pytest.mark.parametrize('kind', ['brief-field-retired-v1', 'brief-field-retired-future'])
+@pytest.mark.parametrize('entrypoint', ['append', 'record_receipt', 'record_receipt_state'])
+def test_public_writers_reject_reserved_projection_before_io(tmp_path, action_id, kind, entrypoint):
+    ledger = RunLedger(tmp_path / 'run.jsonl')
+    receipt = projection(action_id=action_id)
+    receipt.apply_payload['kind'] = kind
+    with pytest.raises(SchemaError) as error:
+        if entrypoint == 'append':
+            ledger.append(LedgerEvent('evt_invalid', receipt.run_id, 'action_proposed',
+                                      {'receipt': receipt.to_dict()}))
+        elif entrypoint == 'record_receipt':
+            ledger.record_receipt(receipt)
+        else:
+            ledger.record_receipt_state(receipt, previous_state='needs_approval')
+    assert error.value.code == 'frozen_content_retired'
+    assert not ledger.path.exists()
+    # Rejected data cannot poison the strict scanner or disable unrelated work.
+    ledger.append(LedgerEvent('evt_safe', 'run_safe', 'security_event', {'kind': 'synthetic'}))
+    assert ledger.frozen_epoch() == 'initial'
+    assert len(ledger.events()) == 1
+
+
 @pytest.mark.parametrize(
     "damage", ["version", "extra", "digest", "action", "state", "body", "principal"]
 )

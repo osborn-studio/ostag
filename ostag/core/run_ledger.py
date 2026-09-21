@@ -97,6 +97,10 @@ class RunLedger:
         record["payload"] = _redact_deep(record.get("payload", {}))
         if _is_recovery(record):
             raise _proposal_error('recovery_requires_verified_snapshot')
+        if record['event_type'] == 'action_proposed':
+            # Retirement projections belong to a verified maintenance protocol,
+            # never to ordinary append, regardless of action ID or kind version.
+            deny_retired(record['payload'].get('receipt'))
         if (record['event_type'] == 'action_proposed'
                 and str(record['payload'].get('receipt', {}).get('action_id', '')).startswith(
                     'action_frozen')):
@@ -664,6 +668,7 @@ class RunLedger:
     def record_receipt_state(
         self, receipt: ActionReceipt, *, previous_state: str, actor_id: str = "", detail: str = ""
     ) -> LedgerEvent:
+        deny_retired(receipt)
         payload: dict[str, Any] = {
             "action_id": receipt.action_id,
             "from_state": previous_state,
