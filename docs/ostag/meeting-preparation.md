@@ -235,8 +235,9 @@ archive envelope, not a silent legacy import.
 
 The display integration tests use an installed `pandoc` CommonMark parser to
 verify plaintext fidelity, canonical-only links, and no active HTML/images through
-the actual module CLI. Those parser probes skip when Pandoc is absent; the fixed
-outside verifier's display probe remains an independent integration gate.
+the actual module CLI. Pandoc is a required test dependency, installed explicitly
+by CI; missing it fails these checks. The fixed outside verifier's display probe
+remains an additional independent integration gate.
 
 ```bash
 .venv/bin/pytest -q tests/test_github_history.py tests/test_meeting_release_facts.py \

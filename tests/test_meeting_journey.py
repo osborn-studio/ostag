@@ -147,8 +147,7 @@ def test_no_production_lifecycle_or_flags_are_wired():
 def commonmark_nodes(markdown):
     """Use an independent CommonMark parser, not renderer-shaped regex assertions."""
     pandoc = shutil.which("pandoc")
-    if pandoc is None:
-        pytest.skip("pandoc CommonMark parser is required for display integration probes")
+    assert pandoc is not None, "Install Pandoc to run the required CommonMark display checks"
     result = subprocess.run([pandoc, "--from=commonmark", "--to=json"], input=markdown,
                             capture_output=True, text=True, timeout=10, check=True)
 

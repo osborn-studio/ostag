@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install system tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep pandoc
       - name: Install dependencies
         run: uv sync --all-extras --locked
       - name: Run release, deployment and live-evidence gates

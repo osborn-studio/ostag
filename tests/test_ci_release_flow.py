@@ -10,7 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALL_COMMANDS = [
-    "sudo apt-get update && sudo apt-get install -y ripgrep",
+    "sudo apt-get update && sudo apt-get install -y ripgrep pandoc",
     "uv sync --all-extras --locked",
 ]
 RELEASE_COMMANDS = [
