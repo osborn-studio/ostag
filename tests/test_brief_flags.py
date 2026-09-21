@@ -35,6 +35,9 @@ def test_registry_and_defaults():
 @pytest.mark.parametrize("flag", EXPECTED)
 @pytest.mark.parametrize("value", [True, 0, 1, None, "false", [], {}])
 def test_settings_reject_enabled_and_non_boolean(flag, value):
+    if value is True and flag == 'brief_enabled':
+        assert Settings(brief_enabled=True).validate().brief_enabled
+        return
     with pytest.raises(ValueError, match="not ready|boolean"):
         Settings(**{flag: value}).validate()
 
@@ -43,8 +46,17 @@ def test_settings_reject_enabled_and_non_boolean(flag, value):
 @pytest.mark.parametrize("value", ["true", "1", "yes", "on", "", "garbage", "null", "2"])
 def test_env_rejects_enabled_or_malformed(tmp_path, monkeypatch, flag, env, value):
     monkeypatch.setenv(env, value)
+    if flag == 'brief_enabled' and value in ('true', '1', 'yes', 'on'):
+        assert load_settings(str(tmp_path / 'absent.env')).brief_enabled
+        return
     with pytest.raises(ValueError, match="not ready|boolean"):
         load_settings(str(tmp_path / "absent.env"))
+
+
+def test_supported_pair_has_explicit_dependency():
+    assert Settings(brief_enabled=True, brief_meetings_enabled=True).validate().brief_meetings_enabled
+    with pytest.raises(ValueError, match='without BRIEF_ENABLED'):
+        Settings(brief_meetings_enabled=True).validate()
 
 
 @pytest.mark.parametrize("flag,env", EXPECTED.items())

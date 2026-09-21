@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from ostag.briefs.runtime import BriefStatusOwner, _StatusWriter, validate_drain_status
 from ostag.config import Settings
 from ostag.work_monitor.server import create_app
+from brief_process_helpers import _delayed_serve, _failing_serve
 
 
 @pytest.fixture(autouse=True)
@@ -338,40 +339,6 @@ def test_unwritable_status_mock_preserves_previous_status(writer, monkeypatch):
     assert {p.name for p in writer.status_dir.iterdir()} == {"owner.lock", "status.json"}
 
 
-def _delayed_serve(connection, status_dir, control_path, boot_id, *, entered, release):
-    """Spawn-safe delay at the actual rename boundary, controlled by IPC events."""
-    from ostag.briefs import runtime
-
-    original = runtime._StatusWriter.publish
-    replace = runtime.os.replace
-
-    def publish(self, lifecycle):
-        def delayed(*args, **kwargs):
-            entered.set()
-            release.acquire()
-            return replace(*args, **kwargs)
-
-        if lifecycle == "running" and control_path.exists():
-            runtime.os.replace = delayed
-        try:
-            return original(self, lifecycle)
-        finally:
-            runtime.os.replace = replace
-
-    runtime._StatusWriter.publish = publish
-    runtime._serve(connection, status_dir, control_path, boot_id)
-
-
-def _failing_serve(connection, status_dir, control_path, boot_id):
-    from ostag.briefs import runtime
-
-    def denied(self, lifecycle):
-        raise PermissionError("/private/secret/must/not/escape")
-
-    runtime._StatusWriter.publish = denied
-    runtime._serve(connection, status_dir, control_path, boot_id)
-
-
 def test_delayed_writer_keeps_health_responsive_and_cannot_overwrite_shutdown(
     tmp_path, monkeypatch
 ):
@@ -389,7 +356,7 @@ def test_delayed_writer_keeps_health_responsive_and_cannot_overwrite_shutdown(
     with TestClient(app) as client:
         owner = app.state.brief_status_owner
         control(tmp_path / "control.json", owner.boot_id)
-        assert entered.wait(timeout=3)
+        assert entered.wait(timeout=3), (owner.health, owner.reason, owner._child_ready, owner.last_status)
         begin = time.monotonic()
         response = client.get("/healthz")
         assert response.status_code == 200 and response.json() == {"status": "ok"}

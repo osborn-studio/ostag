@@ -110,7 +110,10 @@ class _OwnedModel:
 
 
 class BriefWorker:
-    def __init__(self, service: BriefService, *, heartbeat_interval: float = 10):
+    def __init__(self, service: BriefService, *, heartbeat_interval: float = 10, supervised=False):
+        if type(supervised) is not bool:
+            raise ValueError('supervised must be boolean')
+        self._supervised = supervised
         self.service, self.store = service, service.store
         self.lifecycle = service.lifecycle
         if self.lifecycle is not None:
@@ -132,8 +135,24 @@ class BriefWorker:
         self._loop = asyncio.new_event_loop()
         self._thread = Thread(target=self._thread_main, name="brief-worker", daemon=True)
         self._notifier = Thread(target=self._notify, name="brief-completion", daemon=True)
-        self._notifier.start()
-        self._thread.start()
+        try:
+            self._notifier.start()
+            self._thread.start()
+        except BaseException:
+            # No caller can stop an instance whose constructor never returned.
+            # Reap the already-started completion thread here, while the owner
+            # still retains persistence exclusion. No work has been submitted.
+            self._stop.set()
+            with self._completed:
+                self._completed.notify_all()
+            if self._notifier.ident is not None:
+                self._notifier.join()
+            if self._thread.is_alive():
+                self._loop.call_soon_threadsafe(self._loop.stop)
+                self._thread.join()
+            elif not self._loop.is_closed():
+                self._loop.close()
+            raise
         self._ready.wait(1)
 
     @property
@@ -271,7 +290,15 @@ class BriefWorker:
         def bridge():
             if self._cancellation is not None:
                 self._cancellation.set()
-            self._loop.call_later(min(timeout / 2, 0.1), self._loop.stop)
+            def finish():
+                if self._supervised and asyncio.all_tasks(self._loop):
+                    # The production owner retains the persistence flock until
+                    # this thread actually exits. Do not destroy a suppressed
+                    # transport task and call that remote cancellation.
+                    self._loop.call_later(0.01, finish)
+                else:
+                    self._loop.stop()
+            self._loop.call_later(min(timeout / 2, 0.1), finish)
         if not self._loop.is_closed():
             try:
                 self._loop.call_soon_threadsafe(bridge)
@@ -279,6 +306,9 @@ class BriefWorker:
                 pass
         if current_thread() is not self._thread:
             self._thread.join(timeout)
+        # Future callbacks are arbitrary caller code. The production owner's
+        # finalizer observes notifier liveness and retains its persistence lock;
+        # stop itself must never spend the caller's budget joining callbacks.
         return "local_stopping" if self._thread.is_alive() else "local_stopped"
 
     def _check_operation(self):
@@ -442,6 +472,12 @@ class BriefWorker:
                            if meeting else {}))
                 finally:
                     watcher.cancel()
+                    if self._supervised:
+                        # The production owner retains this loop until all work
+                        # is joined. Legacy bounded-stop loops can already have
+                        # a due stop callback: do not yield before recording the
+                        # stopped job/unknown cost after transport returns.
+                        await asyncio.gather(watcher, return_exceptions=True)
                 if cause != "config_changed":
                     cause = result.status
                 if result.status == "draft_candidate":

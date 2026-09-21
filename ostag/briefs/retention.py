@@ -482,7 +482,13 @@ def _keys(scope, source):
 class RetentionCoordinator:
     @_safe
     def __init__(self, *, ledger, store, clock, cards=None, callbacks=None, revisions=None,
-                 maintenance=None):
+                 maintenance=None, lifecycle=None):
+        from ostag.briefs.lifecycle import check_binding
+        check_binding(lifecycle)
+        self.lifecycle = lifecycle
+        # maintenance is the existing three-argument administrative authorizer,
+        # not the lifecycle's read-only maintenance flag. cleanup() separately
+        # acquires lifecycle custody and denies off/maintenance admissions.
         if (type(ledger) is not RetentionLedger or type(store) is not BriefStore
                 or not callable(clock) or (maintenance is not None and not callable(maintenance))):
             raise RetentionDenied()
@@ -841,6 +847,14 @@ class RetentionCoordinator:
 
     @_safe
     def cleanup(self, scope, job):
+        op = None if self.lifecycle is None else self.lifecycle.begin('cleanup')
+        try:
+            return self._cleanup(scope, job)
+        finally:
+            if op is not None:
+                op.finish()
+
+    def _cleanup(self, scope, job):
         key = _scope(scope)
         if self.status(scope, job).decision == 'authorized':
             raise RetentionDenied()
