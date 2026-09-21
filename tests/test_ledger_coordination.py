@@ -183,3 +183,74 @@ def test_coordinated_listing_waits_on_stable_lock(tmp_path):
         with pytest.raises(SchemaError) as error:
             RunLedger(path, coordination=coordination).events()
         assert error.value.code == 'ledger_busy'
+
+
+def test_body_io_error_preserves_identity_and_releases_lock(tmp_path):
+    import errno
+    from time import monotonic
+    _, coordination = prepare(tmp_path)
+    failure = OSError(errno.ENOSPC, 'synthetic disk full')
+    with pytest.raises(OSError) as raised:
+        with coordination.hold():
+            raise failure
+    assert raised.value is failure
+    with coordination.hold(exclusive=True, deadline=monotonic() + .5):
+        pass
+
+
+def test_repeated_install_keeps_identity_and_synchronizes_existing_lock(tmp_path, monkeypatch):
+    import stat
+    from ostag.core.ledger_coordination import LedgerCoordination
+    path, coordination = prepare(tmp_path)
+    calls = []
+    fsync = os.fsync
+
+    def record(descriptor):
+        info = os.fstat(descriptor)
+        calls.append((stat.S_ISDIR(info.st_mode), (info.st_dev, info.st_ino)))
+        fsync(descriptor)
+
+    monkeypatch.setattr(os, 'fsync', record)
+    assert LedgerCoordination.install(path) == coordination
+    assert calls == [(False, coordination.identity),
+                     (True, (path.parent.stat().st_dev, path.parent.stat().st_ino))]
+    assert path.read_bytes() == b''
+
+
+@pytest.mark.parametrize('phase', ['proposal', 'state'])
+def test_coordinated_frozen_write_preserves_fsync_failure_and_custody(tmp_path, monkeypatch, phase):
+    import errno
+    from ostag.core.identity import Principal
+    from ostag.core.schemas import ActionReceipt
+    path, coordination = prepare(tmp_path)
+    ledger = RunLedger(path, coordination=coordination)
+    value = ActionReceipt(action_id='action_frozen' + 'a' * 64, run_id='run_brief',
+        title='Synthetic', target_system='feishu_base', target_object='base/table/record/field',
+        mutation_type='update', principal=Principal('feishu', 'requester'), state='needs_approval',
+        apply_payload={'kind': 'brief-field-change-v1', 'intent_json': '{"new":null}'})
+
+    def propose():
+        return ledger.record_receipt_once(value, chat_id='private_chat',
+                                         platform='feishu', proposer_id='requester')
+
+    if phase == 'state':
+        propose()
+    failure = OSError(errno.EIO, 'synthetic fsync failure')
+    with monkeypatch.context() as patch:
+        def fail(_):
+            raise failure
+        patch.setattr(os, 'fsync', fail)
+        with pytest.raises(OSError) as raised:
+            if phase == 'proposal':
+                propose()
+            else:
+                ledger.record_receipt_state(value.with_state('ready_to_apply'),
+                    previous_state='needs_approval', actor_id='reviewer')
+        assert raised.value is failure
+    # Bytes may already be visible after fsync failed. Do not claim rollback or
+    # append a new proposal that resets the existing approval state on retry.
+    expected = 'needs_approval' if phase == 'proposal' else 'ready_to_apply'
+    assert propose().state == expected
+    events = ledger.events()
+    assert len([e for e in events if e['event_type'] == 'action_proposed']) == 1
+    assert len([e for e in events if e['event_type'] == 'action_state_changed']) == (phase == 'state')

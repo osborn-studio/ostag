@@ -131,7 +131,16 @@ class RunLedger:
                 self.path.parent.mkdir(parents=True, exist_ok=True)
             if self.coordination:
                 flags = (os.O_RDONLY if read_only else os.O_RDWR | os.O_APPEND) | os.O_NOFOLLOW | os.O_NONBLOCK
-                opened = os.fdopen(os.open(self.path, flags), 'rb' if read_only else 'a+b')
+                try:
+                    descriptor = os.open(self.path, flags)
+                    try:
+                        opened = os.fdopen(descriptor, 'rb' if read_only else 'a+b')
+                    except BaseException:
+                        os.close(descriptor)
+                        raise
+                except OSError:
+                    raise SchemaError('ledger_coordination_unavailable', 'Ledger coordination is unavailable.',
+                        'Verify the managed ledger domain; do not recreate or bypass its lock.') from None
             else:
                 opened = self.path.open('rb' if read_only else 'a+b')
             with opened as handle:

@@ -188,8 +188,9 @@ duplicates or supersession. Existing proposal/apply/ephemeral authority paths
 reject it. EffectJournal reads only its resource digest for custody, preserving
 unrelated-resource availability. No writer can create this format through the
 normal frozen proposal API. Synthetic hand-authored files are reader fixtures,
-not validated migration receipts. The stable lock, generation replacement,
-recovery witness, owned-copy registry and full retirement workflow remain absent.
+not validated migration receipts. Generation replacement, recovery witness,
+owned-copy registry and full retirement workflow remain absent. The optional
+stable-lock primitive is described below.
 
 ## Implemented coordination boundary
 
@@ -201,9 +202,12 @@ no production factory has opted in. Synthetic subprocess tests cover a waiting
 writer across data replacement and lock substitution. This is not an old-worker
 exclusion proof or a replacement API.
 
-Before activation, close the recorded review gaps: coordinated end-to-end frozen
-write/fsync failures and repeated install coverage; precise classification of an
-OSError raised inside the lock body; and read contention behavior. Do not blindly
+Coordinated frozen proposal/state fsync failures now preserve the original error;
+tests verify retained custody and no duplicate proposal on retry. Body I/O errors
+are distinct from lock admission errors. Repeated install keeps the same lock
+inode and synchronizes it and its directory. These repairs passed scoped review;
+they do not close the integration gates below. Assess read contention before
+activation. Do not blindly
 change strict readers to shared inode locks: existing legacy appends themselves
 use shared inode locks, so reader/writer exclusion must be assessed together.
 The stable lock inode must never be replaced while a domain is active. All 11

@@ -150,17 +150,20 @@ class LedgerCoordination:
         """
         descriptor = None
         try:
-            if _path(self.path) != self.path:
-                raise _denied()
-            descriptor = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-            if _verify(self.path, descriptor) != self.identity:
-                raise _denied()
-            _acquire(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH, deadline)
-            if _verify(self.path, descriptor) != self.identity:
-                raise _denied()
+            try:
+                if _path(self.path) != self.path:
+                    raise _denied()
+                descriptor = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                if _verify(self.path, descriptor) != self.identity:
+                    raise _denied()
+                _acquire(descriptor, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH, deadline)
+                if _verify(self.path, descriptor) != self.identity:
+                    raise _denied()
+            except OSError:
+                raise _denied() from None
+            # Body failures include writes/flush/fsync. Preserve their identity:
+            # a durability failure is not a failure to enter the lock domain.
             yield
-        except OSError:
-            raise _denied() from None
         finally:
             if descriptor is not None:
                 os.close(descriptor)  # closes/releases even if validation/acquisition failed
