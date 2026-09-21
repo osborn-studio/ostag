@@ -11,6 +11,7 @@ default, twice.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol, runtime_checkable
 
 from ostag.config import Settings
@@ -38,6 +39,8 @@ from ostag.core.schemas import (
     SchemaError,
     new_id,
 )
+
+logger = logging.getLogger(__name__)
 
 PENDING_STATES = ("proposed", "needs_approval", "ready_to_apply")
 
@@ -84,6 +87,17 @@ class ApprovalService:
             receipt, chat_id=chat_id, platform=platform, proposer_id=proposer_id
         )
         return receipt
+
+    def propose_once(self, receipt: ActionReceipt, *, chat_id: str,
+                     platform: str, proposer_id: str, proposal_scope: str | None = None,
+                     replaces: str | None = None) -> ActionReceipt:
+        """Create a frozen proposal without resetting a previous approval.
+
+        This has the same proposal-only authority as propose(); the existing
+        approval verbs and apply gates still own all business authorization.
+        """
+        return self.ledger.record_receipt_once(receipt, chat_id=chat_id,
+            platform=platform, proposer_id=proposer_id, proposal_scope=proposal_scope, replaces=replaces)
 
     def _resolve_receipt(
         self,
@@ -198,9 +212,14 @@ class ApprovalService:
                 run_id = (
                     command.reference if command.reference.startswith("run_") else "run_unknown"
                 )
-                self.ledger.record_security_event(
-                    run_id, f"permission_denied: {actor_id} tried {command.verb}"
-                )
+                try:
+                    self.ledger.record_security_event(
+                        run_id, f"permission_denied: {actor_id} tried {command.verb}"
+                    )
+                except (OSError, SchemaError):
+                    # The denial remains authoritative even when its audit sink
+                    # fails. Emit a stable operational signal without raw details.
+                    logger.error("security_audit_write_failed")
             raise
 
         if command.verb == "status":
