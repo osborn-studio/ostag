@@ -19,7 +19,7 @@ from ostag.connectors.requirements import (
 from ostag.core.channel_brain import ChannelBrainStore
 from ostag.core.event import NormalizedEvent
 from ostag.core.followups import FollowUpService
-from ostag.core.run_ledger import RunLedger
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.schemas import LedgerEvent, new_id
 from ostag.core.logging import write_audit_log
 from ostag.core.requirement_board import (
@@ -226,7 +226,7 @@ class AmbientScheduler:
         self.monitor = AmbientMonitor(self.store)
         self.now = now or (lambda: datetime.now(UTC))
         self.today = today or (lambda: self._local_now().date())
-        self.followups = FollowUpService(config, RunLedger(config.run_ledger_path))
+        self.followups = FollowUpService(config, configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths))
 
     async def run_forever(self) -> None:
         while True:

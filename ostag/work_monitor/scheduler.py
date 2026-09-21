@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from ostag.core.run_ledger import RunLedger
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.identity import Principal
 
 from .identity import Destination, IdentityStore
@@ -38,6 +38,7 @@ class WorkMonitorScheduler:
         transports: dict[str, Any],
         *,
         clock: Callable[[], datetime] | None = None,
+        managed_ledger_paths=(),
         jitter: Callable[[float], float] | None = None,
         degraded_seconds: int = 120,
         offline_seconds: int = 600,
@@ -61,7 +62,8 @@ class WorkMonitorScheduler:
         self.recovery_cooldown_seconds = recovery_cooldown_seconds
         self.copilot = copilot
         self.owner = uuid.uuid4().hex
-        self.ledger = RunLedger(store.path.with_name("run_ledger.jsonl"), clock=self.clock)
+        self.ledger = configured_ledger(store.path.with_name("run_ledger.jsonl"),
+            managed_paths=managed_ledger_paths, clock=self.clock)
         from ostag.copilot_relay.scheduler import CopilotRelayScheduler
 
         self.relay_scheduler = CopilotRelayScheduler(

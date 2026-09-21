@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 from ostag.briefs.runtime import BriefStatusOwner
 from ostag.briefs.production_owner import BriefProductionOwner, TrustedBriefComposition
 from ostag.config import Settings, load_settings
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.identity import Principal
 from ostag.core.schemas import SchemaError
 
@@ -151,6 +152,9 @@ def create_app(
     if outbox is not None:
         raise ValueError("scheduler owns outbox delivery; a separate outbox owner is forbidden")
     configured = settings.validate() if settings is not None else load_settings()
+    managed_ledger_paths = configured.managed_ledger_paths
+    if managed_ledger_paths and (feishu_ws is not None or daily_scheduler is not None):
+        raise ValueError('Managed ledger policy requires host-created transport and daily scheduler owners.')
     runtime = _Runtime(service, projector)
     auto_feishu_ws: LifespanOwner | None = None
     auto_scheduler: LifespanOwner | None = None
@@ -159,12 +163,26 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal auth, auto_feishu_ws, auto_scheduler, auto_daily_scheduler
+        # Validate every configured domain before starting databases or owners.
+        for path in managed_ledger_paths:
+            configured_ledger(path, managed_paths=managed_ledger_paths)
+        if runtime.service is not None:
+            configured_ledger(runtime.service.store.path.with_name('run_ledger.jsonl'),
+                managed_paths=managed_ledger_paths, existing=runtime.service.ledger)
+        if scheduler is not None and managed_ledger_paths:
+            # Unknown injected owners cannot attest to their ledger wiring.
+            from .scheduler import WorkMonitorScheduler
+            if type(scheduler) is not WorkMonitorScheduler:
+                raise ValueError('Managed ledger policy requires a validated scheduler.')
+            configured_ledger(scheduler.store.path.with_name('run_ledger.jsonl'),
+                managed_paths=managed_ledger_paths, existing=scheduler.ledger)
         if runtime.service is None or runtime.projector is None:
             store = MonitorStore(configured.monitor_server_db)
             identities = IdentityStore(
                 store.path, enrollment_secret=configured.monitor_enrollment_secret
             )
-            runtime.service = WorkMonitorService(store, identities)
+            runtime.service = WorkMonitorService(store, identities,
+                                                managed_ledger_paths=managed_ledger_paths)
             # Phase 3 shadow hook: best-effort access-profile capture after
             # projection commits; never on the routing path. Startup
             # reconciliation recovers captures lost to a crash or a failed
@@ -265,6 +283,7 @@ def create_app(
                 runtime.service.store,
                 runtime.service.identities,
                 transports,
+                managed_ledger_paths=managed_ledger_paths,
                 morning_hour=configured.monitor_morning_digest_hour,
                 evening_hour=configured.monitor_evening_digest_hour,
                 degraded_seconds=configured.monitor_degraded_seconds,

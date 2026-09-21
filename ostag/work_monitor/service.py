@@ -14,6 +14,7 @@ from ostag.core.event import NormalizedEvent
 from ostag.core.identity import Principal
 from ostag.core.receipts import ensure_fresh_confirmation, transition_receipt
 from ostag.core.run_ledger import RunLedger
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.safety import redact_secrets
 from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 
@@ -75,10 +76,12 @@ class WorkMonitorService:
         *,
         ledger: RunLedger | None = None,
         clock: Any | None = None,
+        managed_ledger_paths=(),
     ) -> None:
         self.store = store
         self.identities = identities
-        self.ledger = ledger or RunLedger(store.path.with_name("run_ledger.jsonl"))
+        self.ledger = configured_ledger(store.path.with_name("run_ledger.jsonl"),
+            managed_paths=managed_ledger_paths, existing=ledger)
         self.clock = clock or (lambda: datetime.now(UTC))
         self.ledger.clock = self.clock
 

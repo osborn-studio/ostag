@@ -25,7 +25,7 @@ from ostag.core.identity import Principal
 from ostag.core.followups import FollowUpService
 from ostag.core.permissions import LOCAL_ADMIN_ACTOR
 from ostag.core.receipts import ReceiptCommand
-from ostag.core.run_ledger import RunLedger
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.runner import OSTagRunner
 from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 from ostag.mfs.memory import ensure_memory_file, read_memory, remember, sync_memory_root
@@ -667,7 +667,8 @@ async def main_async(argv: list[str] | None = None) -> int:
             config.monitor_spool_db,
             enrollment_secret=config.monitor_enrollment_secret,
         )
-        work_monitor = WorkMonitorService(monitor_store, identities)
+        work_monitor = WorkMonitorService(monitor_store, identities,
+                                         managed_ledger_paths=config.managed_ledger_paths)
     runner = OSTagRunner(config, work_monitor=work_monitor)
     adapter = create_adapter(config.platform, config)
 
@@ -1097,7 +1098,7 @@ def run_inspection_command(args: argparse.Namespace) -> int:
             return 1 if report.status == "blocked" else 0
 
         config = load_settings(getattr(args, "config", None))
-        ledger = RunLedger(config.run_ledger_path)
+        ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
         if args.command == "status":
             _emit(ledger.run_status(args.run), as_json=as_json)
             return 0
@@ -1253,7 +1254,7 @@ def run_audit_command(args: argparse.Namespace) -> int:
 
     as_json = getattr(args, "json", False)
     config = load_settings(getattr(args, "config", None))
-    ledger = RunLedger(config.run_ledger_path)
+    ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
     bundle = AuditExporter(config, ledger).export(
         since=args.since,
         until=args.until,
@@ -1287,7 +1288,7 @@ async def run_query_command(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
     try:
         config = load_settings(getattr(args, "config", None))
-        ledger = RunLedger(config.run_ledger_path)
+        ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
 
         async def status_handler(request: QueryRequest) -> dict[str, object]:
             try:
@@ -1421,7 +1422,7 @@ def run_budget_command(args: argparse.Namespace) -> int:
 
     as_json = getattr(args, "json", False)
     config = load_settings(getattr(args, "config", None))
-    ledger = RunLedger(config.run_ledger_path)
+    ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
     policy = ChannelBrainStore(config).load(args.platform, args.chat).policy
     status = BudgetService(config, ledger).status(args.chat, policy)
     _emit({"platform": args.platform, "chat_id": args.chat, **status}, as_json=as_json)
@@ -1529,7 +1530,7 @@ def run_channel_command(args: argparse.Namespace) -> int:
 async def run_followups_command(args: argparse.Namespace) -> int:
     as_json = getattr(args, "json", False)
     config = load_settings(getattr(args, "config", None))
-    ledger = RunLedger(config.run_ledger_path)
+    ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
     if args.followups_command == "list":
         _emit(ledger.list_continuations(pending_only=not args.all), as_json=as_json)
         return 0
@@ -1543,10 +1544,10 @@ async def run_followups_command(args: argparse.Namespace) -> int:
 async def run_receipt_command(args: argparse.Namespace) -> int:
     """Receipt verbs and receipt management for humans and agents."""
     as_json = getattr(args, "json", False)
-    config = load_settings(getattr(args, "config", None))
-    ledger = RunLedger(config.run_ledger_path)
-    service = ApprovalService(config, ledger, build_apply_executors(AutoBaseWorkflow(config)))
     try:
+        config = load_settings(getattr(args, "config", None))
+        ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
+        service = ApprovalService(config, ledger, build_apply_executors(AutoBaseWorkflow(config)))
         if args.command == "receipts":
             if args.receipts_command == "list":
                 states = PENDING_STATES if args.pending else None

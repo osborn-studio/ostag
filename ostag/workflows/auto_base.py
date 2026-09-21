@@ -27,7 +27,7 @@ from ostag.core.event import NormalizedEvent
 from ostag.core.followups import FollowUpService
 from ostag.core.permissions import effective_flag
 from ostag.core.receipts import render_receipt_text
-from ostag.core.run_ledger import RunLedger
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.schemas import ActionReceipt, new_id
 from ostag.core.stage_ledger import StageLedger
 
@@ -169,7 +169,7 @@ class AutoBaseWorkflow:
         self.tasks = task_connector or LarkCLITaskConnector(self.cli, config.auto_base_identity)
         self.today = today or (lambda: datetime.now().date())
         self.channel_brain = ChannelBrainStore(config)
-        self.run_ledger = RunLedger(config.run_ledger_path)
+        self.run_ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths)
         # Set by the runner before each handle() call so proposed receipts
         # anchor to the current run.
         self.current_run_id = ""

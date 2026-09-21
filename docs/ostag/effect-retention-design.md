@@ -197,8 +197,9 @@ stable-lock primitive is described below.
 `LedgerCoordination` now supplies an explicitly installed stable lock and optional
 RunLedger integration. Coordinated readers/writers acquire it before opening the
 ledger inode, reject lost/replaced/aliased/non-private domain files, and share one
-bounded lock deadline for frozen operations. Default constructors remain legacy;
-no production factory has opted in. Synthetic subprocess tests cover a waiting
+bounded lock deadline for frozen operations. Default constructors remain legacy.
+The product factory now accepts explicit managed domains as described below;
+no production deployment has opted in. Synthetic subprocess tests cover a waiting
 writer across data replacement and lock substitution. This is not an old-worker
 exclusion proof or a replacement API.
 
@@ -210,7 +211,37 @@ they do not close the integration gates below. Assess read contention before
 activation. Do not blindly
 change strict readers to shared inode locks: existing legacy appends themselves
 use shared inode locks, so reader/writer exclusion must be assessed together.
-The stable lock inode must never be replaced while a domain is active. All 11
-existing RunLedger construction sites and the trusted service stop/reap protocol
-still need managed-domain integration. Missing processes or a held lock do not
-prove that arbitrary old/manual writers are absent.
+The stable lock inode must never be replaced while a domain is active. Missing
+processes or a held lock do not prove that arbitrary old/manual writers are absent.
+
+## Managed host construction
+
+`Settings.managed_ledger_paths` is an immutable tuple of distinct absolute direct
+paths. `OSTAG_MANAGED_LEDGER_PATHS` accepts the corresponding JSON array of path
+strings; its default is `[]`, retaining legacy behavior. This is an opt-in host
+configuration, not a new permission or a migration command.
+
+All 11 product construction sites now use `configured_ledger`: main CLI,
+runner, auto-base, ambient followups, and Monitor service/scheduler. Monitor's
+ledger is derived from its database directory and may differ from the main
+configured ledger. List both paths when both domains are managed. The factory
+validates every configured domain, even when constructing an unrelated ledger,
+so a missing configured data/lock file cannot silently disable the policy.
+Symlink aliases do not select an uncoordinated fallback; hardlinked managed
+files fail the coordinator's single-link checks.
+
+The factory never installs a lock, creates a missing managed domain, or rewrites data.
+Paths omitted from the configured domain list retain legacy creation and writing
+behavior; deployment must enumerate every intended managed domain.
+Provisioning remains a separate offline operation requiring the exclusion
+protocol. Within the selected policy, supplied workflow, approval and Monitor
+ledger instances must match the expected path and coordinator. Server startup
+checks configured domains before creating databases or starting background
+owners, checks injected Monitor/scheduler ledgers, and rejects unknown injected
+transport/daily-scheduler owners under the managed policy.
+
+Direct library callers and old binaries can still construct an uncoordinated
+RunLedger. This change closes current product construction paths, not arbitrary
+same-UID/manual writers. Trusted stop/reap receipts and sealed restart/intake
+remain prerequisites for replacement. No lock installation, content retirement,
+production configuration or feature activation is performed by this change.
