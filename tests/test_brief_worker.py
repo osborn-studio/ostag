@@ -197,12 +197,30 @@ async def test_persisted_requester_cancel_and_late_uncooperative_transport(local
 
 
 def test_heartbeat_loss_is_independent_of_blocked_model(local, monkeypatch):
+    from threading import current_thread
+
     service, _, worker = local
-    entered, lost, release = Event(), Event(), Event()
+    entered, lost, release, inject_loss, renewed = (Event() for _ in range(5))
+    renew, load_job = service.store.renew, service.load_job
+    failed_renewals = []
+
     def renewal(*args, **kwargs):
+        if not inject_loss.is_set():
+            result = renew(*args, **kwargs)
+            renewed.set()
+            return result
+        failed_renewals.append((current_thread(), args[0]))
         lost.set()
         raise LeaseLost("synthetic private error must not escape")
+
+    def delayed_load(job):
+        # Force a heartbeat BEFORE model entry. The old always-failing renewal
+        # loses the guard here and never reaches the blocked transport.
+        assert renewed.wait(1)
+        return load_job(job)
+
     monkeypatch.setattr(service.store, "renew", renewal)
+    monkeypatch.setattr(service, "load_job", delayed_load)
     async def blocked(_):
         entered.set()
         assert release.wait(2)
@@ -211,11 +229,22 @@ def test_heartbeat_loss_is_independent_of_blocked_model(local, monkeypatch):
     future = worker.run_once()
     try:
         assert entered.wait(1)
+        inject_loss.set()
         assert lost.wait(1)
+        heartbeat, lease = failed_renewals[0]
+        heartbeat.join(1)  # Observe latched loss, not merely entry to renew().
+        assert not heartbeat.is_alive()
+        assert not future.done()
+        assert service.store.assert_current(lease, clock=service.clock).state == "generating"
+        assert service.store.outbox(SCOPE, admitted.job_id) is None
     finally:
         release.set()
-    assert future.result(2) != "draft_ready"
+    assert future.result(2) == "needs_input"
+    assert len(service.transport.calls) == 1
+    assert service.store.failure_cause(SCOPE, admitted.job_id) == "lease_lost"
     assert service.store.outbox(SCOPE, admitted.job_id) is None
+    with pytest.raises(LeaseLost):
+        service.store.assert_current(lease, clock=service.clock)
 
 
 def test_deadline_during_model_keeps_original_timing_and_records_cause(local):
@@ -411,8 +440,11 @@ def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(
 
 def test_guard_loss_retires_by_maintenance_cas_not_owner_finish(local, monkeypatch):
     service, _, worker = local
-    entered, release, lost = Event(), Event(), Event()
+    entered, release, lost, inject_loss = (Event() for _ in range(4))
+    original_renew = service.store.renew
     def renew(*args, **kwargs):
+        if not inject_loss.is_set():
+            return original_renew(*args, **kwargs)
         lost.set()
         raise LeaseLost("heartbeat ownership lost")
     def forbidden_finish(*args, **kwargs):
@@ -425,8 +457,12 @@ def test_guard_loss_retires_by_maintenance_cas_not_owner_finish(local, monkeypat
     service.transport.effect = block
     admitted = service.submit(event())
     future = worker.run_once()
-    assert entered.wait(1) and lost.wait(1)
-    release.set()
+    try:
+        assert entered.wait(1)
+        inject_loss.set()
+        assert lost.wait(1)
+    finally:
+        release.set()
     assert future.result(2) == "needs_input"
     assert service.store.failure_cause(SCOPE, admitted.job_id) == "lease_lost"
 

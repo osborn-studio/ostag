@@ -6,7 +6,6 @@ Fixture lookups deliberately simulate current policy; they authenticate nothing.
 from __future__ import annotations
 
 import hashlib
-import html
 import io
 import json
 import os
@@ -44,6 +43,8 @@ KINDS = {
     "deployment_success": ("deployments", ("deployment_id", "sha", "environment", "ref"),
                            "明确环境与 SHA 的部署成功记录"),
 }
+# Reference detection only: URL fragments such as #12 are not naked PR refs.
+# This deliberately broad heuristic must never be used to delete display text.
 URL_TEXT = re.compile(
     r"(?<![A-Za-z0-9.+-])(?:[a-z][a-z0-9+.-]*://|(?:javascript|data|vbscript|file|mailto):)"
     r"[^\s<>\[\]\"']*"
@@ -54,26 +55,31 @@ URL_TEXT = re.compile(
 
 
 def safe_text(value: str) -> str:
-    """Inert display projection; provenance hashes use the ORIGINAL text."""
-    value = "".join(c if c not in "\r\n\t" else " " for c in value
-                    if not unicodedata.category(c).startswith("C") or c in "\r\n\t")
-    value = URL_TEXT.sub("（链接已省略）", value)
-    return _escape_display(value)
+    """Normalized display data, NOT HTML or pre-escaped Markdown.
+
+    Keep the existing control/bidi stripping and CR/LF/tab-to-space projection;
+    otherwise preserve text, including URLs, entities, quotes and edge spaces.
+    JSON consumers must treat these strings as data, never HTML. Markdown uses
+    literal code spans at the rendering boundary. Hashes use the ORIGINAL text.
+    """
+    return "".join(c if c not in "\r\n\t" else " " for c in value
+                   if not unicodedata.category(c).startswith("C") or c in "\r\n\t")
 
 
-def _escape_display(value: str) -> str:
-    value = html.escape(value, quote=True)
-    return re.sub(r"([\\`*_{}\[\]()#!|~>])", r"\\\1", value)
+def _literal_code(value: str) -> str:
+    """CommonMark literal span: no entity encoding, links or HTML interpretation.
 
-
-def _display_identifier(value: str, field: str) -> str:
-    # Tags already have an exact ASCII schema. Ref/environment remain untrusted
-    # text; exempt only simple path segments and numeric version forms from the
-    # broad domain heuristic (e.g. release/1.2, staging-v1.2, not rogue.invalid).
-    segment = r"(?:[A-Za-z0-9_-]+|[A-Za-z_-]*[0-9]+(?:\.[0-9]+){1,2}(?:[-_][A-Za-z0-9_-]+)?)"
-    if field == "tag" or re.fullmatch(rf"{segment}(?:/{segment})*", value):
-        return _escape_display(value)
-    return safe_text(value)
+    A longer delimiter than every content run cannot close inside the content.
+    Padding separates boundary backticks and is removed by CommonMark, preserving
+    original edge spaces. All-space content must NOT be padded (CommonMark keeps
+    it verbatim). Empty text stays empty: CommonMark has no empty code span.
+    """
+    value = safe_text(value)
+    if not value:
+        return ""
+    delimiter = "`" * (1 + max((len(run) for run in re.findall(r"`+", value)), default=0))
+    padding = " " if value.strip(" ") else ""
+    return f"{delimiter}{padding}{value}{padding}{delimiter}"
 
 
 def _require(condition):
@@ -280,7 +286,7 @@ def _facts(rows, sources):
             fact.update(label=KINDS[kind][2], repo_id=row["repo_id"])
             for field in KINDS[kind][1]:
                 value = row[field]
-                fact[field] = (_display_identifier(value, field)
+                fact[field] = (safe_text(value)
                                if field in ("ref", "environment", "tag") else value)
         if kind == "pr_merged":
             checks = [r for r in rows if r.get("kind") == "check_success"
@@ -382,7 +388,11 @@ def build_preview(bundle: dict) -> dict:
 
 
 def render_markdown(preview: dict) -> str:
-    """Render only the sanitized projection returned by build_preview."""
+    """Render a validated build_preview result, wrapping untrusted text literally.
+
+    Only schema-derived canonical citations become links. JSON display fields
+    contain normalized text, not these Markdown presentation delimiters.
+    """
     def refs(ids):
         return " ".join(f"[{sid}]({preview['citations'][sid]})" if sid in preview["citations"]
                         else f"`{sid}`" for sid in ids)
@@ -390,7 +400,7 @@ def render_markdown(preview: dict) -> str:
     window = preview["window"]
     lines = ["# 合成双源会议预览", "", f"> {preview['caveat']}", "",
              f"状态：{preview['status']}；meeting_ready={str(preview['meeting_ready']).lower()}；"
-             "semantic_review_required=true", "", f"目标：{preview['goal']}",
+             "semantic_review_required=true", "", f"目标：{_literal_code(preview['goal'])}",
              f"用途：{preview['purpose']}",
              f"时间窗口：[{window['start']}, {window['end']})；时区：{window['display_timezone']}",
              f"观察截止（fixture 元数据）：{preview['observed_at']}",
@@ -398,7 +408,7 @@ def render_markdown(preview: dict) -> str:
              "先阅读变化与原文说法，再核对证据时间和分区缺口。所有记录均来自本地合成输入。",
              "", "## 变化", ""]
     for fact in preview["facts"]:
-        lines.append(f"- {fact['label']}：{fact['text']}；事件 {fact['event_at']}；"
+        lines.append(f"- {fact['label']}：{_literal_code(fact['text'])}；事件 {fact['event_at']}；"
                      f"观察 {fact['observed_at']}。{refs(fact['source_ids'])}")
         if fact["kind"] == "pr_merged":
             lines.append(f"  仓库 {fact['repo_id']} PR #{fact['pr_number']}；"
@@ -408,7 +418,8 @@ def render_markdown(preview: dict) -> str:
             lines.append(f"  check SHA `{fact['check_sha']}`；head `{fact['head_sha']}`；"
                          f"匹配结果：{fact['check_status']}。")
         if fact["kind"] == "deployment_success":
-            lines.append(f"  环境：{fact['environment']}；SHA `{fact['sha']}`；ref：{fact['ref']}。")
+            lines.append(f"  环境：{_literal_code(fact['environment'])}；SHA `{fact['sha']}`；"
+                         f"ref：{_literal_code(fact['ref'])}。")
     if not preview["facts"]:
         lines.append("无窗口内记录；不代表没有发生变化。")
     lines += ["", "## 差异与待核实", ""]
@@ -428,7 +439,9 @@ def render_markdown(preview: dict) -> str:
               "- 建议补充：缺失分区与未绑定仓库引用；由参会者讨论是否行动及如何安排。"]
     for item in preview["conflicts"]:
         lines.append(f"- {item['question']} {refs(item['source_ids'])}")
-    lines += ["", "## 来源", "", "SHA256 基于原始摘录；展示文本已转义并省略任意链接。"]
+    lines += ["", "## 来源", "", "SHA256 基于原始摘录；展示移除控制/双向格式字符并将换行、制表符转为空格。"
+              "其余文本以 CommonMark 字面代码展示，保留文件名、引号、URL 和首尾空格；空文本保持为空。"
+              "仅经 schema 验证生成的规范来源引用可点击；JSON 文本为数据，不应作为 HTML 解释。"]
     for source in preview["sources"]:
         lines.append(f"- {refs([source['source_id']])}；{source['resource_id']}；"
                      f"事件 {source['event_at']}；观察 {source['observed_at']}；"
@@ -437,7 +450,7 @@ def render_markdown(preview: dict) -> str:
     for c in preview["coverage"]:
         lines.append(f"- `{c['partition_id']}`：{c['status']}；"
                      f"{'必需' if c['required'] else '可选'}；窗口内 {c['included']}；"
-                     f"窗口外排除 {c['excluded_out_of_window']}；{c['reason']}")
+                     f"窗口外排除 {c['excluded_out_of_window']}；{_literal_code(c['reason'])}")
     lines.append("可见缺口：" + ("、".join(c["partition_id"] for c in preview["gaps"])
                                or "无分区技术缺口；仍需语义审阅。"))
     for reason in preview["technical_limitations"]:

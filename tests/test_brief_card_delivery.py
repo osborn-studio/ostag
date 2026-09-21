@@ -302,32 +302,55 @@ async def test_cross_instance_cancel_during_response_blocks_activation(tmp_path)
         invoke(c, token)
 
 
-def _process_delivery(path, queue, start):
+def _process_delivery(path, queue, start, claims, loser_finished):
     async def run():
         def handler(r):
-            queue.put('sent')
+            queue.put('sent', timeout=3)
+            # Keep the winning send in flight until the competing claim returns.
+            assert loser_finished.wait(3)
             return httpx.Response(200, json=ack())
         c = make_service(path, handler=handler)
-        start.wait(3)
-        result = await c.deliver(SCOPE, 'job', 'revision')
-        queue.put(result.state)
+        begin = c.ledger.begin
+        first_claim = True
+
+        def competing_claim(*args, **kwargs):
+            nonlocal first_claim
+            if first_claim:
+                first_claim = False
+                claims.wait(timeout=3)
+            return begin(*args, **kwargs)
+
+        c.ledger.begin = competing_claim
+        try:
+            queue.put('initialized', timeout=3)
+            assert start.wait(5)
+            result = await c.deliver(SCOPE, 'job', 'revision')
+            if result.state == 'started':
+                loser_finished.set()
+            queue.put(result.state, timeout=3)
+        finally:
+            c.stop()
     asyncio.run(run())
 
 
 def test_two_processes_prepare_send_exactly_one(tmp_path):
     import multiprocessing
-    context = multiprocessing.get_context('fork')
+    context = multiprocessing.get_context('spawn')
     path = tmp_path/'cards.db'
-    make_service(path)
-    queue, start = context.Queue(), context.Event()
-    processes = [context.Process(target=_process_delivery, args=(path, queue, start))
+    queue, start = context.Queue(maxsize=8), context.Event()
+    claims, loser_finished = context.Barrier(2), context.Event()
+    processes = [context.Process(target=_process_delivery,
+                                 args=(path, queue, start, claims, loser_finished))
                  for _ in range(2)]
     try:
         for process in processes:
             process.start()
+            # Initialization has a real 50 ms busy bound; it is not the race
+            # under test. Each child initializes before either can prepare/send.
+            assert queue.get(timeout=5) == 'initialized'
         start.set()
         results = [queue.get(timeout=5) for _ in range(3)]
-        assert results.count('sent') == 1
+        assert sorted(results) == ['create_acknowledged', 'sent', 'started']
         for process in processes:
             process.join(5)
             assert process.exitcode == 0
@@ -336,11 +359,46 @@ def test_two_processes_prepare_send_exactly_one(tmp_path):
             assert db.execute('SELECT state FROM cards').fetchone()[0] == 'create_acknowledged'
     finally:
         for process in processes:
+            if process.pid is None:
+                continue
             if process.is_alive():
                 process.terminate()
                 process.join(3)
+            if process.is_alive():
+                process.kill()
+                process.join(3)
+            assert not process.is_alive()
+            process.close()
         queue.close()
-        queue.join_thread()
+
+
+def test_initialize_busy_is_bounded_and_does_not_retry(tmp_path, monkeypatch):
+    from contextlib import closing, contextmanager
+    from time import monotonic
+
+    ledger = CardLedger(tmp_path / 'cards.db')
+    ledger.initialize()
+    connection, statements = ledger._connection, []
+
+    @contextmanager
+    def traced(**kwargs):
+        with connection(**kwargs) as db:
+            assert db.execute('PRAGMA busy_timeout').fetchone()[0] == 50
+            db.set_trace_callback(statements.append)
+            yield db
+
+    monkeypatch.setattr(ledger, '_connection', traced)
+    with closing(sqlite3.connect(ledger.path)) as holder:
+        holder.execute('BEGIN IMMEDIATE')
+        started = monotonic()
+        with pytest.raises(CardDeliveryError, match='^brief card unavailable$') as caught:
+            ledger.initialize()
+        elapsed = monotonic() - started
+        assert .04 <= elapsed < 1
+        assert statements.count('BEGIN IMMEDIATE') == 1
+        assert caught.value.__context__ is caught.value.__cause__ is None
+        assert holder.in_transaction  # Failure happened while the real lock remained held.
+        holder.rollback()
 
 
 async def test_scalar_bounds_and_no_uninitialized_database_creation(tmp_path):

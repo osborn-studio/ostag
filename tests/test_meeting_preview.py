@@ -4,12 +4,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
 import pytest
 
-from ostag.briefs.meeting_preview import build_preview, load_bundle, render_markdown
+from ostag.briefs.meeting_preview import (
+    _literal_code, build_preview, load_bundle, render_markdown, safe_text,
+)
 from ostag.briefs.models import SourceRef
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +33,39 @@ def deployment(bundle, **changes):
                 event_at="2026-09-16T08:00:00Z", observed_at=bundle["observed_at"],
                 title="虚构生产部署", excerpt="虚构成功记录", deployment_id=701,
                 sha="b" * 40, environment="production", ref="main") | changes
+
+
+def literal_contents(markdown, citations=()):
+    """Independent CommonMark code-span oracle (no installed parser required).
+
+    Only equal-length backtick runs close a span; inside, newlines become spaces
+    and one boundary space is removed iff both exist and content is not all spaces.
+    All remaining Markdown must contain only the supplied canonical links.
+    """
+    runs = list(re.finditer(r"`+", markdown))
+    contents, outside = [], []
+    cursor = index = 0
+    while index < len(runs):
+        opening = runs[index]
+        closing_index = next((j for j in range(index + 1, len(runs))
+                              if runs[j].group() == opening.group()), None)
+        assert closing_index is not None, "unclosed code delimiter"
+        closing = runs[closing_index]
+        outside.append(markdown[cursor:opening.start()])
+        assert "\n" not in markdown[opening.end():closing.start()], "span swallowed another line"
+        text = markdown[opening.end():closing.start()].replace("\n", " ")
+        if text.startswith(" ") and text.endswith(" ") and text.strip(" "):
+            text = text[1:-1]
+        contents.append(text)
+        cursor, index = closing.end(), closing_index + 1
+    outside.append(markdown[cursor:])
+    exposed = "".join(outside)
+    for sid, url in dict(citations).items():
+        exposed = exposed.replace(f"[{sid}]({url})", "")
+    assert not re.search(r"[<`]|!?\[[^\]]*\]\(|://|javascript:|data:|vbscript:|file:|mailto:",
+                         exposed, re.IGNORECASE)
+    assert "rogue.invalid" not in exposed
+    return contents
 
 
 def test_golden_merge_window_claim_and_coverage(bundle):
@@ -171,12 +207,14 @@ def test_injection_is_inert_in_both_formats(bundle):
     bundle["request"]["goal"] = attack
     bundle["partitions"][-1]["reason"] = attack[:240]
     result = build_preview(bundle)
+    normalized = attack.replace("\x1b", "").replace("\u202e", "")
+    assert result["goal"] == normalized
+    assert normalized in literal_contents(render_markdown(result), result["citations"])
     for output in (json.dumps(result, ensure_ascii=False), render_markdown(result)):
-        assert "rogue.invalid" not in output
-        assert "<script>" not in output
+        assert "rogue.invalid" in output
+        assert "<script>" in output  # JSON is data; Markdown wraps this in code.
         assert "\x1b" not in output and "\u202e" not in output
         assert "https://synthetic" not in output
-        assert "链接已省略" in output
     source = next(s for s in result["sources"] if s["source_id"] == "chat-shipped")
     assert source["content_sha256"] == hashlib.sha256(attack.encode()).hexdigest()
     assert "https://github.com/synthetic-example/demo-api/pull/12" in render_markdown(result)
@@ -199,29 +237,102 @@ def test_benign_dotted_chinese_and_word_prefix_survive_display(bundle, text):
     assert text in render_markdown(result)
 
 
-def test_domain_heuristic_preserves_surrounding_chinese(bundle):
-    # ASCII file names remain indistinguishable from domain-like tokens.
-    bundle["feishu"][1]["text"] = "虚构：修改config.yaml后再确认"
+@pytest.mark.parametrize("text", [
+    '虚构：修改README.md和config.yaml后再确认 "quoted_id" \'another_id\'',
+    "虚构：https://rogue.invalid/path#12后再确认",
+    "&quot;quoted&quot; &amp; &#96; &#x3c;script&#x3e;",
+    '`leading ``nested``` [x](https://rogue.invalid) ![x](file:/secret) ``end`',
+    '```<script>alert("x")</script>`````',
+    "  leading and trailing  ",
+])
+def test_visible_text_fidelity_in_all_untrusted_fields(bundle, text):
+    bundle["feishu"][1]["text"] = text
+    bundle["request"]["goal"] = text
+    bundle["github"][0].update(title=text, excerpt=text)
+    bundle["partitions"][-1]["reason"] = text
+    bundle["github"].append(deployment(bundle, ref=text, environment=text))
     result = build_preview(bundle)
     source = next(s for s in result["sources"] if s["source_id"] == "chat-ambiguous")
-    assert source["excerpt"] == "虚构：修改（链接已省略）后再确认"
+    assert source["excerpt"] == result["goal"] == result["coverage"][-1]["reason"] == text
+    fact = next(f for f in result["facts"] if f["kind"] == "deployment_success")
+    assert fact["ref"] == fact["environment"] == text
+    assert pr(result)["text"] == text + " " + text
+    assert source["content_sha256"] == hashlib.sha256(text.encode()).hexdigest()
+    assert json.loads(json.dumps(result, ensure_ascii=False)) == result
+    literals = literal_contents(render_markdown(result), result["citations"])
+    assert literals.count(text) == 5  # goal, chat, ref, environment, reason
+    assert text + " " + text in literals
+
+
+@pytest.mark.parametrize("text", [
+    "`" * n for n in (1, 2, 3, 16, 255, 1024, 3999, 4000)
+] + [
+    "`" * 1900 + ' `` ![x](data:text/html,<script>) "README.md" ' + "`" * 1901,
+    "`" + " ".join("`" * n for n in range(1, 70)) + "``",
+    "\\`[x](javascript:alert(1))`\\",
+    "~~~\n<script>\n```\n![x](https://rogue.invalid)\n~~~",
+])
+def test_backtick_runs_and_delimiter_injection_at_source_limit(bundle, text):
+    assert len(text) <= 4000
+    bundle["feishu"][1]["text"] = text
+    result = build_preview(bundle)
+    normalized = text.replace("\n", " ")
+    assert normalized in literal_contents(render_markdown(result), result["citations"])
+    source = next(s for s in result["sources"] if s["source_id"] == "chat-ambiguous")
+    assert source["excerpt"] == normalized
+    assert source["content_sha256"] == hashlib.sha256(text.encode()).hexdigest()
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("", ""), ("\x00\x1b\u202e\u2066", ""),
+    (" ", " "), ("   ", "   "), ("\r\n\t", "   "),
+    (" left", " left"), ("right ", "right "), (" both ", " both "),
+    ("  ` both `  ", "  ` both `  "),
+    ("a\x1b[31m\u202eb\r\nc\td\x00", "a[31mb  c d"),
+])
+def test_normalization_empty_and_edge_space_semantics(text, expected):
+    assert safe_text(text) == expected
+    rendered = _literal_code(text)
+    if expected:
+        assert literal_contents(rendered) == [expected]
+    else:
+        assert rendered == ""
 
 
 @pytest.mark.parametrize("url", [
-    "https://rogue.invalid/#12", "custom+scheme://rogue.invalid/#12",
-    "javascript:alert(1)", "data:text/plain,secret", "vbscript:secret",
-    "file:/private/secret", "mailto:secret@rogue.invalid",
+    "https://rogue.invalid/#12", "http://rogue.invalid/#12",
+    "custom+scheme://rogue.invalid/#12", "ftp://rogue.invalid/#12",
+    "javascript:alert(1)#12", "data:text/plain,secret#12", "vbscript:secret#12",
+    "file:/private/secret#12", "mailto:secret@rogue.invalid#12", "JAVASCRIPT:alert(1)#12",
     "www.rogue.invalid/#12", "//rogue.invalid/#12", "rogue.invalid/#12",
 ])
-def test_url_patterns_still_omitted_from_display_and_references(bundle, url):
+def test_url_literals_preserved_but_fragments_excluded_from_references(bundle, url):
     bundle["feishu"][1]["text"] = url
     result = build_preview(bundle)
     source = next(s for s in result["sources"] if s["source_id"] == "chat-ambiguous")
-    assert "链接已省略" in source["excerpt"]
+    assert source["excerpt"] == url
     assert source["content_sha256"] == hashlib.sha256(url.encode()).hexdigest()
     assert result["ambiguities"] == []
     for output in (json.dumps(result, ensure_ascii=False), render_markdown(result)):
-        assert url not in output
+        assert url in output
+    assert url in literal_contents(render_markdown(result), result["citations"])
+    # Keep independent naked refs even when the same message contains a URL.
+    bundle["feishu"][1]["text"] = url + " 核实 #13"
+    assert [a["pr_number"] for a in build_preview(bundle)["ambiguities"]] == [13]
+
+
+@pytest.mark.parametrize(("text", "normalized"), [("\u202e", ""), ("\u202e   ", "   ")])
+def test_normalized_empty_and_space_only_source_remains_valid(bundle, text, normalized):
+    bundle["feishu"][1]["text"] = text
+    result = build_preview(bundle)
+    source = next(s for s in result["sources"] if s["source_id"] == "chat-ambiguous")
+    assert source["excerpt"] == normalized
+    assert source["content_sha256"] == hashlib.sha256(text.encode()).hexdigest()
+    literals = literal_contents(render_markdown(result), result["citations"])
+    if normalized:
+        assert normalized in literals
+    else:
+        assert "说法（未验证，不是决策）：；事件" in render_markdown(result)
 
 
 def test_safe_dotted_identifiers_survive_display_projection(bundle):
@@ -235,7 +346,7 @@ def test_safe_dotted_identifiers_survive_display_projection(bundle):
     assert all(f["ref"] == "release/1.2" for f in result["facts"] if "ref" in f)
     assert pr(result)["check_status"] == "success_at_head"
     assert pr(result)["production_deployment"] == "success"
-    assert "ref：release/1.2" in render_markdown(result)
+    assert "release/1.2" in literal_contents(render_markdown(result), result["citations"])
     bundle["github"][-1]["environment"] = "staging-v1.2"
     result = build_preview(bundle)
     fact = next(f for f in result["facts"] if f["kind"] == "deployment_success")
@@ -253,10 +364,11 @@ def test_untrusted_identifiers_stay_inert(bundle, field, value):
     bundle["github"].append(deployment(bundle, **{field: value}))
     result = build_preview(bundle)
     fact = next(f for f in result["facts"] if f["kind"] == "deployment_success")
-    assert "链接已省略" in fact[field]
+    normalized = value.replace("\x1b", "").replace("\u202e", "")
+    assert fact[field] == normalized
+    assert normalized in literal_contents(render_markdown(result), result["citations"])
     for output in (json.dumps(result, ensure_ascii=False), render_markdown(result)):
-        assert "rogue.invalid" not in output and "javascript:" not in output
-        assert "<script>" not in output and "\x1b" not in output and "\u202e" not in output
+        assert "\x1b" not in output and "\u202e" not in output
 
 
 @pytest.mark.parametrize(("text", "expected"), [
@@ -336,6 +448,24 @@ def test_real_cli_json_markdown_and_installed_entrypoint(bundle, tmp_path):
     path = tmp_path / "complete.json"
     path.write_text(json.dumps(bundle))
     assert cli(path).returncode == 0
+
+
+def test_actual_cli_preserves_synthetic_hostile_text_as_literals(bundle, tmp_path):
+    text = ('` "README.md" config.yaml https://rogue.invalid/#12后再确认 '
+            '``![x](javascript:alert(1)) <script>&quot;x&quot;</script> ```')
+    bundle["feishu"][1]["text"] = text
+    bundle["request"]["goal"] = text
+    path = tmp_path / "synthetic-fidelity.json"
+    path.write_text(json.dumps(bundle, ensure_ascii=False))
+    expected = build_preview(bundle)
+    result = cli(path)
+    assert result.returncode == 3 and not result.stderr
+    assert json.loads(result.stdout) == expected
+    assert json.loads(result.stdout)["goal"] == text
+    result = cli(path, fmt="markdown")
+    assert result.returncode == 3 and not result.stderr
+    assert result.stdout == render_markdown(expected) + "\n"
+    assert literal_contents(result.stdout, expected["citations"]).count(text) == 2
 
 
 @pytest.mark.parametrize("payload", [
