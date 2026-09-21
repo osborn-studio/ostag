@@ -4,7 +4,8 @@ Syntax: /brief <strict JSON object>. Required keys: version="manual-brief-v1",
 namespace, purpose, window={start,end,display_timezone}, grant_id, grant_revision,
 coverage={version="brief-coverage-v1",complete,gaps}, goals, sources=[A01 SourceRef
 objects]. No extra keys/duplicate keys/coercion. Source text and goals are data.
-Only manual sources are accepted; empty sources return needs_input without IO.
+The /brief command accepts only manual sources. The explicit local meeting API
+uses a distinct meeting-brief-v1 payload and current trusted authority.
 Coverage describes the submitted material, not the completeness of live systems.
 
 NormalizedEvent is trusted adapter output, never fabricated from event.raw.
@@ -25,9 +26,8 @@ An explicit audited A03 ReadOnlyTransport is required. The Protocol does not
 certify read-only behavior, actual provider identity or billing bounds; that
 production adapter and D01/D07 semantic/platform pilots remain external gates.
 Backend.run is never adapted. Budgets/config are frozen at admission, and current
-config must still match on execution. Manual jobs have no Meeting FrozenScope;
-future meeting jobs must map persisted first_claim_at and execution_seconds to
-ExecutionTiming without reconstructing intake/deadline. They are rejected here.
+config must still match on execution. Meeting jobs preserve both the original
+collection origin and this store's first claim; neither is reset on restart.
 """
 from __future__ import annotations
 
@@ -224,6 +224,12 @@ class BriefService:
         and fences concurrent mutations. Only the mirror pass is inside that
         boundary; retention/primary SQL never holds an authority mutex.
         """
+        from ostag.briefs.meeting_service import DurableMeetingRequest
+        if type(request) is DurableMeetingRequest:
+            if self._authority is None or not self._retention_enabled or self.lifecycle is None:
+                raise _invalid("mandatory meeting gates unavailable")
+            if operation is None:
+                raise _invalid("meeting lifecycle operation required")
         original_stopped = stopped
         def stopped():
             return original_stopped() or (operation is not None and not operation.allowed())
@@ -275,6 +281,22 @@ class BriefService:
             raise _invalid("authorization unavailable")
         if request.namespace != scope.namespace:
             raise _invalid("scope mismatch")
+        from ostag.briefs.meeting_service import DurableMeetingRequest
+        meeting = type(request) is DurableMeetingRequest
+        if meeting:
+            self._authority.meeting(scope, request)
+            current_settings = self.settings()
+            current_grant = authorize(lookup=self.grants, config=current_settings,
+                grant_id=request.grant_id, grant_revision=request.grant_revision,
+                namespace=scope.namespace, principal=scope.principal,
+                resource_ids=request.scope.request.resource_ids, purpose=request.purpose,
+                allowed_audience=(scope.principal,), operation="generate", now=self.clock())
+            from ostag.briefs.project_mapping import _hash
+            if (request.scope.grant_sha256 != _hash(current_grant.to_dict())
+                    or request.scope.core_policy_sha256 != _hash(dict(
+                        default_permission_level=current_settings.default_permission_level,
+                        actor_permissions=list(current_settings.actor_permissions), channel_grants=[]))):
+                raise _invalid("meeting policy pins changed")
         request.source_set(scope)
         resolved = self.destination(scope)
         if (type(resolved) is not PrivateDestination or resolved != destination
@@ -284,7 +306,8 @@ class BriefService:
         for source in request.sources:
             if (source.grant_id != request.grant_id
                     or source.grant_revision != request.grant_revision
-                    or source.content_sha256 != hashlib.sha256(source.excerpt.encode()).hexdigest()):
+                    or (not meeting and source.content_sha256 !=
+                        hashlib.sha256(source.excerpt.encode()).hexdigest())):
                 raise _invalid("source snapshot mismatch")
             current = self.sources(scope, source.source_id)
             if (type(current) is not SourceSnapshot or current.scope != scope
@@ -316,11 +339,17 @@ class BriefService:
             raise _invalid("authorization stopped")
 
     def load_job(self, job: Job):
-        payload = _keys(json.loads(job.payload_json), ("kind", "request", "intake_at", "config"))
-        if payload["kind"] != "manual-brief-v1":
-            raise _invalid("meeting/foreign jobs require their own frozen scope mapping")
+        from ostag.briefs.meeting_service import DurableMeetingRequest, VERSION
+        wire = json.loads(job.payload_json)
+        meeting = wire.get("kind") == VERSION
+        payload = _keys(wire, ("kind", "request", "intake_at", "config") +
+                        (("retention_expires_at",) if meeting else ()))
+        if payload["kind"] not in ("manual-brief-v1", VERSION):
+            raise _invalid("unknown brief job kind")
         _utc(payload["intake_at"], "intake_at")
-        request = ManualRequest.from_dict(payload["request"])
+        request = (DurableMeetingRequest if meeting else ManualRequest).from_dict(payload["request"])
+        if meeting and payload["intake_at"] != request.scope.intake_at:
+            raise _invalid("meeting intake pin changed")
         config = GenerationConfig.from_dict(payload["config"])
         if (not self.configured or config != self.config
                 or job.execution_seconds != config.parameters.budget.timeout_seconds):
@@ -330,6 +359,11 @@ class BriefService:
             raise _invalid("admission binding mismatch")
         request.validate_completion_size(job.scope, config)
         return request, config
+
+    def meeting_application(self, *, policy):
+        """Explicit trusted local API, using this service and its existing worker."""
+        from ostag.briefs.meeting_service import MeetingApplication
+        return MeetingApplication(self, policy=policy)
 
     def _submit(self, event, operation=None):
         if not self.configured:

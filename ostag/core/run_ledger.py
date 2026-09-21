@@ -10,8 +10,13 @@ secret redaction before they touch disk.
 from __future__ import annotations
 
 import json
+import fcntl
+import hashlib
+import os
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from time import monotonic, sleep
 from typing import Any
 
 from ostag.core.event import NormalizedEvent
@@ -41,6 +46,40 @@ def _redact_deep(value: Any) -> Any:
     return value
 
 
+def _proposal_error(code: str) -> SchemaError:
+    return SchemaError(code, 'Frozen proposal could not be recorded.',
+                       'Verify the current proposal and ledger; do not reuse an old approval.')
+
+
+def _proposal_binding(payload: dict) -> str:
+    value = json.loads(json.dumps(payload, allow_nan=False))
+    value.pop('proposal_binding', None)
+    for key in ('created_at', 'updated_at', 'state', 'commands'):
+        value['receipt'].pop(key, None)
+    encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+def _is_recovery(record):
+    return (record.get('event_type') == 'security_event'
+            and record.get('payload', {}).get('kind') == 'frozen_history_recovered')
+
+
+def _is_frozen_record(record):
+    payload = record.get('payload', {})
+    return (_is_recovery(record)
+          or (record['event_type'] == 'action_state_changed'
+              and str(payload.get('action_id', '')).startswith('action_frozen'))
+          or (record['event_type'] == 'action_proposed'
+              and type(payload.get('receipt')) is dict
+              and str(payload['receipt'].get('action_id', '')).startswith('action_frozen')))
+
+
+def _epoch_valid(value):
+    return (type(value) is str and (value == 'initial' or
+            (len(value) == 64 and all(c in '0123456789abcdef' for c in value))))
+
+
 class RunLedger:
     def __init__(self, path: Path, *, clock: Any | None = None) -> None:
         self.path = Path(path)
@@ -49,10 +88,292 @@ class RunLedger:
     def append(self, event: LedgerEvent) -> LedgerEvent:
         record = event.to_dict()
         record["payload"] = _redact_deep(record.get("payload", {}))
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+        if _is_recovery(record):
+            raise _proposal_error('recovery_requires_verified_snapshot')
+        if (record['event_type'] == 'action_proposed'
+                and str(record['payload'].get('receipt', {}).get('action_id', '')).startswith(
+                    'action_frozen')):
+            raise _proposal_error('frozen_proposal_requires_unique_creation')
+        frozen_state = (record['event_type'] == 'action_state_changed'
+                        and str(record['payload'].get('action_id', '')).startswith('action_frozen'))
+        with self._exclusive(bounded=frozen_state) as handle:
+            if (record['event_type'] == 'action_state_changed'
+                    and str(record['payload'].get('action_id', '')).startswith('action_frozen')):
+                records = self._strict_records(handle)
+                action_id = record['payload']['action_id']
+                if self._frozen_original(records, action_id) is None:
+                    raise _proposal_error('action_not_found')
+                entry = self._fold_receipts(records)[action_id]
+                if (entry.get('quarantined') or entry.get('superseded_by') is not None
+                        or entry['receipt']['state'] != record['payload'].get('from_state')):
+                    raise _proposal_error('frozen_state_conflict')
+            self._write_locked(handle, record, durable=frozen_state)
         return event
+
+    @contextmanager
+    def _exclusive(self, *, read_only=False, bounded=True):
+        """Cooperating append/unique-create writers serialize on the same inode."""
+        if not read_only:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open('rb' if read_only else 'a+b') as handle:
+            if not bounded:
+                # Legacy append callers did not have a ledger_busy failure.
+                # Shared blocking admission serializes with strict frozen scans
+                # without imposing the new proposal admission deadline on them.
+                fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+            else:
+                deadline = monotonic() + .5
+                while True:
+                    try:
+                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        if monotonic() >= deadline:
+                            raise _proposal_error('ledger_busy') from None
+                        sleep(.001)
+            try:
+                yield handle
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _write_locked(handle, record, *, durable=False):
+        frozen = _is_frozen_record(record)
+        handle.write((json.dumps(record, ensure_ascii=False, sort_keys=True,
+                                 allow_nan=not frozen) + '\n').encode('utf-8'))
+        handle.flush()
+        if durable:
+            os.fsync(handle.fileno())
+
+    @staticmethod
+    def _strict_records(handle):
+        # Stream all bytes; retain only receipt history. No whole-file capacity
+        # cliff. Invalid bytes remain fatal unless a verified recovery marker
+        # explicitly quarantines their entire preceding history.
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError('duplicate key')
+                result[key] = value
+            return result
+        handle.seek(0)
+        digest, length, uncertain, records = hashlib.sha256(), 0, False, []
+        for raw in handle:
+            record = None
+            try:
+                if not raw.endswith(b'\n'):
+                    raise ValueError('unterminated record')
+                if raw.strip():
+                    record = json.loads(raw, object_pairs_hook=unique)
+                    if type(record) is not dict or type(record.get('payload', {})) is not dict:
+                        raise ValueError('invalid event')
+                    LedgerEvent.from_dict(record)
+                    payload = record.get('payload', {})
+                    if _is_frozen_record(record):
+                        # Frozen history must be finite; unrelated legacy audit
+                        # payloads historically allowed NaN/Infinity and pruning.
+                        json.dumps(record, allow_nan=False)
+                    if _is_recovery(record):
+                        if (payload.get('prefix_sha256') != digest.hexdigest()
+                                or type(payload.get('prefix_bytes')) is not int
+                                or payload['prefix_bytes'] != length
+                                or not _epoch_valid(payload.get('epoch'))
+                                or payload['epoch'] == 'initial'
+                                or type(payload.get('reason')) is not str
+                                or not payload['reason']):
+                            raise ValueError('invalid recovery binding')
+                        Principal.from_dict(payload['operator'])
+                        uncertain = False
+                    elif record['event_type'] == 'action_proposed':
+                        receipt = ActionReceipt.from_dict(payload['receipt'])
+                        if (receipt.action_id.startswith('action_frozen')
+                                and payload.get('proposal_binding') != _proposal_binding(payload)):
+                            raise ValueError('invalid frozen binding')
+            except (ValueError, TypeError, AttributeError, KeyError, RecursionError):
+                uncertain = True
+                record = None
+            if record is not None and not uncertain and (record['event_type'] in (
+                    'action_proposed', 'action_state_changed') or _is_recovery(record)):
+                records.append(record)
+            digest.update(raw)
+            length += len(raw)
+        if uncertain:
+            raise _proposal_error('ledger_integrity')
+        return records
+
+    @staticmethod
+    def _epoch(records):
+        return next((r['payload']['epoch'] for r in reversed(records)
+                     if _is_recovery(r)), 'initial')
+
+    def frozen_epoch(self):
+        """Current proposal generation, supplied by the trusted host when freezing."""
+        try:
+            with self._exclusive(read_only=True) as handle:
+                return self._epoch(self._strict_records(handle))
+        except FileNotFoundError:
+            return 'initial'
+
+    def recover_frozen_history(self, *, expected_sha256, operator, reason):
+        """Explicit trusted-local maintenance; preserve bytes and revoke old approval.
+
+        Stop effect workers first and retain incident evidence. This never asserts
+        provider absence/success or authorizes replay. It does not restore a backup
+        or replace the inode. Caller must supply the exact inspected file digest.
+        """
+        if (type(operator) is not Principal or type(reason) is not str
+                or not reason.strip() or len(reason) > 500
+                or redact_secrets(reason) != reason
+                or not _epoch_valid(expected_sha256) or expected_sha256 == 'initial'):
+            raise _proposal_error('invalid_recovery_request')
+        # Do not manufacture a missing ledger as recovery evidence.
+        if not self.path.is_file():
+            raise _proposal_error('action_not_found')
+        with self._exclusive() as handle:
+            handle.seek(0)
+            digest, length, last = hashlib.sha256(), 0, b''
+            while block := handle.read(1024 * 1024):
+                digest.update(block)
+                length += len(block)
+                last = block[-1:]
+            if digest.hexdigest() != expected_sha256:
+                raise _proposal_error('recovery_snapshot_changed')
+            if last and last != b'\n':
+                handle.write(b'\n')
+                handle.flush()
+                digest.update(b'\n')
+                length += 1
+            epoch = hashlib.sha256(os.urandom(32)).hexdigest()
+            record = LedgerEvent(new_id('evt'), 'run_recovery', 'security_event', {
+                'kind': 'frozen_history_recovered', 'epoch': epoch, 'prefix_sha256': digest.hexdigest(), 'prefix_bytes': length,
+                'inspected_sha256': expected_sha256, 'operator': operator.to_dict(),
+                'reason': reason,
+            }, self.clock().isoformat()).to_dict()
+            if _redact_deep(record) != record:
+                raise _proposal_error('invalid_recovery_request')
+            self._write_locked(handle, record)
+            self._sync_proposal(handle)
+            return epoch
+
+    @staticmethod
+    def _frozen_original(records, action_id):
+        originals = [r['payload'] for r in records if r.get('event_type') == 'action_proposed'
+                     and r['payload']['receipt'].get('action_id') == action_id]
+        if not originals:
+            return None
+        if len(originals) != 1:
+            raise _proposal_error('ledger_integrity')
+        original = originals[0]
+        if original.get('proposal_binding') != _proposal_binding(original):
+            raise _proposal_error('ledger_integrity')
+        return original
+
+    def _sync_proposal(self, handle):
+        os.fsync(handle.fileno())
+        directory = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+    def get_frozen_receipt(self, action_id: str, *, chat_id: str, platform: str) -> ActionReceipt:
+        """Fail closed on damaged or ambiguous frozen-proposal history."""
+        if type(action_id) is not str or not action_id.startswith('action_frozen'):
+            raise _proposal_error('invalid_frozen_proposal')
+        try:
+            with self._exclusive(read_only=True) as handle:
+                records = self._strict_records(handle)
+                original = self._frozen_original(records, action_id)
+                if original is None:
+                    raise _proposal_error('action_not_found')
+                if original.get('chat_id') != chat_id or original.get('platform') != platform:
+                    raise _proposal_error('receipt_scope_mismatch')
+                return ActionReceipt.from_dict(self._fold_receipts(records)[action_id]['receipt'])
+        except FileNotFoundError:
+            raise _proposal_error('action_not_found') from None
+
+    def record_receipt_once(self, receipt: ActionReceipt, *, chat_id: str,
+                            platform: str, proposer_id: str, proposal_scope: str | None = None,
+                            replaces: str | None = None) -> ActionReceipt:
+        """Durably create a frozen proposal, or return its current approved state.
+
+        The reserved action_frozen namespace cannot be created by legacy append.
+        Identity, target, original payload and source channel are immutable. Times
+        may differ on a retry, but a retry never appends a creation/state event.
+        The parent directory must be provisioned before use. File and directory
+        are synchronized before return. This neither approves nor executes it.
+        """
+        if (type(receipt) is not ActionReceipt or not receipt.action_id.startswith('action_frozen')
+                or receipt.state not in ('proposed', 'needs_approval')
+                or type(receipt.principal) is not Principal
+                or receipt.principal != Principal(platform, proposer_id)
+                or type(chat_id) is not str or not chat_id):
+            raise _proposal_error('invalid_frozen_proposal')
+        if not self.path.parent.is_dir():
+            raise _proposal_error('ledger_parent_missing')
+        if ((proposal_scope is not None and (type(proposal_scope) is not str
+                or len(proposal_scope) != 64 or any(c not in '0123456789abcdef' for c in proposal_scope)))
+                or (replaces is not None and (proposal_scope is None or type(replaces) is not str
+                    or not replaces.startswith('action_frozen')))):
+            raise _proposal_error('invalid_frozen_proposal')
+        record = LedgerEvent(new_id('evt'), receipt.run_id, 'action_proposed', {
+            'receipt': receipt.to_dict(), 'chat_id': chat_id,
+            'platform': platform, 'proposer_id': proposer_id,
+        }, self.clock().isoformat()).to_dict()
+        # Freeze caller-owned dictionaries once, before binding or waiting.
+        try:
+            record = json.loads(json.dumps(record, allow_nan=False))
+        except (ValueError, TypeError, RecursionError):
+            raise _proposal_error('invalid_frozen_proposal') from None
+        payload = record['payload']
+        if proposal_scope is not None:
+            payload['proposal_scope'] = proposal_scope
+        if _redact_deep(payload) != payload:
+            raise _proposal_error('frozen_proposal_redacted')
+        try:
+            binding = _proposal_binding(payload)
+        except (TypeError, ValueError, RecursionError):
+            raise _proposal_error('invalid_frozen_proposal') from None
+        record['payload']['proposal_binding'] = binding
+        with self._exclusive() as handle:
+            records = self._strict_records(handle)
+            original = self._frozen_original(records, receipt.action_id)
+            if original is not None:
+                if 'supersedes' in original:
+                    record['payload']['supersedes'] = original['supersedes']
+                    binding = _proposal_binding(record['payload'])
+                if original['proposal_binding'] != binding:
+                    raise _proposal_error('frozen_proposal_conflict')
+                current = self._fold_receipts(records)[receipt.action_id]['receipt']
+                # A prior attempt may have written but failed to fsync. A replay
+                # cannot claim durable creation until that write is synchronized.
+                self._sync_proposal(handle)
+                return ActionReceipt.from_dict(current)
+            if receipt.apply_payload.get('ledger_epoch', 'initial') != self._epoch(records):
+                raise _proposal_error('frozen_epoch_mismatch')
+            if proposal_scope is not None:
+                group = [r['payload']['receipt']['action_id'] for r in records
+                         if r.get('event_type') == 'action_proposed'
+                         and r['payload'].get('proposal_scope') == proposal_scope
+                         and r['payload']['receipt']['action_id'].startswith('action_frozen')]
+                if group:
+                    previous = group[-1]
+                    prior = self._frozen_original(records, previous)
+                    entry = self._fold_receipts(records)[previous]
+                    if (replaces != previous or prior['receipt'].get('principal') != receipt.principal.to_dict()
+                            or entry['receipt']['state'] not in ('proposed', 'needs_approval',
+                                'ready_to_apply', 'approved_only', 'rejected', 'stale')):
+                        raise _proposal_error('frozen_proposal_conflict')
+                    # One authoritative JSONL event creates the new proposal AND
+                    # supersedes the old approval; there is no two-append window.
+                    record['payload']['supersedes'] = previous
+                elif replaces is not None:
+                    raise _proposal_error('frozen_proposal_conflict')
+            record['payload']['proposal_binding'] = _proposal_binding(record['payload'])
+            self._write_locked(handle, record)
+            self._sync_proposal(handle)
+            return ActionReceipt.from_dict(record['payload']['receipt'])
 
     def record_notification(
         self, delivery_id: str, action: str, payload: dict[str, Any]
@@ -124,7 +445,7 @@ class RunLedger:
         if not self.path.exists():
             return []
         records: list[dict[str, Any]] = []
-        with self.path.open("r", encoding="utf-8") as handle:
+        with self.path.open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 line = line.strip()
                 if not line:
@@ -421,13 +742,19 @@ class RunLedger:
             )
         )
 
-    def _fold_receipts(self) -> dict[str, dict[str, Any]]:
+    def _fold_receipts(self, records=None) -> dict[str, dict[str, Any]]:
         """Reconstruct latest receipt payloads from proposed/state-changed events."""
         entries: dict[str, dict[str, Any]] = {}
-        for record in self._read_all():
+        for record in self._read_all() if records is None else records:
             event_type = record.get("event_type")
             payload = record.get("payload", {})
-            if event_type == "action_proposed" and isinstance(payload.get("receipt"), dict):
+            if _is_recovery(record):
+                for action_id, entry in entries.items():
+                    if action_id.startswith('action_frozen'):
+                        entry['quarantined'] = True
+                        entry['receipt']['state'] = 'blocked'
+                        entry['receipt']['updated_at'] = record.get('created_at')
+            elif event_type == "action_proposed" and isinstance(payload.get("receipt"), dict):
                 action_id = payload["receipt"].get("action_id")
                 if action_id:
                     receipt_payload = dict(payload["receipt"])
@@ -458,10 +785,34 @@ class RunLedger:
                         "chat_id": payload.get("chat_id", ""),
                         "platform": payload.get("platform", ""),
                         "proposer_id": payload.get("proposer_id", ""),
+                        "proposal_scope": payload.get("proposal_scope"),
                     }
+                    supersedes = payload.get('supersedes')
+                    if supersedes is not None and action_id.startswith('action_frozen'):
+                        old = entries.get(supersedes)
+                        if (old is None or not supersedes.startswith('action_frozen')
+                                or not payload.get('proposal_scope')
+                                or old.get('proposal_scope') != payload['proposal_scope']
+                                or old['receipt'].get('principal') != receipt_payload.get('principal')
+                                or payload.get('proposal_binding') != _proposal_binding(payload)):
+                            if records is not None:
+                                raise _proposal_error('ledger_integrity')
+                            # Lenient legacy listing must not become unusable
+                            # because a frozen line is corrupt. Quarantine its
+                            # frozen view; execution still requires strict scan.
+                            for known_id, known in entries.items():
+                                if known_id.startswith('action_frozen'):
+                                    known['quarantined'] = True
+                                    known['receipt']['state'] = 'blocked'
+                            continue
+                        old['superseded_by'] = action_id
+                        old['receipt']['state'] = 'stale'
+                        old['receipt']['updated_at'] = record.get('created_at')
             elif event_type == "action_state_changed":
                 entry = entries.get(payload.get("action_id", ""))
                 if entry and payload.get("to_state"):
+                    if entry.get('quarantined') or entry.get('superseded_by') is not None:
+                        continue  # never resurrect a superseded approval
                     entry["receipt"]["state"] = payload["to_state"]
                     entry["receipt"]["updated_at"] = record.get(
                         "created_at", entry["receipt"].get("updated_at")

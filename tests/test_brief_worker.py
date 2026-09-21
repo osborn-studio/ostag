@@ -70,10 +70,10 @@ async def test_private_worker_does_not_block_shared_loop(tmp_path):
 
 
 @pytest.fixture
-def local(tmp_path):
+def local(tmp_path, request):
     authority = Authority()
     service = authority.service(BriefStore(tmp_path / "brief.db", busy_timeout=1))
-    worker = BriefWorker(service, heartbeat_interval=0.02)
+    worker = BriefWorker(service, heartbeat_interval=0.02, supervised=getattr(request, "param", False))
     yield service, authority, worker
     worker.stop()
     service.close()
@@ -197,12 +197,30 @@ async def test_persisted_requester_cancel_and_late_uncooperative_transport(local
 
 
 def test_heartbeat_loss_is_independent_of_blocked_model(local, monkeypatch):
+    from threading import current_thread
+
     service, _, worker = local
-    entered, lost, release = Event(), Event(), Event()
+    entered, lost, release, inject_loss, renewed = (Event() for _ in range(5))
+    renew, load_job = service.store.renew, service.load_job
+    failed_renewals = []
+
     def renewal(*args, **kwargs):
+        if not inject_loss.is_set():
+            result = renew(*args, **kwargs)
+            renewed.set()
+            return result
+        failed_renewals.append((current_thread(), args[0]))
         lost.set()
         raise LeaseLost("synthetic private error must not escape")
+
+    def delayed_load(job):
+        # Force a heartbeat BEFORE model entry. The old always-failing renewal
+        # loses the guard here and never reaches the blocked transport.
+        assert renewed.wait(1)
+        return load_job(job)
+
     monkeypatch.setattr(service.store, "renew", renewal)
+    monkeypatch.setattr(service, "load_job", delayed_load)
     async def blocked(_):
         entered.set()
         assert release.wait(2)
@@ -211,11 +229,22 @@ def test_heartbeat_loss_is_independent_of_blocked_model(local, monkeypatch):
     future = worker.run_once()
     try:
         assert entered.wait(1)
+        inject_loss.set()
         assert lost.wait(1)
+        heartbeat, lease = failed_renewals[0]
+        heartbeat.join(1)  # Observe latched loss, not merely entry to renew().
+        assert not heartbeat.is_alive()
+        assert not future.done()
+        assert service.store.assert_current(lease, clock=service.clock).state == "generating"
+        assert service.store.outbox(SCOPE, admitted.job_id) is None
     finally:
         release.set()
-    assert future.result(2) != "draft_ready"
+    assert future.result(2) == "needs_input"
+    assert len(service.transport.calls) == 1
+    assert service.store.failure_cause(SCOPE, admitted.job_id) == "lease_lost"
     assert service.store.outbox(SCOPE, admitted.job_id) is None
+    with pytest.raises(LeaseLost):
+        service.store.assert_current(lease, clock=service.clock)
 
 
 def test_deadline_during_model_keeps_original_timing_and_records_cause(local):
@@ -384,7 +413,28 @@ def test_unexpected_precommit_exception_is_sanitized_and_cause_persisted(local, 
     assert service.store.failure_cause(SCOPE, admitted.job_id) == "commit_failed"
 
 
-def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(local):
+@pytest.mark.parametrize("local", [False, True], indirect=True)
+@pytest.mark.parametrize("delayed_watcher_join", [False, True])
+def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(
+    local, monkeypatch, delayed_watcher_join
+):
+    joined = Event()
+    if delayed_watcher_join:
+        original_gather = asyncio.gather
+        def gather(*tasks, **kwargs):
+            result = original_gather(*tasks, **kwargs)
+            if any(isinstance(task, asyncio.Task) and
+                   task.get_coro().__qualname__.endswith('.watch') for task in tasks):
+                async def delayed():
+                    joined.set()
+                    await result
+                    # Cancellation acknowledgement can take longer than the
+                    # bounded local stop deadline. It must not erase failure
+                    # bookkeeping once the blocking transport has returned.
+                    await asyncio.sleep(.05)
+                return delayed()
+            return result
+        monkeypatch.setattr(asyncio, 'gather', gather)
     service, _, worker = local
     entered, release, returned = Event(), Event(), Event()
     async def blocking(_):
@@ -407,12 +457,16 @@ def test_stop_returns_while_sync_transport_blocks_and_late_return_cannot_commit(
     assert not worker._thread.is_alive()
     assert service.store.outbox(SCOPE, admitted.job_id) is None
     assert service.store.failure_cause(SCOPE, admitted.job_id) == "stopped"
+    assert joined.is_set() == (delayed_watcher_join and worker._supervised)
 
 
 def test_guard_loss_retires_by_maintenance_cas_not_owner_finish(local, monkeypatch):
     service, _, worker = local
-    entered, release, lost = Event(), Event(), Event()
+    entered, release, lost, inject_loss = (Event() for _ in range(4))
+    original_renew = service.store.renew
     def renew(*args, **kwargs):
+        if not inject_loss.is_set():
+            return original_renew(*args, **kwargs)
         lost.set()
         raise LeaseLost("heartbeat ownership lost")
     def forbidden_finish(*args, **kwargs):
@@ -425,8 +479,12 @@ def test_guard_loss_retires_by_maintenance_cas_not_owner_finish(local, monkeypat
     service.transport.effect = block
     admitted = service.submit(event())
     future = worker.run_once()
-    assert entered.wait(1) and lost.wait(1)
-    release.set()
+    try:
+        assert entered.wait(1)
+        inject_loss.set()
+        assert lost.wait(1)
+    finally:
+        release.set()
     assert future.result(2) == "needs_input"
     assert service.store.failure_cause(SCOPE, admitted.job_id) == "lease_lost"
 
@@ -1161,3 +1219,37 @@ def test_optin_guard_without_claim_snapshot_never_retries_unconfirmed_busy(local
         assert guard.lost
         holder.rollback()
     assert not service.transport.calls
+
+
+def test_supervised_stop_does_not_join_blocked_future_callback(tmp_path):
+    from threading import Thread
+    service = Authority().service(BriefStore(tmp_path / "callback-stop.db"))
+    worker = BriefWorker(service, supervised=True)
+    executing, release_execution, callback, release_callback, stopped = (Event() for _ in range(5))
+
+    async def execute():
+        executing.set()
+        while not release_execution.is_set():
+            await asyncio.sleep(0.001)
+        return "idle"
+
+    worker._execute = execute
+    future = worker.run_once()
+    assert executing.wait(1)
+    future.add_done_callback(lambda _: (callback.set(), release_callback.wait(3)))
+    release_execution.set()
+    assert callback.wait(1)
+    stopper = Thread(target=lambda: (worker.stop(timeout=1), stopped.set()), daemon=True)
+    stopper.start()
+    try:
+        # The execution loop is idle: the caller must not spend its budget
+        # joining arbitrary callback code. Production owner retains its custody.
+        assert stopped.wait(.4)
+        assert worker._notifier.is_alive()
+    finally:
+        release_callback.set()
+        stopper.join(2)
+        worker.stop()
+        worker._notifier.join(1)
+        service.close()
+    assert not worker._notifier.is_alive()

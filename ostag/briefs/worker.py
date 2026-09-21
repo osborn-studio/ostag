@@ -31,6 +31,7 @@ All precommit policy callbacks are bounded, current, thread-safe, non-reentrant
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import Future, InvalidStateError
 from dataclasses import replace
 from threading import Condition, Event, Lock, Thread, current_thread
@@ -41,6 +42,7 @@ from ostag.briefs.generation import generate
 from ostag.briefs.models import _invalid
 from ostag.briefs.lifecycle import LifecycleDenied
 from ostag.briefs.service import BriefService, ConfigChanged
+from ostag.briefs.meeting_service import DurableMeetingRequest, MeetingTimeout, register_retention
 from ostag.briefs.store import (
     ClockError, Conflict, LeaseGuard, LeaseLost, RecoveryValidity, StoreBusy, StoreError, WorkerContext,
 )
@@ -108,7 +110,10 @@ class _OwnedModel:
 
 
 class BriefWorker:
-    def __init__(self, service: BriefService, *, heartbeat_interval: float = 10):
+    def __init__(self, service: BriefService, *, heartbeat_interval: float = 10, supervised=False):
+        if type(supervised) is not bool:
+            raise ValueError('supervised must be boolean')
+        self._supervised = supervised
         self.service, self.store = service, service.store
         self.lifecycle = service.lifecycle
         if self.lifecycle is not None:
@@ -130,8 +135,24 @@ class BriefWorker:
         self._loop = asyncio.new_event_loop()
         self._thread = Thread(target=self._thread_main, name="brief-worker", daemon=True)
         self._notifier = Thread(target=self._notify, name="brief-completion", daemon=True)
-        self._notifier.start()
-        self._thread.start()
+        try:
+            self._notifier.start()
+            self._thread.start()
+        except BaseException:
+            # No caller can stop an instance whose constructor never returned.
+            # Reap the already-started completion thread here, while the owner
+            # still retains persistence exclusion. No work has been submitted.
+            self._stop.set()
+            with self._completed:
+                self._completed.notify_all()
+            if self._notifier.ident is not None:
+                self._notifier.join()
+            if self._thread.is_alive():
+                self._loop.call_soon_threadsafe(self._loop.stop)
+                self._thread.join()
+            elif not self._loop.is_closed():
+                self._loop.close()
+            raise
         self._ready.wait(1)
 
     @property
@@ -269,7 +290,15 @@ class BriefWorker:
         def bridge():
             if self._cancellation is not None:
                 self._cancellation.set()
-            self._loop.call_later(min(timeout / 2, 0.1), self._loop.stop)
+            def finish():
+                if self._supervised and asyncio.all_tasks(self._loop):
+                    # The production owner retains the persistence flock until
+                    # this thread actually exits. Do not destroy a suppressed
+                    # transport task and call that remote cancellation.
+                    self._loop.call_later(0.01, finish)
+                else:
+                    self._loop.stop()
+            self._loop.call_later(min(timeout / 2, 0.1), finish)
         if not self._loop.is_closed():
             try:
                 self._loop.call_soon_threadsafe(bridge)
@@ -277,6 +306,9 @@ class BriefWorker:
                 pass
         if current_thread() is not self._thread:
             self._thread.join(timeout)
+        # Future callbacks are arbitrary caller code. The production owner's
+        # finalizer observes notifier liveness and retains its persistence lock;
+        # stop itself must never spend the caller's budget joining callbacks.
         return "local_stopping" if self._thread.is_alive() else "local_stopped"
 
     def _check_operation(self):
@@ -297,6 +329,10 @@ class BriefWorker:
                 if cost.state == "reserved":
                     self.store.release_cost(self.context, cost.reservation_id,
                                             clock=self.service.clock)
+                return RecoveryValidity(False, False, False)
+            if type(request) is DurableMeetingRequest:
+                # Preserve the existing never-started reservation release above,
+                # but grant no collection/model resume even when nothing spent.
                 return RecoveryValidity(False, False, False)
             self.service.authorize_current(request, job.scope, job.destination,
                                            stopped=self._stop.is_set, job_id=job.job_id,
@@ -373,6 +409,12 @@ class BriefWorker:
                             confirmed_job=job, stop_signal=self._stop) as guard:
                 self._check_operation()
                 request, config = self.service.load_job(job)
+                meeting = type(request) is DurableMeetingRequest
+                if meeting:
+                    request.check_budget(config, self.service.clock())
+                    self.service.authorize_current(request, job.scope, job.destination,
+                        stopped=self._stop.is_set, operation=operation)
+                    register_retention(self.service, job)
                 cost = guard.database(self.store.cost_record, job.scope, job.job_id, CALL_ID,
                                       clocked=False)
                 if cost is not None:
@@ -390,10 +432,14 @@ class BriefWorker:
                     if self.service.config != config:
                         cause = "config_changed"
                         raise ConfigChanged()
+                    if meeting:
+                        request.check_budget(config, self.service.clock())
                     try:
                         self.service.authorize_current(request, job.scope, job.destination,
                                                        stopped=stopped, job_id=job.job_id,
                                                        operation=operation)
+                        if meeting:
+                            request.check_budget(config, self.service.clock())
                     except SchemaError:
                         cause = "authorization_denied"
                         raise
@@ -420,9 +466,18 @@ class BriefWorker:
                         lease=job.lease, call_id=CALL_ID,
                         sources=request.source_set(job.scope), coverage=request.coverage,
                         goal=request.goals, config=config, transport=transport,
-                        checkpoint=checkpoint, cancellation=cancellation, clock=self.service.clock)
+                        checkpoint=checkpoint, cancellation=cancellation, clock=self.service.clock,
+                        **(dict(links=request.links, request_deadline=request.deadline(config),
+                                request_input_limit=request.scope.budget.max_model_input_bytes)
+                           if meeting else {}))
                 finally:
                     watcher.cancel()
+                    if self._supervised:
+                        # The production owner retains this loop until all work
+                        # is joined. Legacy bounded-stop loops can already have
+                        # a due stop callback: do not yield before recording the
+                        # stopped job/unknown cost after transport returns.
+                        await asyncio.gather(watcher, return_exceptions=True)
                 if cause != "config_changed":
                     cause = result.status
                 if result.status == "draft_candidate":
@@ -434,6 +489,9 @@ class BriefWorker:
                             job.scope, result.provenance, job.content_hash),
                         validation_version=config.parameters.validation_version,
                         precommit=authorization)
+                    if meeting:
+                        register_retention(self.service, self.store.get(job.scope, job.job_id))
+                        authorization()
                     return "draft_ready"
                 if self._stop.is_set():
                     cause = "stopped"
@@ -441,6 +499,8 @@ class BriefWorker:
                     cause = "lease_lost"
         except ConfigChanged:
             cause = "config_changed"
+        except MeetingTimeout:
+            cause = "timeout"
         except LeaseLost:
             cause = "lease_lost"
         except SchemaError:
@@ -473,6 +533,12 @@ class BriefWorker:
     def _reconcile_result(self, job, cause, operator_cancel):
         box = self.store.outbox(job.scope, job.job_id)
         if box is not None:
+            if box.state == "pending":
+                if json.loads(job.payload_json).get("kind") == "meeting-brief-v1":
+                    # Primary completion may precede retention registration or
+                    # its acknowledgement. Do not advertise exposure readiness;
+                    # authorized status/export can repair registration idempotently.
+                    return "needs_input"
             return "draft_ready" if box.state == "pending" else "cancelled"
         if operator_cancel.is_set():
             # The authenticated cancellation handler may still be waiting

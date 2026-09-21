@@ -526,3 +526,36 @@ def test_changed_journal_mode_is_refused_without_conversion(store):
     with sqlite3.connect(store.path) as db:
         assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert db.execute("SELECT state FROM brief_jobs").fetchone()[0] == "queued"
+
+
+@pytest.mark.parametrize('request_hash', [None, 'a' * 64])
+def test_meeting_kind_requires_scope_binding_even_through_raw_store(store, request_hash):
+    store.enable_manual()
+    payload = {'kind': 'meeting-brief-v1', 'request': {'confirmed_scope_hash': 'a' * 64}}
+    with pytest.raises(SchemaError):
+        admit(store, payload=payload, request_hash=request_hash)
+    assert store.get_by_event(SCOPE, 'key') is None
+
+
+@pytest.mark.parametrize('request_value', [None, [], 'untrusted', 1])
+def test_meeting_scope_binding_rejects_nonobject_request(store, request_value):
+    store.enable_manual()
+    with pytest.raises(SchemaError):
+        admit(store, payload={'kind': 'meeting-brief-v1', 'request': request_value},
+              request_hash='a' * 64, meeting_scope_hash='a' * 64)
+    assert store.get_by_event(SCOPE, 'key') is None
+
+
+def test_raw_meeting_admission_preserves_replay_and_cross_event_tombstone(store):
+    store.enable_manual()
+    args = dict(payload={'kind': 'meeting-brief-v1',
+                         'request': {'confirmed_scope_hash': 'a' * 64, 'origin': at()}},
+                request_hash='a' * 64, meeting_scope_hash='a' * 64)
+    original = admit(store, **args)
+    assert admit(store, **args).job_id == original.job_id
+    with pytest.raises(Conflict):
+        admit(store, 'another-event', **args)
+    with pytest.raises(Conflict):
+        admit(store, **(args | {'payload': {'kind': 'meeting-brief-v1',
+              'request': {'confirmed_scope_hash': 'a' * 64, 'origin': at(30)}}}))
+    assert store.get_by_event(SCOPE, 'another-event') is None

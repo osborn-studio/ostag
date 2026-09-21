@@ -1,0 +1,1521 @@
+{
+  "notice": "SYNTHETIC / anonymized shape reproduction only. No actual private names, IDs or URLs. Not live Feishu evidence or A08 real-data acceptance. Primary table: 48 rows, 44 named (31 completed, 13 known unfinished; 10 named unfinished without owners), and 4 blank title/status/owner rows. Comparison table has 8 explicitly mapped status discrepancies; blank statuses stay unknown.",
+  "left": {
+    "resource_key": {
+      "namespace": "synthetic",
+      "platform": "feishu",
+      "base_id": "synthetic-base",
+      "table_id": "synthetic-table-a"
+    },
+    "records": [
+      {
+        "record_id": "synthetic-a-01",
+        "fields": {
+          "title": "Synthetic task 01",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-02",
+        "fields": {
+          "title": "Synthetic task 02",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-03",
+        "fields": {
+          "title": "Synthetic task 03",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-04",
+        "fields": {
+          "title": "Synthetic task 04",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-05",
+        "fields": {
+          "title": "Synthetic task 05",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-06",
+        "fields": {
+          "title": "Synthetic task 06",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-07",
+        "fields": {
+          "title": "Synthetic task 07",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-08",
+        "fields": {
+          "title": "Synthetic task 08",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-09",
+        "fields": {
+          "title": "Synthetic task 09",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-10",
+        "fields": {
+          "title": "Synthetic task 10",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-11",
+        "fields": {
+          "title": "Synthetic task 11",
+          "status": "open",
+          "owner": [
+            {
+              "id": "synthetic-person-11",
+              "name": "Person 11"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-12",
+        "fields": {
+          "title": "Synthetic task 12",
+          "status": "open",
+          "owner": [
+            {
+              "id": "synthetic-person-12",
+              "name": "Person 12"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-13",
+        "fields": {
+          "title": "Synthetic task 13",
+          "status": "open",
+          "owner": [
+            {
+              "id": "synthetic-person-13",
+              "name": "Person 13"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-14",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-15",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-16",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-17",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-18",
+        "fields": {
+          "title": "Synthetic task 18",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-18",
+              "name": "Person 18"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-19",
+        "fields": {
+          "title": "Synthetic task 19",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-19",
+              "name": "Person 19"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-20",
+        "fields": {
+          "title": "Synthetic task 20",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-20",
+              "name": "Person 20"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-21",
+        "fields": {
+          "title": "Synthetic task 21",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-21",
+              "name": "Person 21"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-22",
+        "fields": {
+          "title": "Synthetic task 22",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-22",
+              "name": "Person 22"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-23",
+        "fields": {
+          "title": "Synthetic task 23",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-23",
+              "name": "Person 23"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-24",
+        "fields": {
+          "title": "Synthetic task 24",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-24",
+              "name": "Person 24"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-25",
+        "fields": {
+          "title": "Synthetic task 25",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-25",
+              "name": "Person 25"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-26",
+        "fields": {
+          "title": "Synthetic task 26",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-26",
+              "name": "Person 26"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-27",
+        "fields": {
+          "title": "Synthetic task 27",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-27",
+              "name": "Person 27"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-28",
+        "fields": {
+          "title": "Synthetic task 28",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-28",
+              "name": "Person 28"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-29",
+        "fields": {
+          "title": "Synthetic task 29",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-29",
+              "name": "Person 29"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-30",
+        "fields": {
+          "title": "Synthetic task 30",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-30",
+              "name": "Person 30"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-31",
+        "fields": {
+          "title": "Synthetic task 31",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-31",
+              "name": "Person 31"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-32",
+        "fields": {
+          "title": "Synthetic task 32",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-32",
+              "name": "Person 32"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-33",
+        "fields": {
+          "title": "Synthetic task 33",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-33",
+              "name": "Person 33"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-34",
+        "fields": {
+          "title": "Synthetic task 34",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-34",
+              "name": "Person 34"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-35",
+        "fields": {
+          "title": "Synthetic task 35",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-35",
+              "name": "Person 35"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-36",
+        "fields": {
+          "title": "Synthetic task 36",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-36",
+              "name": "Person 36"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-37",
+        "fields": {
+          "title": "Synthetic task 37",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-37",
+              "name": "Person 37"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-38",
+        "fields": {
+          "title": "Synthetic task 38",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-38",
+              "name": "Person 38"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-39",
+        "fields": {
+          "title": "Synthetic task 39",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-39",
+              "name": "Person 39"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-40",
+        "fields": {
+          "title": "Synthetic task 40",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-40",
+              "name": "Person 40"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-41",
+        "fields": {
+          "title": "Synthetic task 41",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-41",
+              "name": "Person 41"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-42",
+        "fields": {
+          "title": "Synthetic task 42",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-42",
+              "name": "Person 42"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-43",
+        "fields": {
+          "title": "Synthetic task 43",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-43",
+              "name": "Person 43"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-44",
+        "fields": {
+          "title": "Synthetic task 44",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-44",
+              "name": "Person 44"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-45",
+        "fields": {
+          "title": "Synthetic task 45",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-45",
+              "name": "Person 45"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-46",
+        "fields": {
+          "title": "Synthetic task 46",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-46",
+              "name": "Person 46"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-47",
+        "fields": {
+          "title": "Synthetic task 47",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-47",
+              "name": "Person 47"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-a-48",
+        "fields": {
+          "title": "Synthetic task 48",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-48",
+              "name": "Person 48"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      }
+    ],
+    "observed_at": "2026-09-20T12:00:00Z",
+    "observed_revision": "synthetic-a-v1"
+  },
+  "right": {
+    "resource_key": {
+      "namespace": "synthetic",
+      "platform": "feishu",
+      "base_id": "synthetic-base",
+      "table_id": "synthetic-table-b"
+    },
+    "records": [
+      {
+        "record_id": "synthetic-b-01",
+        "fields": {
+          "title": "Synthetic task 01",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-02",
+        "fields": {
+          "title": "Synthetic task 02",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-03",
+        "fields": {
+          "title": "Synthetic task 03",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-04",
+        "fields": {
+          "title": "Synthetic task 04",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-05",
+        "fields": {
+          "title": "Synthetic task 05",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-06",
+        "fields": {
+          "title": "Synthetic task 06",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-07",
+        "fields": {
+          "title": "Synthetic task 07",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-08",
+        "fields": {
+          "title": "Synthetic task 08",
+          "status": "done",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-09",
+        "fields": {
+          "title": "Synthetic task 09",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-10",
+        "fields": {
+          "title": "Synthetic task 10",
+          "status": "open",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-11",
+        "fields": {
+          "title": "Synthetic task 11",
+          "status": "open",
+          "owner": [
+            {
+              "id": "synthetic-person-11",
+              "name": "Person 11"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-12",
+        "fields": {
+          "title": "Synthetic task 12",
+          "status": "open",
+          "owner": [
+            {
+              "id": "synthetic-person-12",
+              "name": "Person 12"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-13",
+        "fields": {
+          "title": "Synthetic task 13",
+          "status": "open",
+          "owner": [
+            {
+              "id": "synthetic-person-13",
+              "name": "Person 13"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-14",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-15",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-16",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-17",
+        "fields": {
+          "title": "",
+          "status": "",
+          "owner": [],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-18",
+        "fields": {
+          "title": "Synthetic task 18",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-18",
+              "name": "Person 18"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-19",
+        "fields": {
+          "title": "Synthetic task 19",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-19",
+              "name": "Person 19"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-20",
+        "fields": {
+          "title": "Synthetic task 20",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-20",
+              "name": "Person 20"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-21",
+        "fields": {
+          "title": "Synthetic task 21",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-21",
+              "name": "Person 21"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-22",
+        "fields": {
+          "title": "Synthetic task 22",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-22",
+              "name": "Person 22"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-23",
+        "fields": {
+          "title": "Synthetic task 23",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-23",
+              "name": "Person 23"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-24",
+        "fields": {
+          "title": "Synthetic task 24",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-24",
+              "name": "Person 24"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-25",
+        "fields": {
+          "title": "Synthetic task 25",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-25",
+              "name": "Person 25"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-26",
+        "fields": {
+          "title": "Synthetic task 26",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-26",
+              "name": "Person 26"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-27",
+        "fields": {
+          "title": "Synthetic task 27",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-27",
+              "name": "Person 27"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-28",
+        "fields": {
+          "title": "Synthetic task 28",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-28",
+              "name": "Person 28"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-29",
+        "fields": {
+          "title": "Synthetic task 29",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-29",
+              "name": "Person 29"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-30",
+        "fields": {
+          "title": "Synthetic task 30",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-30",
+              "name": "Person 30"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-31",
+        "fields": {
+          "title": "Synthetic task 31",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-31",
+              "name": "Person 31"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-32",
+        "fields": {
+          "title": "Synthetic task 32",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-32",
+              "name": "Person 32"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-33",
+        "fields": {
+          "title": "Synthetic task 33",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-33",
+              "name": "Person 33"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-34",
+        "fields": {
+          "title": "Synthetic task 34",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-34",
+              "name": "Person 34"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-35",
+        "fields": {
+          "title": "Synthetic task 35",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-35",
+              "name": "Person 35"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-36",
+        "fields": {
+          "title": "Synthetic task 36",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-36",
+              "name": "Person 36"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-37",
+        "fields": {
+          "title": "Synthetic task 37",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-37",
+              "name": "Person 37"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-38",
+        "fields": {
+          "title": "Synthetic task 38",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-38",
+              "name": "Person 38"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-39",
+        "fields": {
+          "title": "Synthetic task 39",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-39",
+              "name": "Person 39"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-40",
+        "fields": {
+          "title": "Synthetic task 40",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-40",
+              "name": "Person 40"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-41",
+        "fields": {
+          "title": "Synthetic task 41",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-41",
+              "name": "Person 41"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-42",
+        "fields": {
+          "title": "Synthetic task 42",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-42",
+              "name": "Person 42"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-43",
+        "fields": {
+          "title": "Synthetic task 43",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-43",
+              "name": "Person 43"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-44",
+        "fields": {
+          "title": "Synthetic task 44",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-44",
+              "name": "Person 44"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-45",
+        "fields": {
+          "title": "Synthetic task 45",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-45",
+              "name": "Person 45"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-46",
+        "fields": {
+          "title": "Synthetic task 46",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-46",
+              "name": "Person 46"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-47",
+        "fields": {
+          "title": "Synthetic task 47",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-47",
+              "name": "Person 47"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      },
+      {
+        "record_id": "synthetic-b-48",
+        "fields": {
+          "title": "Synthetic task 48",
+          "status": "done",
+          "owner": [
+            {
+              "id": "synthetic-person-48",
+              "name": "Person 48"
+            }
+          ],
+          "manual_note": "SYNTHETIC manual annotation retained verbatim.",
+          "recorded_at": "2026-09-01T09:00:00+00:00"
+        }
+      }
+    ],
+    "observed_at": "2026-09-20T12:00:00Z",
+    "observed_revision": "synthetic-b-v1"
+  },
+  "record_mapping": [
+    [
+      "synthetic-a-01",
+      "synthetic-b-01"
+    ],
+    [
+      "synthetic-a-02",
+      "synthetic-b-02"
+    ],
+    [
+      "synthetic-a-03",
+      "synthetic-b-03"
+    ],
+    [
+      "synthetic-a-04",
+      "synthetic-b-04"
+    ],
+    [
+      "synthetic-a-05",
+      "synthetic-b-05"
+    ],
+    [
+      "synthetic-a-06",
+      "synthetic-b-06"
+    ],
+    [
+      "synthetic-a-07",
+      "synthetic-b-07"
+    ],
+    [
+      "synthetic-a-08",
+      "synthetic-b-08"
+    ],
+    [
+      "synthetic-a-09",
+      "synthetic-b-09"
+    ],
+    [
+      "synthetic-a-10",
+      "synthetic-b-10"
+    ],
+    [
+      "synthetic-a-11",
+      "synthetic-b-11"
+    ],
+    [
+      "synthetic-a-12",
+      "synthetic-b-12"
+    ],
+    [
+      "synthetic-a-13",
+      "synthetic-b-13"
+    ],
+    [
+      "synthetic-a-14",
+      "synthetic-b-14"
+    ],
+    [
+      "synthetic-a-15",
+      "synthetic-b-15"
+    ],
+    [
+      "synthetic-a-16",
+      "synthetic-b-16"
+    ],
+    [
+      "synthetic-a-17",
+      "synthetic-b-17"
+    ],
+    [
+      "synthetic-a-18",
+      "synthetic-b-18"
+    ],
+    [
+      "synthetic-a-19",
+      "synthetic-b-19"
+    ],
+    [
+      "synthetic-a-20",
+      "synthetic-b-20"
+    ],
+    [
+      "synthetic-a-21",
+      "synthetic-b-21"
+    ],
+    [
+      "synthetic-a-22",
+      "synthetic-b-22"
+    ],
+    [
+      "synthetic-a-23",
+      "synthetic-b-23"
+    ],
+    [
+      "synthetic-a-24",
+      "synthetic-b-24"
+    ],
+    [
+      "synthetic-a-25",
+      "synthetic-b-25"
+    ],
+    [
+      "synthetic-a-26",
+      "synthetic-b-26"
+    ],
+    [
+      "synthetic-a-27",
+      "synthetic-b-27"
+    ],
+    [
+      "synthetic-a-28",
+      "synthetic-b-28"
+    ],
+    [
+      "synthetic-a-29",
+      "synthetic-b-29"
+    ],
+    [
+      "synthetic-a-30",
+      "synthetic-b-30"
+    ],
+    [
+      "synthetic-a-31",
+      "synthetic-b-31"
+    ],
+    [
+      "synthetic-a-32",
+      "synthetic-b-32"
+    ],
+    [
+      "synthetic-a-33",
+      "synthetic-b-33"
+    ],
+    [
+      "synthetic-a-34",
+      "synthetic-b-34"
+    ],
+    [
+      "synthetic-a-35",
+      "synthetic-b-35"
+    ],
+    [
+      "synthetic-a-36",
+      "synthetic-b-36"
+    ],
+    [
+      "synthetic-a-37",
+      "synthetic-b-37"
+    ],
+    [
+      "synthetic-a-38",
+      "synthetic-b-38"
+    ],
+    [
+      "synthetic-a-39",
+      "synthetic-b-39"
+    ],
+    [
+      "synthetic-a-40",
+      "synthetic-b-40"
+    ],
+    [
+      "synthetic-a-41",
+      "synthetic-b-41"
+    ],
+    [
+      "synthetic-a-42",
+      "synthetic-b-42"
+    ],
+    [
+      "synthetic-a-43",
+      "synthetic-b-43"
+    ],
+    [
+      "synthetic-a-44",
+      "synthetic-b-44"
+    ],
+    [
+      "synthetic-a-45",
+      "synthetic-b-45"
+    ],
+    [
+      "synthetic-a-46",
+      "synthetic-b-46"
+    ],
+    [
+      "synthetic-a-47",
+      "synthetic-b-47"
+    ],
+    [
+      "synthetic-a-48",
+      "synthetic-b-48"
+    ]
+  ]
+}

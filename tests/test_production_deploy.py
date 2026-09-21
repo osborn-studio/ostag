@@ -25,7 +25,7 @@ def test_production_workflow_runs_only_after_main_ci_or_manual_dispatch() -> Non
         "types": ["completed"],
     }
     assert "workflow_dispatch" in workflow["on"]
-    assert workflow["permissions"] == {"checks": "read", "contents": "read"}
+    assert workflow["permissions"] == {"actions": "read", "contents": "read"}
     assert workflow["concurrency"] == {
         "group": "ostag-production",
         "cancel-in-progress": "false",
@@ -40,7 +40,8 @@ def test_production_workflow_pins_actions_and_keeps_credentials_in_environment()
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert uses == [
-        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     ]
     assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", use) for use in uses)
     assert "secrets.PRODUCTION_SSH_PRIVATE_KEY" in text
@@ -57,7 +58,10 @@ def test_production_workflow_is_commit_bound_and_health_checked() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert '[[ "$candidate" == "$main_sha" ]]' in text
-    assert '.name == "release-check" and .conclusion == "success"' in text
+    assert '/actions/workflows/ostag-ci.yml/runs?head_sha=$candidate&branch=main&event=push' in text
+    assert '.head_sha == $sha and .head_branch == "main" and .event == "push"' in text
+    assert '| max_by(.id)' in text
+    assert '.status == "completed" and .conclusion == "success"' in text
     assert "git archive --format=tar" in text
     assert "sha256sum" in text
     assert '"$PRODUCTION_URL/healthz"' in text

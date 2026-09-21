@@ -180,6 +180,13 @@ class BriefLifecycle:
                     self._valid = True
                     self._admission, self._maintenance = admission, maintenance
                     self._deadline = sampled_at + _AUTHORITY_LIFETIME
+                elif admission == 'on' and getattr(owner, '_production', None) is not None:
+                    # Production on observations never acknowledge drain. An
+                    # unchanged renewal may use the ORIGINAL unexpired authority
+                    # until ACK; otherwise periodic status IO randomly rejects
+                    # nested intake/model/card operations. Changed/off controls
+                    # still seal before observation and invalidate old receipts.
+                    self._publishing = False
             return self._epoch, self._snapshot_locked()
 
     def _file_ack(self, owner, epoch, sampled_at):

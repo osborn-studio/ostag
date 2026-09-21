@@ -8,8 +8,10 @@ on:
 jobs:
   release-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       OSTAG_SKIP_OSSTACK_CROSS_REPO_SMOKE: "1"
+      PYTEST_ADDOPTS: "-o faulthandler_timeout=60"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -17,10 +19,39 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install system tools
-        run: sudo apt-get update && sudo apt-get install -y ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep pandoc
       - name: Install dependencies
         run: uv sync --all-extras --locked
-      - name: Run release check
-        run: scripts/release_check.sh
-      - name: Run deployment and live-evidence gates
+      - name: Run release, deployment and live-evidence gates
         run: scripts/ci_release_gates.sh
+
+  image-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build exact-source native production image
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git archive HEAD | docker build --platform linux/amd64 \
+            -f deploy/work-monitor/Dockerfile \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "ostag-image:$GITHUB_SHA" -
+      - name: Verify cold boot and disabled Brief control
+        run: |
+          python3 scripts/verify_work_monitor_image.py \
+            --image "ostag-image:$GITHUB_SHA" --source-sha "$GITHUB_SHA" \
+            --output image-verification
+      - name: Preserve image verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, immutable upstream commit
+        with:
+          name: work-monitor-image-verification
+          path: image-verification/
+          if-no-files-found: warn

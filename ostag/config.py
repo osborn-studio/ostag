@@ -282,8 +282,10 @@ class Settings:
             value = getattr(self, field)
             if type(value) is not bool:
                 raise ValueError(f"{env} must be a boolean")
-            if value:
+            if value and field not in ('brief_enabled', 'brief_meetings_enabled'):
                 raise ValueError(f"{env} is not ready: trusted Brief runtime is unsupported")
+        if self.brief_meetings_enabled and not self.brief_enabled:
+            raise ValueError("OSTAG_BRIEF_MEETINGS_ENABLED is not ready without BRIEF_ENABLED")
         if not isinstance(self.brief_status_dir, Path) or not isinstance(
             self.brief_control_path, Path
         ):

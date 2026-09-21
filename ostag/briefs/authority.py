@@ -2,7 +2,9 @@
 
 Only application code with independently established identity/ACL evidence may
 publish. Python types, wire parsing, event.raw and model content prove no rights.
-There is no loader, environment switch, route, worker or background refresh.
+Refresh accepts only a trusted application callable, never event.raw or model
+data. There is no credential loader, environment switch, route, scheduler or
+background refresh; loader latency and cancellation belong to the caller.
 
 Snapshot collections accept bounded builtin lists/tuples and freeze to tuples;
 permissions are (Principal, level), destinations are (RequesterContext,
@@ -17,6 +19,7 @@ handed to a network. Successful checks are never durable authorization.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -78,6 +81,8 @@ class AuthoritySnapshot:
     destinations: tuple[tuple[RequesterContext, PrivateDestination], ...] = ()
     grants: tuple[PilotGrant, ...] = ()
     sources: tuple[SourceSnapshot, ...] = ()
+    # Explicit trusted host publication, never populated from event/raw/model JSON.
+    meetings: tuple = ()
 
     def __post_init__(self):
         try:
@@ -90,6 +95,16 @@ class AuthoritySnapshot:
             raise _denied()
         if _utc(self.observed_at, "observed") >= _utc(self.fresh_until, "expiry"):
             raise _denied()
+        from ostag.briefs.meeting_service import DurableMeetingRequest
+        meetings = tuple(DurableMeetingRequest.from_dict(_exact(m, DurableMeetingRequest).to_dict())
+                         for m in _rows(self.meetings))
+        if sum(len(m.evidence_json.encode()) + len(m.chat_raw_json.encode())
+               for m in meetings) > 4 * 1024 * 1024:
+            raise _denied()
+        if len({m.scope.content_hash for m in meetings}) != len(meetings):
+            raise _denied()
+        meeting_sources = {(RequesterContext(m.namespace, m.scope.request.requesting_principal),
+                            s.source_id): s for m in meetings for s in m.sources}
         permissions, destinations, grants, sources = [], [], [], []
         for principal, level in _pairs(self.permissions):
             principal = _principal(principal)
@@ -112,7 +127,10 @@ class AuthoritySnapshot:
             source = answer.source
             if (scope.namespace != source.namespace
                     or source.allowed_audience != (scope.principal,)
-                    or hashlib.sha256(source.excerpt.encode()).hexdigest() != source.content_sha256
+                    or (source.source_kind == "manual" and
+                        hashlib.sha256(source.excerpt.encode()).hexdigest() != source.content_sha256)
+                    or (source.source_kind != "manual" and
+                        meeting_sources.get((scope, source.source_id)) != source)
                     or _utc(source.observed_at, "observed") >= _utc(answer.fresh_until, "expiry")):
                 raise _denied()
             sources.append(answer)
@@ -139,7 +157,7 @@ class AuthoritySnapshot:
                     or grant.allowed_audience != s.allowed_audience):
                 raise _denied()
         for name, value in (("permissions", permissions), ("destinations", destinations),
-                            ("grants", grants), ("sources", sources)):
+                            ("grants", grants), ("sources", sources), ("meetings", meetings)):
             object.__setattr__(self, name, tuple(value))
 
 
@@ -170,7 +188,7 @@ class TrustedBriefAuthority:
     clock and monotonic are trusted local clock functions, sampled outside the
     mutex; neither may load policy. max_ttl_seconds is a strict int in [1, 300]
     (default 60). Invalid clocks permanently latch this instance closed.
-    publish failures and invalidate retain the accepted revision high-water.
+    publish/refresh failures and invalidate retain the accepted revision high-water.
     """
     def __init__(self, *, clock=utc_now, monotonic=system_monotonic, max_ttl_seconds=60):
         if (type(max_ttl_seconds) is not int or not 1 <= max_ttl_seconds <= 300
@@ -254,12 +272,44 @@ class TrustedBriefAuthority:
         """
         return self._now().isoformat().replace("+00:00", "Z")
 
-    def publish(self, snapshot: AuthoritySnapshot):
-        """Replace the complete mirror. Invalid input never falls back."""
+    def _begin_publication(self):
         with self._lock:
             self._state = None
             self._epoch += 1
-            epoch = self._epoch
+            return self._epoch
+
+    def publish(self, snapshot: AuthoritySnapshot):
+        """Replace the complete mirror. Invalid input never falls back."""
+        self._commit_snapshot(snapshot, self._begin_publication())
+
+    def refresh(self, loader: Callable[[], AuthoritySnapshot] | None = None):
+        """Revoke first, then synchronously load and publish trusted policy.
+
+        loader is trusted application code with independently established
+        identity/ACL evidence, not event.raw or model data. It takes no arguments
+        and must return an exact AuthoritySnapshot. This API issues no rights.
+        Loading, parsing and clock sampling run outside the authority mutex;
+        caller code owns loader latency, timeouts and cancellation. Exceptions,
+        including cancellation, become a fixed private denial.
+
+        Any newer mutation (including a reentrant one or a failed attempt)
+        supersedes this refresh. Failure never restores old state or clears a
+        newer success. Freshness and accepted revision high-water do not reset.
+        The return value conveys no durable authorization or reconciliation.
+        """
+        epoch = self._begin_publication()
+        try:
+            if not callable(loader):
+                raise _denied()
+            snapshot = loader()
+            self._commit_snapshot(snapshot, epoch)
+        except BaseException:
+            # Revocation already happened at entry. Cleanup here could revoke a
+            # later successful mutation; even cancellation must not do that.
+            raise _denied() from None
+
+    def _commit_snapshot(self, snapshot, epoch):
+        """Shared validation and commit; epoch was assigned before caller work."""
         try:
             snapshot = replace(_exact(snapshot, AuthoritySnapshot))
             observed = _utc(snapshot.observed_at, "observed")
@@ -337,6 +387,18 @@ class TrustedBriefAuthority:
         state, _ = self._read()
         return deepcopy(state.destinations.get(scope))
 
+    def meeting(self, scope, request):
+        """Check current exact provenance, scope/mapping pins and origin ownership.
+
+        A trusted publisher must revalidate selected mapping/config/ACL evidence
+        on each refresh. Omitting this request immediately removes its authority.
+        """
+        scope = _lookup_key(scope, scope=True)
+        state, _ = self._read()
+        if (scope != RequesterContext(request.namespace, request.scope.request.requesting_principal)
+                or not any(m.to_dict() == request.to_dict() for m in state.snapshot.meetings)):
+            raise _denied()
+
     def _bounds(self, observed, expiry):
         # Final fencing includes every consulted source/grant even if a final
         # stopped()/clock callback consumes its remaining lifetime. Parsing is
@@ -356,7 +418,8 @@ class TrustedBriefAuthority:
                     or actual.__func__ is not method):
                 raise _denied()
 
-    def create_service(self, *, store, transport, config, retention=None, max_intake=8):
+    def create_service(self, *, store, transport, config, retention=None, max_intake=8,
+                       lifecycle=None):
         """Explicit initialized store + audited read-only transport/config only.
 
         No path creation, lifecycle enablement, routing or retention ownership.
@@ -369,4 +432,4 @@ class TrustedBriefAuthority:
         return BriefService(store=store, transport=transport, config=config,
             settings=self.settings, grants=self.grants, sources=self.sources,
             destination=self.destination, clock=self.clock, retention=retention,
-            max_intake=max_intake, authority=self)
+            max_intake=max_intake, authority=self, lifecycle=lifecycle)

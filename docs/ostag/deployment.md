@@ -358,7 +358,7 @@ an incompatible migration requires it.
 The production workflow in `.github/workflows/deploy-production.yml` runs only
 after `OS Tag CI` succeeds on `main`, or by an explicit manual dispatch of the
 current `main` commit. It refuses malformed SHAs, stale commits, and manual
-deployments without a successful `release-check` for the exact commit.
+deployments unless the latest main-push run of the complete `OS Tag CI` workflow succeeds for the exact commit.
 
 Configure the GitHub `production` environment with these values:
 
@@ -408,6 +408,77 @@ Run a non-mutating server check at any time:
 ```bash
 /usr/local/sbin/ostag-deploy-work-monitor preflight
 ```
+
+### Host deployment mutex (D02 prerequisite, repository support only)
+
+The repository deploy script takes one exclusive, nonblocking Python 3
+`fcntl.flock` lock at `/run/ostag-work-monitor-deploy.lock`. Valid `preflight`
+and `deploy` calls use the same host-wide lock, independent of release SHA,
+Compose project, and `OSTAG_RELEASE_ROOT`. Argument count, command, SHA and
+checksum syntax are checked before locking or runtime access. Acquisition
+precedes the first Docker call and production environment/database reads.
+The lock covers the whole preflight or deployment, including archive checks,
+backup, image switch, health/image verification, every receipt, cleanup, and
+internal rollback. Rollback runs under the original lock without reacquiring it.
+
+A concurrent call exits immediately with status 1 and exactly
+`production deploy refused: deployment lock is busy`, before Docker, curl,
+database access, or rollback. Unsafe/unavailable lock paths also fail closed
+with status 1 and the fixed message
+`production deploy refused: deployment lock is unavailable or unsafe`;
+neither error includes paths, exception details, or environment values.
+
+Python acquires the lock once, then replaces itself with the Bash continuation
+in the same parent PID, carrying the open descriptor. There is no skip-lock
+argument or environment marker. The kernel releases ownership when the last
+inherited descriptor closes on success, failure, or process exit. Runtime
+children inherit the descriptor: killing only the parent does not unlock while
+an in-flight child still holds it. A leftover file is normal and reusable;
+never unlink, replace, or truncate it to clear a lock, since that can create
+independent inode owners. This is an advisory lock for cooperating invocations
+of the updated script; direct Docker commands and older installed scripts do
+not participate.
+
+Lock path components must be real directories owned by root or the effective
+deploy UID, with no group/other write permission. Root-owned sticky ancestors
+(such as `/tmp`) are allowed only above a protected immediate parent. The
+script walks directory descriptors without following symlinks. The lock itself
+must be a regular file owned by the effective UID, exactly mode `0600`, with
+one link; symlinks, hardlinks, special files, and permissive files are refused.
+The default `/run` location assumes the existing trusted root host invocation.
+
+`OSTAG_DEPLOY_LOCK_PATH` is an explicit absolute path override solely for trusted
+isolated tests or host administration. Tests must choose a private local temp
+directory and share that one path across all competing invocations, even when
+their release roots differ. An empty or unsafe override fails; it never disables
+locking. The launcher, its environment/PATH, script, and lock directory owners
+are trusted: allowing an untrusted caller to choose a different safe lock path
+would defeat coordination. Do not accept this override from release artifacts,
+SSH command arguments, or untrusted environment forwarding; production callers
+must share the default identity. No wrapper or Actions changes are part of this
+prerequisite.
+
+This is **repository support only**, not evidence of a production installation
+or a completed D02. Trusted host installation of the reviewed script and the
+corresponding `PRODUCTION_DEPLOY_SCRIPT_SHA256` hash update remain future gates.
+The full A11 drain, multistore backup, and rollback rehearsal/evidence also remain
+future gates. The mutex does not expand the existing single-SQLite backup schema
+or implement that procedure. Nothing in this slice installs, deploys, changes
+production credentials/control flags, or marks D02 done.
+
+Local verification uses subprocesses and real kernel locks with fake Docker,
+curl, and local archives; it never opens a production database. Run:
+
+```bash
+python -m pytest -q tests/test_production_deploy.py tests/test_production_deploy_lock.py
+ruff check tests/test_production_deploy.py tests/test_production_deploy_lock.py
+bash -n scripts/deploy_work_monitor_release.sh
+```
+
+Contention, unsafe-path, malformed-input, and process-exit tests run on macOS
+as well. Full deploy/receipt/rollback tests require Linux because the existing
+runtime uses GNU `stat -c` and Bash `mapfile`; their macOS skips are not Linux
+deployment evidence. Run those tests on real Linux before advancing the gate.
 
 Rotate the GitHub deployment identity independently of developer SSH keys.
 Install the replacement public key first, update the environment secret, prove
@@ -536,3 +607,175 @@ docker compose -f deploy/work-monitor/docker-compose.yml down  # volume retained
 Run `scripts/work_monitor_container_smoke.sh` to build, verify Feishu/Crypto
 imports, health, SQLite write, restart, and persistence. It retains its unique
 test volume unless `OSTAG_CONTAINER_SMOKE_CLEANUP_VOLUME=1` is explicitly set.
+
+### Native production-image CI
+
+The `image-smoke` job is part of **OS Tag CI**, so its failure prevents that
+workflow from succeeding and triggering automatic production deployment. Manual redeploy
+also requires the latest matching main-push run of that complete workflow to have
+succeeded; an older success, PR-only run or isolated release-check is insufficient. It builds
+`deploy/work-monitor/Dockerfile` from the exact checkout's Git archive on the
+native Linux/amd64 runner, without repository credentials in the build context.
+
+`scripts/verify_work_monitor_image.py` performs one cold container start with no
+network, host mounts or published ports. It verifies UID10001, all six Brief flags
+OFF, running disabled status, no Brief business databases, exact imported source
+hashes, a fresh current-boot drain acknowledgement and rejection of a wrong-boot
+control. It saves a receipt and container logs as the workflow artifact
+`work-monitor-image-verification`. A health HTTP200 alone does not pass; the
+container is not restarted to turn a failed cold boot into a passing result.
+
+The verifier requires a native Linux/amd64 daemon. Local ARM-to-amd64 emulation
+can hit the status subprocess's existing startup deadline; that failure must be
+recorded rather than weakening the production timeout or silently accepting a
+warm restart. This image check does not enable Brief, prove provider permissions,
+install host tools, exercise multistore rollback or replace D02/live acceptance.
+
+The production workflow rebuilds its image after CI. It therefore runs the same
+isolated native image verifier against that exact rebuilt image and release SHA
+before packaging or configuring SSH. Automatic and manual deployments both stop
+on verification failure; evidence is retained as a GitHub Actions artifact. This
+closes the gap where mutable base images or dependency resolution could make the
+image uploaded to production differ from the earlier CI-tested image.
+## Explicit Brief host composition and production observation v3
+
+The A11 lifespan integration supports an explicit authenticated application API;
+it does not install a host preflight, activate a provider, or change production
+pins. All six business flags still default off. Environment flags alone cannot
+supply a trusted issuer or construct a functioning business runtime.
+
+Host application code constructs `TrustedBriefComposition` from independently
+verified local adapters and passes it to
+`ostag.work_monitor.server.create_app(settings=..., brief_composition=...)`.
+Required fields are `directory`, `image_sha256`, `authority`, `model_transport`,
+`generation`, `authenticate`, `resolve_binding`, `card_transport`, `owners`, and
+`policy`. `inventory` pins the current schemas and capacities. `initialize_new`
+defaults false; explicitly setting it true permits a wholly absent five-store set,
+under the acquired persistence lock, in a precreated mode-0700 directory. It never
+repairs partial sets or migrates existing databases. Business files must be owned
+by the process UID, regular, single-link and mode 0600. Symlink paths, aliases,
+WAL/SHM/journal recovery and incompatible schemas fail closed. Do not copy a live
+store or clear a lock file to make startup succeed.
+
+Orphan recovery sidecars block even a wholly absent database set, before any file
+reservation or schema initialization. Store permissions must be exactly 0600;
+read-only or executable database files are not accepted as ready. Inventory
+capacities and budgets are validated before construction.
+
+During the running FastAPI lifespan, the verified adapter uses:
+
+```python
+application = app.state.brief_application
+await application.submit(verified_context, normalized_manual_event)
+await application.submit_meeting(verified_context, event_id, durable_meeting_request)
+await application.status(verified_context, job_id)
+await application.private_export(verified_context, job_id)
+await application.cancel(verified_context, job_id)
+```
+
+`verified_context` is opaque to this module. The supplied `authenticate` callback
+must derive a current `RequesterContext` from an already authenticated adapter
+session; no fabricated default user is provided. Manual event principal/namespace
+must match it. Meeting requests must be present in the independent current
+`TrustedBriefAuthority`. There is no public HTTP grant, control or bearer endpoint.
+The module-level default server supplies no host composition and therefore stays
+closed if BRIEF is enabled. Deploying a reviewed provider issuer and connecting its
+verified ingress are still explicit outstanding work, not implied by this API.
+
+Trusted host/operator code controls the live owner, with fresh boot and identities:
+
+```python
+owner = app.state.brief_owner
+await owner.request_control(
+    boot_id=owner.status.boot_id, generation=1, admission="on",
+    **owner.control_identity(),
+)
+# Later: a strictly higher generation closes admission immediately.
+await owner.request_control(
+    boot_id=owner.status.boot_id, generation=2, admission="off",
+    **owner.control_identity(),
+)
+```
+
+This API is not exposed to application callers. The protected control parent must
+be mode 0700. It atomically writes control **version 2**, binding boot, generation,
+admission, maintenance, image digest, config digest and persistence identity. It
+serializes with publication. Direct external file replacements are still checked
+but a replacement during publication may fail Brief closed. New boots reject old
+controls. Submitted generations are reserved immediately, so even two writes before
+the next sample cannot reuse a generation. The existing 250ms sampling, 500ms status IO budget, 5s child bootstrap
+budget and 750ms authority lease are unchanged. On an unchanged production ON
+renewal, operations can use only the original unexpired authority until ACK;
+OFF and changed controls seal admission before observation.
+
+Production **status version 3** (`brief-production/3`) includes the same local
+custody observation plus image/config/persistence and reconciliation identities.
+`drain_ack` requires current OFF control, zero local custody, no uncertainty and a
+fresh successful five-store reconciliation under exclusion. A pending queue of
+unclaimed registered jobs is allowed: it has no active lease/remote effect and is
+preserved for an authorized restart. Reconciliation never uses a caller-provided
+ready boolean. Persisted job generation configuration must match the host's pinned
+configuration; mismatches quarantine startup. During active work the durable counts refer to the last completed
+scan; only `production.reconciled=true` marks current all-store drain evidence.
+Legacy attached **v2 continues to have `drain_ack=false`**; disabled v1 retains its
+existing compatibility contract.
+
+`validate_production_drain(owner, observation, boot_id=..., generation=...,
+image_sha256=..., config_sha256=..., persistence=...)` requires the current live
+owner observation sealed from the acknowledged IPC result, matching
+identities/generation and freshness. Mutated, copied or stale JSON
+cannot satisfy it. A future host preflight needs a live challenge to this owner;
+reading saved `status.json` is insufficient. This protocol alone does not install
+D02's preflight, authorize activation, or establish global atomicity against
+noncooperating database writers.
+
+For read-only maintenance, construct the same-image trusted composition with
+`maintenance=True, initialize_new=False`; no service/worker/card runner is
+constructed. Request OFF with `maintenance=True`. All five business stores remain
+unchanged. Missing/incompatible schemas and unresolved effects remain blockers.
+This is not a downgrade migration. Older images that cannot read these schemas
+must not open them; supported multistore restore/repinning and downgrade procedures
+still require an explicit reviewed rehearsal. Unknown remote effects forbid drain
+until independent verified reconciliation exists; do not clear them or kill
+unrelated processes.
+
+Runnable synthetic server-lifespan and fixed regression commands (no credentials,
+external collection, model service or external messages):
+
+```bash
+.venv/bin/python -m pytest -q tests/test_brief_production_owner.py tests/test_brief_startup_reconciliation.py
+.venv/bin/python -m pytest -q tests/test_brief_*.py tests/test_meeting_*.py
+pandoc --from=commonmark --to=html docs/ostag/architecture.md --output=/tmp/ostag-architecture.html
+pandoc --from=commonmark --to=html docs/ostag/deployment.md --output=/tmp/ostag-deployment.html
+```
+
+The current meeting suites still require installed Pandoc; keep those parser
+assertions and the real loopback TCP/TLS revocation tests. Required macOS and
+isolated Linux evidence, the actual final Claude CLI Opus5 audit, and all original
+A11/D02/provider/live gates must be recorded separately. Synthetic passes never
+close the frozen 31+9 scope or all120AC.
+
+
+Production Brief construction has a separate bounded allowance of five seconds
+for setup plus `0.5 + 2 * sum(store_scan_budget_ms) / 1000` seconds for the two
+five-store reconciliation passes (at most 55.5 seconds total with the supported
+per-store limits). This does not change the status child's five-second bootstrap,
+500 ms IPC deadline, or 750 ms authority lease. Invalid composition types degrade
+Brief without preventing Monitor startup. A v3 drain consumer must challenge the
+current owner through `await owner.challenge_drain(...)`: a new pending reconciliation
+immediately invalidates the preceding proof, and the 750 ms freshness limit is
+measured from scan completion as well as status publication, without adding the
+two windows together. Detached JSON remains insufficient.
+
+
+Business construction now runs as an application-owned startup task after the
+bounded status-child handshake; the Monitor lifespan does not await its database
+scan. Brief intake stays denied until startup completes. Shutdown seals the task
+and retains the business future and persistence lock until the actual constructor
+and finalizer return, including a worker created concurrently with shutdown.
+Trusted host consumers should use `await owner.challenge_drain(...)`: it samples
+and validates the current observation under the control/publication lock. False
+while a scan is pending is retryable observation, not permission to bypass it.
+This is a point-in-time challenge, not a lease for a later mutation or saved JSON.
+The current paused implementation performs periodic two-pass reconciliation;
+its IO cost and remaining host preflight/backup integration are not live-accepted.

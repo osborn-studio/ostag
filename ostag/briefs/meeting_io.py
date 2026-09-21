@@ -36,10 +36,12 @@ def decode_json(raw):
         return json.loads(raw, object_pairs_hook=_object,
                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
     except (ValueError, UnicodeError, RecursionError):
-        raise CollectionError("invalid_schema") from None
+        pass
+    # Raise outside the handler: even __context__ must not retain source bodies.
+    raise CollectionError("invalid_schema")
 
 
-def run_process(argv, *, deadline, clock=time.monotonic):
+def _run_process(argv, *, deadline, clock=time.monotonic):
     """Stream both pipes with a shared cap; always kill the owned session and reap.
 
     Also handles a leader that exits while descendants retain its pipe handles.
@@ -93,6 +95,17 @@ def run_process(argv, *, deadline, clock=time.monotonic):
             proc.stderr.close()
 
 
+def run_process(argv, *, deadline, clock=time.monotonic):
+    category = "transport_failed"
+    try:
+        return _run_process(argv, deadline=deadline, clock=clock)
+    except CollectionError as exc:
+        category = exc.category
+    except Exception:
+        pass
+    raise CollectionError(category)
+
+
 class LocalTransport:
     def __init__(self, *, clock=time.monotonic, runner=run_process):
         self.clock, self.runner, self.accepted_bytes = clock, runner, 0
@@ -125,3 +138,93 @@ class LocalTransport:
             raise CollectionError("total_response_limit")
         self.accepted_bytes += size
         return decode_json(raw)
+
+
+def _directory(path, *, create=False):
+    """Walk pinned directory FDs, never symlinks or '..'. Caller closes returned fd."""
+    from pathlib import Path
+    parts = Path(path).parts
+    if not parts or ".." in parts:
+        raise CollectionError("unsafe_path")
+    fd = os.open("/" if os.path.isabs(path) else ".", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for index, part in enumerate(parts):
+            if part in ("/", "."):
+                continue
+            if create and index == len(parts) - 1:
+                os.mkdir(part, mode=0o700, dir_fd=fd)  # Exclusive destination; never replace.
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def read_private_json(path):
+    """Bounded regular input; rejects symlinks in every path component and FIFOs."""
+    from pathlib import Path
+    import stat
+    failed = False
+    try:
+        p = Path(path)
+        if ".." in p.parts:
+            raise CollectionError("unsafe_path")
+        parent = _directory(str(p.parent))
+        try:
+            fd = os.open(p.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            with os.fdopen(fd, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > RESPONSE_BYTES:
+                    raise CollectionError("invalid_input_file")
+                raw = stream.read(RESPONSE_BYTES + 1)
+            if len(raw) > RESPONSE_BYTES:
+                raise CollectionError("invalid_input_file")
+            return decode_json(raw)
+        finally:
+            os.close(parent)
+    except Exception:
+        failed = True
+    if failed:
+        raise CollectionError("input_file_denied")
+
+
+def write_private_package(destination, markdown, manifest):
+    """Two bounded atomic no-replace files in a NEW private directory.
+
+    Directory creation is exclusive; failures may leave an empty/partial private
+    directory. Never overwrite or clean up a caller's previous artifact.
+    """
+    import secrets
+    import stat
+    failed = False
+    try:
+        payloads = {"meeting.md": markdown.encode("utf-8"), "manifest.json": manifest.encode("utf-8")}
+        if any(len(body) > RESPONSE_BYTES for body in payloads.values()):
+            raise CollectionError("output_limit")
+        fd = _directory(str(destination), create=True)
+        try:
+            info = os.fstat(fd)
+            if stat.S_IMODE(info.st_mode) != 0o700 or info.st_uid != os.getuid():
+                raise CollectionError("unsafe_output_directory")
+            for name, body in payloads.items():
+                temp = ".meeting-" + secrets.token_hex(12)
+                out = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                              0o600, dir_fd=fd)
+                try:
+                    with os.fdopen(out, "wb") as stream:
+                        os.fchmod(stream.fileno(), 0o600)
+                        stream.write(body)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.link(temp, name, src_dir_fd=fd, dst_dir_fd=fd, follow_symlinks=False)
+                finally:
+                    os.unlink(temp, dir_fd=fd)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except Exception:
+        failed = True
+    if failed:
+        raise CollectionError("output_file_denied")

@@ -78,11 +78,15 @@ operations; the CLI exposes stable human/agent operations. Details:
 
 ## Quick start
 
+Development and release checks require ripgrep, Pandoc, the SQLite and GitHub
+CLIs, and Docker with Compose. Pandoc is required for the meeting Markdown
+integration checks; missing it fails verification instead of skipping those checks.
+
 ```bash
 cp .env.example .env
 uv sync --extra dev
 python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
-uv run pytest                 # 217 tests
+uv run pytest
 scripts/release_check.sh      # full release gate
 ```
 

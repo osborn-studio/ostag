@@ -1318,3 +1318,28 @@ async def test_retired_observation_custody_cannot_repopulate_history(tmp_path):
         assert MARKER.encode() not in reopened.path.read_bytes()
     finally:
         briefs.close()
+
+
+def test_lifecycle_binding_preserves_explicit_admin_authorizer(tmp_path):
+    from ostag.briefs.lifecycle import BriefLifecycle
+    calls = []
+    life = BriefLifecycle()
+    life.apply(1, 'on', False)
+    def admin(actor, scope, operation):
+        calls.append((actor, scope, operation))
+    authority, service, coordinator = configured(tmp_path, lifecycle=life, maintenance=admin)
+    try:
+        job = service.submit(event()).job_id
+        coordinator.register(SCOPE, job, policy=RetentionPolicy(at(60)))
+        grant_id = authority.grant.grant_id
+        assert coordinator.revoke_grant(SCOPE, SCOPE, grant_id) == 1
+        assert calls == [(SCOPE, SCOPE, 'revoke_grant')]
+        assert coordinator.status(SCOPE, job).decision == 'revoked'
+        life.apply(2, 'off', True)
+        before = (coordinator.ledger.path.read_bytes(), service.store.path.read_bytes())
+        with pytest.raises(RetentionDenied):
+            coordinator.cleanup_as(SCOPE, SCOPE, job)
+        assert calls[-1] == (SCOPE, SCOPE, 'cleanup')
+        assert before == (coordinator.ledger.path.read_bytes(), service.store.path.read_bytes())
+    finally:
+        service.close()

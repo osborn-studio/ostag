@@ -1,6 +1,13 @@
-# Codex、Kimi K3 与 osstack 协作流程
+# Codex、独立审计模型与 osstack 协作流程
+
+> **历史记录提示：** 下文保留规划或各切片当时的状态，不代表当前阻断、模型分工或生产状态。最新已核实进展统一查看 [当前状态与证据](CURRENT-STATUS.md)；不要据旧记录重复认证、采集或修复已经完成的问题。
 
 ## 当前角色
+
+2026-09-20 用户最新指定：Codex 编码，实际 Claude CLI `claude-opus-5` 独立审计。
+必须保存 CLI 原始输出、modelUsage、最终候选摘要及测试回执；不能将历史
+Kimi/Fable 结果改名，也不能仅凭 CLI 退出 0 宣称批准。以下原轮次记录保留原模型身份。
+
 
 按用户最新要求“use codex for coding and kimi k3 for auditing and verfication”，Codex负责实现，Kimi K3负责独立审计和核查验证证据，osstack负责隔离执行与验收循环。本轮实际编码CLI请求gpt-6-astra；实际Kimi Code CLI请求kimi-code/k3，配置提供方managed:kimi-code、模型k3。记录请求标识与实际工具回执，不推测未返回的服务端模型身份，也不把替代模型称作Fable或Opus。
 
@@ -33,3 +40,42 @@ builder不能修改独立验收脚本、保留评测集或验收条件来过关�
 2026-09-13的Fable规划讨论以及早期Fable/Opus代码审查保留其真实范围，见[规划审查](REVIEW.md)、[会议共创](MEETING-REVIEW.md)和[执行记录](EXECUTION.md)。额度耗尽、超时、格式错误和未完成读取均不计批准。最新模型选择替代此前固定Fable的要求。
 
 用户已有开发授权按会话持续使用。A10与A05显式恢复已完成本地集成；下一步A11运行时接线，随后完成会议采集和真实平台验收。尚未push、main合并或部署，完整会议产品未宣告完成。
+
+
+## P01 单次执行诊断
+
+先复用 `8b0dd3d92804a0b09660ec2d32f12e9ecca42768` 的
+`scripts/engineering/runner_probe.py` 与原测试，保留其安装源码摘要校验。
+`--negative-control --surface osstack_codex_adapter` 只通过生成的假 CLI
+验证实际安装的 0.19.0 适配器分派，预期退出 1；它既不调用模型，也不证明
+CLI 沙箱行为。工作目录与 Git worktree 均不是操作系统安全边界。
+
+新增固定情景诊断：
+
+```bash
+python scripts/engineering/runner_loop_probe.py \
+  --osstack /opt/homebrew/bin/osstack \
+  --output /absolute/new-diagnostic-directory \
+  --scenario success
+```
+
+输出目录必须不存在，其父目录需预先存在。每次只使用新建的合成工作目录，
+本项目原队列、旧 daemon、凭据和业务数据不会被复制或使用。0.19.0 原生
+`loop enqueue` 创建一个任务；精确能力白名单拒绝优先级更高的旧任务哨兵。
+执行固定命令、非空验证，限制为一轮一次尝试。除 `success` 外还必须运行
+`builder_failure`、`verifier_failure`、`wrong_model`、`empty_verifier`、`timeout`。
+验证 `completed_tasks` 只有指定任务、迭代数为 1、结果与情景匹配，检查非空
+验证记录和旧任务 blocked 记录，而不是只看退出码。失败输出、状态与回执留在
+独立目录，不覆盖已有结果。超时终止该诊断自己的进程组，包含忽略 TERM 的子进程。
+
+这里的模型回执都是明示的合成测试数据。实际开发中，父验证器必须从受信 CLI
+调用的原始输出读取模型元数据，并将它与请求模型、准确候选摘要、非空且通过的
+测试证据绑定；不能把 builder 自写的 JSON 视为模型身份或审批。
+`validate_verification` 只检查这些字段，不能验证证据来源或授权自动写入。
+原生 loop 不可用时保留错误和候选，在受控 Codex 实现、固定测试、实际指定模型
+独立审计的流程下继续；不得自行启动旧 daemon，也不得把诊断通过当成发布批准。
+
+诊断子进程只接收固定 PATH／语言和新建目录下的 OSSTACK_HOME、XDG 配置与缓存、
+临时目录、GitHub 配置目录。宿主凭据、NODE_OPTIONS 和原 osstack 环境设置不继承；
+入队与执行都显式传入同一个 `--workspace`。这仍不是文件系统沙箱：回执不声称
+审计过宿主所有仓库的变化，只记录实际队列哨兵摘要与原生调度结果。

@@ -3,8 +3,6 @@ import asyncio
 import functools
 import json
 import multiprocessing
-import os
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -12,12 +10,7 @@ import pytest
 from ostag.briefs import runtime
 from ostag.briefs.lifecycle import BriefLifecycle, LifecycleDenied
 from test_brief_control_bridge import control, owner_at
-
-
-def _bootstrap_delay(target, args, delay, entered):
-    entered.set()
-    time.sleep(delay)  # Simulate interpreter/import work before the runtime target.
-    target(*args)
+from brief_process_helpers import _bootstrap_delay, _bad_ready, _blocked_io
 
 
 @pytest.fixture
@@ -140,23 +133,6 @@ async def test_handshake_interruption_reaps_without_opening_writer(
             await owner.stop()
 
 
-def _bad_ready(connection, readiness, serve, status_dir, control_path, boot_id, *, mode):
-    marker = runtime._CHILD_READY + boot_id.encode('ascii')
-    payload = {
-        'eof': b'', 'malformed': b'ready', 'wrong_boot': runtime._CHILD_READY + b'0' * 36,
-        'extra': marker + b'!', 'partial': marker[:10],
-    }[mode]
-    os.write(readiness.fileno(), payload)
-    if mode == 'partial':
-        time.sleep(60)
-    readiness.close()
-    try:
-        if connection.poll(2):
-            serve(connection, status_dir, control_path, boot_id)
-    finally:
-        connection.close()
-
-
 @pytest.mark.parametrize('attached', [False, True])
 @pytest.mark.parametrize('mode', ['eof', 'malformed', 'wrong_boot', 'extra', 'partial'])
 async def test_invalid_readiness_never_reaches_writer(
@@ -186,21 +162,6 @@ async def test_failed_process_start_closes_all_endpoints(tmp_path, monkeypatch, 
     await owner.stop()
     assert owner.health == 'degraded' and owner.reason == 'worker_failed'
     assert_reaped(owner, probe)
-
-
-def _blocked_io(connection, status_dir, control_path, boot_id, *, attached, opening, entered):
-    serve = runtime._serve_attached if attached else runtime._serve
-    original = runtime._StatusWriter.open if opening else runtime._StatusWriter._write
-
-    def blocked(self, *args, **kwargs):
-        if opening or (args[0]['lifecycle'] == 'running'
-                       and args[0]['control_generation'] == 2):
-            entered.set()
-            time.sleep(60)
-        return original(self, *args, **kwargs)
-
-    setattr(runtime._StatusWriter, 'open' if opening else '_write', blocked)
-    serve(connection, status_dir, control_path, boot_id)
 
 
 def block_io(monkeypatch, attached, *, opening=False):
