@@ -18,6 +18,7 @@ from ostag.core.safety import redact_secrets
 from ostag.core.schemas import ActionReceipt, SchemaError, new_id
 
 from .identity import Destination, IdentityError, IdentityStore
+from .models import RemoteCommand
 from .rendering import MobileBoardView, TaskDetailView
 from .store import MonitorStore
 
@@ -200,11 +201,20 @@ class WorkMonitorService:
         self, instance_id: str, *, lease_seconds: int = 30
     ) -> tuple[dict[str, Any], ...]:
         """Claim commands for an already-authenticated instance."""
+
+        def eligible(db: sqlite3.Connection, row: sqlite3.Row) -> bool:
+            try:
+                self._published_command(db, row["command_id"], row["action_id"])
+            except SchemaError:
+                return False
+            return True
+
         claimed_at = self.clock()
         return self.store.claim_pending_commands(
             instance_id,
             claimed_at=claimed_at.isoformat(),
             lease_until=(claimed_at + timedelta(seconds=lease_seconds)).isoformat(),
+            eligible=eligible,
         )
 
     def watch(
@@ -437,6 +447,34 @@ class WorkMonitorService:
             )
         return command
 
+    def _published_command(
+        self, db: sqlite3.Connection, command_id: str, action_id: str
+    ) -> tuple[ActionReceipt, dict[str, Any]]:
+        """Require this exact publication and frozen ownership under the commands write lock."""
+        try:
+            receipt = self.ledger.receipt_for_command(command_id)
+            if (
+                receipt.action_id != action_id
+                or receipt.state != "applying"
+                or receipt.principal is None
+                or receipt.target_system != "work_monitor"
+                or receipt.target_object
+                != f"{receipt.apply_payload.get('instance_id')}/{receipt.apply_payload.get('task_id')}"
+            ):
+                raise ValueError("command has no matching applying receipt")
+            actor = receipt.principal
+            command = self._owned_command(db, receipt, f"{actor.platform}:{actor.actor_id}")
+            RemoteCommand.from_dict(command)
+            if command["command_id"] != command_id:
+                raise ValueError("publication belongs to another command")
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise SchemaError(
+                "command_not_found",
+                "Command publication is missing, invalid, or bound elsewhere",
+                "Retry the authorized apply before polling or acknowledging the command.",
+            ) from exc
+        return receipt, command
+
     @staticmethod
     def _state_moved(receipt: ActionReceipt, state: str) -> SchemaError:
         return SchemaError(
@@ -550,9 +588,8 @@ class WorkMonitorService:
                     "Unknown or cross-instance command",
                     "Poll commands for the authenticated instance.",
                 )
-            command = json.loads(row["payload"])
-            receipt = self.ledger.get_receipt(str(row["action_id"]))
             if row["status"] == "acked":
+                receipt = self.ledger.get_receipt(str(row["action_id"]))
                 if row["ack_hash"] != ack_hash:
                     raise SchemaError(
                         "conflicting_ack",
@@ -569,6 +606,7 @@ class WorkMonitorService:
                     "Poll current command state.",
                 )
             else:
+                receipt, command = self._published_command(db, command_id, row["action_id"])
                 statuses = {
                     "pause": {"paused"},
                     "resume": {"running", "resumed"},
