@@ -405,7 +405,8 @@ async def generate(*, store: BriefStore, lease: Lease, call_id: str,
                    config: GenerationConfig, transport: ReadOnlyTransport,
                    checkpoint: Checkpoint, cancellation: asyncio.Event,
                    clock: Callable[[], str] = utc_now,
-                   links: tuple[SourceLink, ...] = ()) -> GenerationResult:
+                   links: tuple[SourceLink, ...] = (), request_deadline: str | None = None,
+                   request_input_limit: int | None = None) -> GenerationResult:
     """Return a candidate only; A04 reauthorizes and atomically completes the job.
 
     checkpoint is mandatory trusted service code, raising on grant/ACL/guard loss;
@@ -423,6 +424,10 @@ async def generate(*, store: BriefStore, lease: Lease, call_id: str,
     if type(config) is not GenerationConfig or type(coverage) is not Coverage or type(lease) is not Lease:
         raise _invalid("explicit config, coverage and lease required")
     config, coverage = replace(config), replace(coverage)
+    if request_deadline is not None:
+        _utc(request_deadline, "original request deadline")
+    if request_input_limit is not None:
+        bounded_int(request_input_limit, "request input limit", 1048576, 1)
     lease.__post_init__()
     _identifier(call_id, "call_id")
     _text(goal, "goal", 16000)
@@ -444,7 +449,8 @@ async def generate(*, store: BriefStore, lease: Lease, call_id: str,
             "goal": goal, "coverage": coverage.to_dict(),
             "sources": [{"source_id": s.source_id, "excerpt": s.excerpt} for s in sources.sources]}})
         source_hash = digest(sources.to_dict())
-        if len(serialized.encode()) > budget.max_input_bytes:
+        if len(serialized.encode()) > min(budget.max_input_bytes,
+                                         request_input_limit or budget.max_input_bytes):
             return GenerationResult("input_too_large")
     except SchemaError:
         return GenerationResult("input_too_large")
@@ -461,6 +467,8 @@ async def generate(*, store: BriefStore, lease: Lease, call_id: str,
         deadline = min(_utc(job.deadline, "persisted deadline"),
                        _utc(job.first_claim_at, "persisted first claim")
                        + timedelta(seconds=budget.timeout_seconds))
+        if request_deadline is not None:
+            deadline = min(deadline, _utc(request_deadline, "original request deadline"))
         seconds = (deadline - now).total_seconds()
         return seconds, deadline.isoformat(), now.date().isoformat()
 

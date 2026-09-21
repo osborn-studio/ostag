@@ -1345,6 +1345,7 @@ class BriefStore:
         grant_id: str, grant_revision: int, destination: PrivateDestination,
         now: str, execution_seconds: int = MAX_EXECUTION_SECONDS,
         request_hash: str | None = None, precommit: Callable[[], None] | None = None,
+        meeting_scope_hash: str | None = None,
     ) -> Job:
         """Atomically admit a trusted frozen snapshot as one queued job.
 
@@ -1365,6 +1366,12 @@ class BriefStore:
             raise _invalid("destination must be explicitly requester-private")
         _identifier(destination.address, "destination")
         encoded = _canonical(payload)
+        if meeting_scope_hash is not None:
+            _hash(meeting_scope_hash, "meeting scope hash")
+            if (not isinstance(payload, dict) or payload.get("kind") != "meeting-brief-v1"
+                    or payload.get("request", {}).get("confirmed_scope_hash") != meeting_scope_hash
+                    or request_hash != meeting_scope_hash):
+                raise _invalid("meeting identity must bind the frozen payload")
         # Encode content separately from its bounded payload, allowing an exact
         # 1MiB payload without accidentally charging envelope bytes against it.
         content = json.dumps([namespace, platform, actor, encoded, grant_id, grant_revision,
@@ -1385,7 +1392,18 @@ class BriefStore:
                     matches = existing["content_hash"] == digest
                 if not matches:
                     raise Conflict("idempotency key already binds different admission content")
+                if meeting_scope_hash is not None and json.loads(existing["payload_json"]).get(
+                        "request") != payload["request"]:
+                    raise Conflict("meeting replay changed immutable request")
                 return _job(existing)
+            if meeting_scope_hash is not None and db.execute(
+                "SELECT 1 FROM brief_jobs j JOIN brief_intakes i ON j.job_id=i.job_id "
+                "WHERE namespace=? AND platform=? AND actor_id=? AND i.request_hash=?",
+                (namespace, platform, actor, meeting_scope_hash)).fetchone() is not None:
+                # No new event key can reset a previously admitted meeting's
+                # origin, attempt or cost ledger. The existing intake tombstone
+                # survives payload retirement; no new schema or JSON index.
+                raise Conflict("frozen meeting already admitted under another event")
             if db.execute("SELECT count(*) FROM brief_jobs WHERE state='queued'").fetchone()[0] >= MAX_QUEUED:
                 raise QueueFull("brief queue has 20 pending jobs; retry later")
             job_id = uuid4().hex

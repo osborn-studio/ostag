@@ -31,6 +31,7 @@ All precommit policy callbacks are bounded, current, thread-safe, non-reentrant
 from __future__ import annotations
 
 import asyncio
+import json
 from concurrent.futures import Future, InvalidStateError
 from dataclasses import replace
 from threading import Condition, Event, Lock, Thread, current_thread
@@ -41,6 +42,7 @@ from ostag.briefs.generation import generate
 from ostag.briefs.models import _invalid
 from ostag.briefs.lifecycle import LifecycleDenied
 from ostag.briefs.service import BriefService, ConfigChanged
+from ostag.briefs.meeting_service import DurableMeetingRequest, MeetingTimeout, register_retention
 from ostag.briefs.store import (
     ClockError, Conflict, LeaseGuard, LeaseLost, RecoveryValidity, StoreBusy, StoreError, WorkerContext,
 )
@@ -298,6 +300,10 @@ class BriefWorker:
                     self.store.release_cost(self.context, cost.reservation_id,
                                             clock=self.service.clock)
                 return RecoveryValidity(False, False, False)
+            if type(request) is DurableMeetingRequest:
+                # Preserve the existing never-started reservation release above,
+                # but grant no collection/model resume even when nothing spent.
+                return RecoveryValidity(False, False, False)
             self.service.authorize_current(request, job.scope, job.destination,
                                            stopped=self._stop.is_set, job_id=job.job_id,
                                            operation=self._operation)
@@ -373,6 +379,12 @@ class BriefWorker:
                             confirmed_job=job, stop_signal=self._stop) as guard:
                 self._check_operation()
                 request, config = self.service.load_job(job)
+                meeting = type(request) is DurableMeetingRequest
+                if meeting:
+                    request.check_budget(config, self.service.clock())
+                    self.service.authorize_current(request, job.scope, job.destination,
+                        stopped=self._stop.is_set, operation=operation)
+                    register_retention(self.service, job)
                 cost = guard.database(self.store.cost_record, job.scope, job.job_id, CALL_ID,
                                       clocked=False)
                 if cost is not None:
@@ -390,10 +402,14 @@ class BriefWorker:
                     if self.service.config != config:
                         cause = "config_changed"
                         raise ConfigChanged()
+                    if meeting:
+                        request.check_budget(config, self.service.clock())
                     try:
                         self.service.authorize_current(request, job.scope, job.destination,
                                                        stopped=stopped, job_id=job.job_id,
                                                        operation=operation)
+                        if meeting:
+                            request.check_budget(config, self.service.clock())
                     except SchemaError:
                         cause = "authorization_denied"
                         raise
@@ -420,7 +436,10 @@ class BriefWorker:
                         lease=job.lease, call_id=CALL_ID,
                         sources=request.source_set(job.scope), coverage=request.coverage,
                         goal=request.goals, config=config, transport=transport,
-                        checkpoint=checkpoint, cancellation=cancellation, clock=self.service.clock)
+                        checkpoint=checkpoint, cancellation=cancellation, clock=self.service.clock,
+                        **(dict(links=request.links, request_deadline=request.deadline(config),
+                                request_input_limit=request.scope.budget.max_model_input_bytes)
+                           if meeting else {}))
                 finally:
                     watcher.cancel()
                 if cause != "config_changed":
@@ -434,6 +453,9 @@ class BriefWorker:
                             job.scope, result.provenance, job.content_hash),
                         validation_version=config.parameters.validation_version,
                         precommit=authorization)
+                    if meeting:
+                        register_retention(self.service, self.store.get(job.scope, job.job_id))
+                        authorization()
                     return "draft_ready"
                 if self._stop.is_set():
                     cause = "stopped"
@@ -441,6 +463,8 @@ class BriefWorker:
                     cause = "lease_lost"
         except ConfigChanged:
             cause = "config_changed"
+        except MeetingTimeout:
+            cause = "timeout"
         except LeaseLost:
             cause = "lease_lost"
         except SchemaError:
@@ -473,6 +497,12 @@ class BriefWorker:
     def _reconcile_result(self, job, cause, operator_cancel):
         box = self.store.outbox(job.scope, job.job_id)
         if box is not None:
+            if box.state == "pending":
+                if json.loads(job.payload_json).get("kind") == "meeting-brief-v1":
+                    # Primary completion may precede retention registration or
+                    # its acknowledgement. Do not advertise exposure readiness;
+                    # authorized status/export can repair registration idempotently.
+                    return "needs_input"
             return "draft_ready" if box.state == "pending" else "cancelled"
         if operator_cancel.is_set():
             # The authenticated cancellation handler may still be waiting

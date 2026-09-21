@@ -30,17 +30,16 @@ from ostag.connectors.github_history import (
 
 @dataclass(frozen=True, repr=False)
 class MeetingServiceInput:
-    """Typed integration seam ONLY, not a BriefService request or an authority token.
+    """Evidence handoff consumed by meeting_service; never an authority token.
 
-    An existing job adapter must issue source authority after current ACL checks,
-    preserve first-claim deadlines/consumption, and use existing immutable revision
-    storage. ManualRequest intentionally rejects github_event/feishu_message.
-    Never manufacture manual sources, AuthoritySnapshot, jobs or grants here.
+    Archived/default inputs remain non-authoritative. Current inputs still need
+    independently published exact provenance and current policy at every gate.
     """
     scope: FrozenScope = field(repr=False)
     sources: SourceSet | None = field(repr=False)
     coverage: Coverage
     revision_digest: str
+    input_mode: str = "historical_private_draft"
 
 
 @dataclass(frozen=True, repr=False)
@@ -161,7 +160,8 @@ def _build(scope, history, chats, historical):
     markdown = "\n\n".join(lines) + "\n"
     manifest["render_sha256"] = hashlib.sha256(markdown.encode()).hexdigest()
     return MeetingPackage(markdown, canonical(manifest) + "\n",
-                          MeetingServiceInput(scope, combined.sources, combined.coverage, revision))
+                          MeetingServiceInput(scope, combined.sources, combined.coverage, revision,
+                                              manifest["input_mode"]))
 
 
 def build_meeting(scope: FrozenScope, history: HistoryResult, *, chats=()):

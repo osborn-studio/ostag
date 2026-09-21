@@ -3,8 +3,10 @@
 This batch provides an operator-local meeting package for an explicitly confirmed
 purpose and exact frozen scope. It advances the full31+9 objective; it does **not**
 complete M02–M05, activate A11/D02, or establish live/semantic acceptance.
-Every package says `needs_input`, `meeting_ready=false`, and
-`semantic_review_required=true`. Matching schemas is not evidence of usefulness.
+Operator packages and private exports say `needs_input`, `meeting_ready=false`, and
+`semantic_review_required=true`. The local durable job can reach `draft_ready`,
+meaning a validated private revision exists, not meeting readiness. Matching
+schemas is not evidence of usefulness.
 
 ## Runnable synthetic CLI example
 
@@ -198,8 +200,9 @@ collected history partitions stay partial even if pagination exhausts.
 **Durable resume is unsupported.** Every supplied resume object is rejected before
 IO. Serialized consumption, deadline, principal or scope hashes are diagnostics,
 never budget authority. There is no new database, trusted resume capability or
-second lifecycle. New attempts must be admitted by a future existing-job adapter;
-this operator API does not claim retry-safe durable job accounting.
+second lifecycle. The local durable API below accepts independently trusted pre-collected input
+with its original origin/finish and consumption. It never resumes collection.
+This operator CLI still does not claim retry-safe durable collection accounting.
 
 Public error boundaries discard exceptions and raise outside the handler, leaving
 both cause and context empty. Bodies/credentials are absent from public reprs and
@@ -219,14 +222,15 @@ undocumented fields are not invented.
 | M04-AC1 | Exact explicit links, frozen project selection, no name-based identity joins | Richer approved mapping associations and semantic candidate review |
 | M04-AC2 | Ordered facts, separate chat/repository/deployment sections, unknown owner/due | Human review of contradictions and extracted commitments; no automatic truth oracle |
 | M04-AC3 | Gap-first needs_input, deterministic topic/time/count bounds, mandatory semantic review | Key-claim/numeric semantic evaluation against real authorized sources |
-| M05-AC1 | Working private pre-read/manifest and typed `MeetingServiceInput` handoff | BriefService/job/grant/revision authority issuance and lifecycle integration; no outbox bypass |
-| M05-AC2 | Exportable local Markdown, flags unchanged/default OFF/rejected | Private-chat status integration and production acceptance; A11/D02 remain gated |
+| M05-AC1 | Local trusted meeting admission through BriefService, persisted job, existing worker, validated revision/provenance and private outbox; restart-tested status/export | Production authority issuer/owner, durable live collection and semantic acceptance |
+| M05-AC2 | Current-authorized local status/cancel/private export, retention and lifecycle gates; flags unchanged/default OFF/rejected | Live private-chat status/delivery and production acceptance; A11/D02 remain gated |
 | M05-AC3 | Exact confirmation before collection; no calendar/sharing/table writes; empty shareable sources | Any future sharing API must recheck every source ACL and audience intersection |
 
-The typed handoff carries scope, source set, coverage and revision digest. It
-creates no `AuthoritySnapshot`, manual-source impersonation, production DB, worker,
-scheduler, card or outbox. Existing `ManualRequest` correctly rejects this source
-shape. Archived evidence is a private historical draft whose identity fields are
+The typed handoff carries scope, source set, coverage and revision digest.
+`DurableMeetingRequest.from_input` consumes an exact current handoff with raw
+provenance and original timing. Construction grants no authority; `ManualRequest`
+continues to reject this source shape. The operator CLI creates no worker/outbox;
+the explicit durable API below uses the existing ones. Archived evidence is a private historical draft whose identity fields are
 observations, never current authorization. The legacy private R2 artifact has not
 been read, copied, adapted or recollected; this CLI expects the new explicit
 archive envelope, not a silent legacy import.
@@ -266,3 +270,155 @@ Primary contracts consulted:
 - [REST API versions and legacy default](https://docs.github.com/en/rest/about-the-rest-api/api-versions)
 - [Actual gh api flags](https://cli.github.com/manual/gh_api)
 - [gh API HTTP dispatch source](https://github.com/cli/cli/blob/v2.96.0/pkg/cmd/api/http.go)
+
+## Local durable application API
+
+This is explicit application composition, not an HTTP route or self-grant
+endpoint. A11 production ownership and D02 activation remain the next dependency.
+All six flags remain OFF and unsupported activation still rejects. Frozen31+9,
+all 40 tasks and all 120 acceptance criteria remain the objective.
+
+The host explicitly initializes the existing BriefStore/manual schema and
+RetentionLedger, composes one RetentionCoordinator and BriefLifecycle, and
+publishes a current TrustedBriefAuthority snapshot. No meeting schema is added.
+The snapshot's `meetings=(request,)` entry means the trusted host independently
+owns that exact frozen scope, canonical raw evidence, partition reports, original
+collection origin/finish and consumption. `sources` must separately contain every
+exact current SourceSnapshot after ACL checks; grants, permissions and private
+destinations remain mandatory. Refresh must revalidate current mapping, identities,
+configuration and grant pins. Omission or stale publication denies. Archived JSON,
+input-mode strings, event.raw, model output and constructing a request grant nothing.
+
+```python
+from ostag.briefs.meeting_service import DurableMeetingRequest
+
+request = DurableMeetingRequest.from_current_collection(
+    frozen_scope, history=trusted_history, chats=trusted_chat_evidence,
+    first_claimed_at=original_collection_origin,
+    collection_finished_at=original_collection_finish,
+    collection_calls=trusted_total_calls, collection_bytes=trusted_total_bytes,
+    chat_raw_content=trusted_original_chat_contents_by_source_id,
+    confirmed_purpose=confirmed_purpose,
+    confirmed_scope_hash=confirmed_scope_hash,
+)
+# Trusted host independently publishes request + exact SourceSnapshots and policy.
+# It must not publish a request by trusting a caller-supplied archive.
+service = authority.create_service(
+    store=store, transport=explicit_read_only_transport, config=pinned_config,
+    retention=coordinator.guard(store), lifecycle=lifecycle,
+)
+meetings = service.meeting_application(policy=original_retention_policy)
+accepted = meetings.submit(authenticated_requester, stable_event_id, request)
+# Execute with the existing BriefWorker(service), under the same lifecycle owner.
+status = meetings.status(authenticated_requester, accepted.job_id)
+markdown = meetings.private_export(authenticated_requester, accepted.job_id)
+# Existing requester-scoped durable cancellation:
+# meetings.cancel(authenticated_requester, accepted.job_id)
+```
+
+`submit` returns BriefStatus (`queued`, existing state, `conflict`, `timeout`,
+`needs_input`, or `denied`). Status returns durable state, input completeness,
+coverage gaps, sanitized failure cause and mandatory semantic-review flag.
+Status/export raise a sanitized contract error on current authorization failure.
+Export returns inert Markdown to the authenticated requester; it never sends,
+marks an outbox sent, or creates a human receipt. Revision/provenance are committed
+atomically by the existing worker. Suggestions never constitute content adoption,
+sharing permission or business approval.
+
+The existing read-only model adapter is explicitly injected; no default model or
+Backend.run bridge is installed. Canonical raw GitHub hashes remain distinct from
+display-excerpt hashes. Feishu hashes bind explicitly supplied `chat_raw_content` by source ID when the
+original content differs from its display excerpt; that raw content is persisted
+and independently owned by current authority. Omitting it is valid only when the
+existing source hash already matches the exact excerpt. No hashes are rewritten.
+Full provider-record reconstruction remains outside this ingress. Source kinds
+are preserved. Code constructs citations; untrusted text is literal
+Markdown. At most three priority decision topics include suggested actions and
+five-minute allocations, plus ten minutes for review and recording decisions.
+
+A10's public registration currently decodes manual jobs only. The meeting adapter
+uses the same coordinator, ledger, target identity pins, source/grant tombstones
+and expiry policy. Registration happens before model dispatch and after primary
+completion, before status/export exposes a revision. Failure between transactions
+leaves a durable primary result inaccessible by revision until registration with
+the original policy succeeds. Status/export can repair registration idempotently;
+they never repeat generation. The worker reports `needs_input` when its final
+registration/authorization fails. No cross-database atomicity is claimed. Raw
+BriefStore access is an internal trusted interface, not an authorized preview API.
+
+Original collection origin/finish, scope, confirmation, raw provenance, consumption
+and configuration are preserved in versioned JSON. The worker separately persists
+its own first claim/deadline. Generation uses the earlier of its persisted deadline
+and the original origin plus the lower meeting/config timeout. Collection must
+finish within the frozen ceiling (at most 120 seconds with the profile's generation
+reserve inside 180); queue delay after precollection consumes remaining time.
+`HistoryResult.collection_seconds` is a profile diagnostic, not elapsed-time
+authority. Explicit total collection calls/bytes include GitHub and Feishu reads
+and must fit the same global caps; incomplete accounting cannot be admitted.
+These counters are frozen host evidence, never a resume allowance.
+A new event ID cannot create another job for the same frozen scope, even after
+retirement: the existing intake hash remains an identity tombstone. An expired
+claimed meeting records `recovery_required`; no implicit retry/resume is granted.
+
+Explicitly trusted complete partition evidence can yield `input_complete=true`.
+All selected partitions must be reported; missing/partial/failed reports or other
+collection gaps keep coverage partial. Semantic review is never waived. The
+existing live-list collector still produces partial coverage. The complete
+synthetic case is not live history reconstruction or live acceptance.
+
+### Runnable synthetic durable example
+
+This uses physical temporary SQLite, the real BriefWorker, and the existing
+OpenAI read-only adapter with only its HTTP boundary mocked. It closes/reopens the
+service before status/export and cleans up afterwards. It needs no credentials,
+real messages, calendar/table writes or model traffic.
+
+```bash
+PYTHONPATH=tests .venv/bin/python - <<'PY'
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from ostag.briefs.worker import BriefWorker
+from test_meeting_service import current_request, runtime
+
+with TemporaryDirectory(prefix="meeting-durable-synthetic-") as directory:
+    path = Path(directory)
+    local = runtime(path, current_request())  # two repos + Feishu, honest gaps
+    worker = BriefWorker(local.service)
+    try:
+        accepted = local.app.submit(local.scope, "synthetic-meeting", local.request)
+        assert accepted.status == "queued"
+        assert worker.run_once().result(5) == "draft_ready"
+    finally:
+        worker.stop()
+        local.service.close()
+    reopened = runtime(path, local.request, clock=local.clock)
+    try:
+        status = reopened.app.status(local.scope, accepted.job_id)
+        assert status["state"] == "draft_ready" and not status["input_complete"]
+        assert not status["meeting_ready"] and status["semantic_review_required"]
+        print(status)
+        print(reopened.app.private_export(local.scope, accepted.job_id))
+    finally:
+        reopened.service.close()
+PY
+```
+
+The fixed local verifier is:
+
+```bash
+.venv/bin/pytest -q tests/test_meeting_service.py tests/test_meeting_runtime_journey.py \
+  tests/test_brief_service.py tests/test_brief_worker.py tests/test_brief_store.py \
+  tests/test_brief_authority*.py tests/test_brief_retention.py tests/test_brief_revocation.py \
+  tests/test_brief_recovery.py tests/test_brief_generation.py tests/test_brief_validation.py \
+  tests/test_brief_grants.py tests/test_brief_lifecycle*.py tests/test_brief_flags.py
+```
+
+The new durable Markdown test requires Pandoc and fails rather than skipping if
+it is absent. Full M02–M05 still require complete historical reconstruction,
+approved live collection and cursor/resume accounting, prior-head/current
+deployment provenance, semantic conflict/commitment evaluation, live private-chat
+delivery and sharing ACL checks. A11 production ownership/D02 activation are not
+cancelled. D01/D07/M07 require actual model/platform/user evidence, including the
+held-out scenarios and repeated semantic cases. No fixture supplies semantic
+scores, provider acceptance or human receipts. The actualClaudeOpus5 independent
+audit remains the outside harness's responsibility; no nested reviewer was run.

@@ -81,6 +81,8 @@ class AuthoritySnapshot:
     destinations: tuple[tuple[RequesterContext, PrivateDestination], ...] = ()
     grants: tuple[PilotGrant, ...] = ()
     sources: tuple[SourceSnapshot, ...] = ()
+    # Explicit trusted host publication, never populated from event/raw/model JSON.
+    meetings: tuple = ()
 
     def __post_init__(self):
         try:
@@ -93,6 +95,16 @@ class AuthoritySnapshot:
             raise _denied()
         if _utc(self.observed_at, "observed") >= _utc(self.fresh_until, "expiry"):
             raise _denied()
+        from ostag.briefs.meeting_service import DurableMeetingRequest
+        meetings = tuple(DurableMeetingRequest.from_dict(_exact(m, DurableMeetingRequest).to_dict())
+                         for m in _rows(self.meetings))
+        if sum(len(m.evidence_json.encode()) + len(m.chat_raw_json.encode())
+               for m in meetings) > 4 * 1024 * 1024:
+            raise _denied()
+        if len({m.scope.content_hash for m in meetings}) != len(meetings):
+            raise _denied()
+        meeting_sources = {(RequesterContext(m.namespace, m.scope.request.requesting_principal),
+                            s.source_id): s for m in meetings for s in m.sources}
         permissions, destinations, grants, sources = [], [], [], []
         for principal, level in _pairs(self.permissions):
             principal = _principal(principal)
@@ -115,7 +127,10 @@ class AuthoritySnapshot:
             source = answer.source
             if (scope.namespace != source.namespace
                     or source.allowed_audience != (scope.principal,)
-                    or hashlib.sha256(source.excerpt.encode()).hexdigest() != source.content_sha256
+                    or (source.source_kind == "manual" and
+                        hashlib.sha256(source.excerpt.encode()).hexdigest() != source.content_sha256)
+                    or (source.source_kind != "manual" and
+                        meeting_sources.get((scope, source.source_id)) != source)
                     or _utc(source.observed_at, "observed") >= _utc(answer.fresh_until, "expiry")):
                 raise _denied()
             sources.append(answer)
@@ -142,7 +157,7 @@ class AuthoritySnapshot:
                     or grant.allowed_audience != s.allowed_audience):
                 raise _denied()
         for name, value in (("permissions", permissions), ("destinations", destinations),
-                            ("grants", grants), ("sources", sources)):
+                            ("grants", grants), ("sources", sources), ("meetings", meetings)):
             object.__setattr__(self, name, tuple(value))
 
 
@@ -371,6 +386,18 @@ class TrustedBriefAuthority:
         scope = _lookup_key(scope, scope=True)
         state, _ = self._read()
         return deepcopy(state.destinations.get(scope))
+
+    def meeting(self, scope, request):
+        """Check current exact provenance, scope/mapping pins and origin ownership.
+
+        A trusted publisher must revalidate selected mapping/config/ACL evidence
+        on each refresh. Omitting this request immediately removes its authority.
+        """
+        scope = _lookup_key(scope, scope=True)
+        state, _ = self._read()
+        if (scope != RequesterContext(request.namespace, request.scope.request.requesting_principal)
+                or not any(m.to_dict() == request.to_dict() for m in state.snapshot.meetings)):
+            raise _denied()
 
     def _bounds(self, observed, expiry):
         # Final fencing includes every consulted source/grant even if a final
