@@ -10,7 +10,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / '.a11-verification'
+OUT = ROOT / 'a11-verification'
 MANIFEST = Path(__file__).with_name('a11_candidate_ci.json')
 
 
@@ -31,6 +31,8 @@ def main():
                    head=subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
                    platform=platform.platform(), python=sys.version,
                    scope='Full macOS fixed gate only; not model approval or live acceptance')
+    receipt['pandoc'] = subprocess.check_output(['pandoc', '--version'], text=True).splitlines()[0]
+    assert receipt['pandoc'] == 'pandoc 3.9.0.1'
     (OUT / 'environment.json').write_text(json.dumps(receipt, indent=2) + '\n')
     env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(ROOT / 'tests'),
                str(ROOT / 'scripts/engineering')]),
@@ -46,6 +48,7 @@ def main():
     verify_source(manifest)
     receipt.update(returncode=result.returncode, log_sha256=hashlib.sha256(log.read_bytes()).hexdigest())
     (OUT / 'result.json').write_text(json.dumps(receipt, indent=2) + '\n')
+    print(json.dumps(receipt, indent=2), flush=True)
     assert result.returncode == 0, 'Required macOS gate failed'
     assert re.search(r'\b897 passed\b', text), 'Unexpected fixed gate count'
     assert not re.search(r'\b\d+ (?:skipped|xfailed|xpassed|failed|error)\b', text)

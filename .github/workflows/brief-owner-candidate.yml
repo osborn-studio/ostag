@@ -19,6 +19,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install exact native Pandoc parser
+        shell: python
+        run: |
+          import hashlib, os, pathlib, platform, subprocess, urllib.request, zipfile
+          assert platform.machine() == 'arm64'
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ostag-pandoc'
+          root.mkdir()
+          archive = root / 'pandoc.zip'
+          urllib.request.urlretrieve('https://github.com/jgm/pandoc/releases/download/3.9.0.1/pandoc-3.9.0.1-arm64-macOS.zip', archive)
+          assert hashlib.sha256(archive.read_bytes()).hexdigest() == '0fc702defbf1fee9645ca7f8c296ffba62531db56d93660149cbe70eb19d33aa'
+          with zipfile.ZipFile(archive) as bundle:
+              bundle.extractall(root)
+          binaries = list(root.rglob('bin/pandoc'))
+          assert len(binaries) == 1
+          binary = binaries[0]
+          binary.chmod(0o755)
+          assert subprocess.check_output([str(binary), '--version'], text=True).splitlines()[0] == 'pandoc 3.9.0.1'
+          with open(os.environ['GITHUB_PATH'], 'a') as path:
+              path.write(str(binary.parent) + '\n')
       - run: uv sync --all-extras --locked
       - name: Verify exact candidate and full macOS owner gate
         run: uv run --locked python scripts/engineering/a11_candidate_ci.py
@@ -26,5 +45,5 @@ jobs:
         if: always()
         with:
           name: brief-owner-macos-${{ github.sha }}
-          path: .a11-verification/
+          path: a11-verification/
           if-no-files-found: error
