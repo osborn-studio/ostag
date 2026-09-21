@@ -1,5 +1,7 @@
 # Codex、Kimi K3 与 osstack 协作流程
 
+> **历史记录提示：** 下文保留规划或各切片当时的状态，不代表当前阻断、模型分工或生产状态。最新已核实进展统一查看 [当前状态与证据](CURRENT-STATUS.md)；不要据旧记录重复认证、采集或修复已经完成的问题。
+
 ## 当前角色
 
 按用户最新要求“use codex for coding and kimi k3 for auditing and verfication”，Codex负责实现，Kimi K3负责独立审计和核查验证证据，osstack负责隔离执行与验收循环。本轮实际编码CLI请求gpt-6-astra；实际Kimi Code CLI请求kimi-code/k3，配置提供方managed:kimi-code、模型k3。记录请求标识与实际工具回执，不推测未返回的服务端模型身份，也不把替代模型称作Fable或Opus。

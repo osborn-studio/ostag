@@ -1,5 +1,7 @@
 # 实施衔接记录（当前代码检查所得，后续任务未完成）
 
+> **历史记录提示：** 下文保留规划或各切片当时的状态，不代表当前阻断、模型分工或生产状态。最新已核实进展统一查看 [当前状态与证据](CURRENT-STATUS.md)；不要据旧记录重复认证、采集或修复已经完成的问题。
+
 1. A04：M01 的 content_hash 标识一次受理快照，包含 intake_at；不能充当跨次请求的幂等键。入口事件必须有独立、按 namespace/platform/requester 隔离的幂等键，重放先找原任务，不要重建 intake_at 后误当新任务。
 2. A04：后续每次读取、模型出网、提交、投递都重新核对当前授权/映射/ACL；这不等于重建已确认范围。原 FrozenScope 不变，当前政策变化导致 needs_input/重新确认，不能借重试换 intake_at 或 first_claimed_at。
 3. A04：ExecutionTiming 必须使用 A02 持久化的首次 claim 时间及相同冻结时长。M01 can_commit 对 failed/cancelled 只允许无私有内容的状态记录；真实存储提交仍检查当前 fence。硬截止处 lease 也已到期时，由可信恢复/维护路径记录终态，不让旧尝试写草稿。
