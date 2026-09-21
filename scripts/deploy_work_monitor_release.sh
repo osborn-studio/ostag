@@ -390,7 +390,9 @@ exec python3 - "$BASH" -c "$(declare -f)
 set -euo pipefail
 locked_main \"\$@\"" "$0" "$command_name" "$@" <<'PY'
 import fcntl
+import json
 import os
+import re
 import stat
 import sys
 
@@ -416,16 +418,21 @@ try:
         ):
             raise ValueError("untrusted directory")
         if index == len(parts) - 2:
-            descriptor = os.open(
-                part, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
-                0o600, dir_fd=directory,
-            )
+            try:
+                descriptor = os.open(
+                    part, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    0o600, dir_fd=directory,
+                )
+            except FileExistsError:
+                descriptor = os.open(part, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                     dir_fd=directory)
+            else:
+                os.fchmod(descriptor, 0o600)
         else:
             child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                             dir_fd=directory)
             os.close(directory)
             directory = child
-    os.close(directory)
     metadata = os.fstat(descriptor)
     if (
         not stat.S_ISREG(metadata.st_mode)
@@ -438,6 +445,66 @@ try:
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         raise SystemExit("production deploy refused: deployment lock is busy")
+    current = os.stat(parts[-1], dir_fd=directory, follow_symlinks=False)
+    if (metadata.st_dev, metadata.st_ino) != (current.st_dev, current.st_ino):
+        raise ValueError("lock identity changed")
+    os.close(directory)
+    # Persistent state is deliberately required even on preflight. It is never
+    # initialized here: a missing file is not evidence maintenance completed.
+    # The installed host launcher must pin this path for every invocation.
+    state_directory = None
+    state_descriptor = None
+    try:
+        state_path = os.environ.get("OSTAG_MAINTENANCE_STATE_PATH", "/var/lib/ostag-maintenance/work-monitor.json")
+        state_parts = state_path.split("/")
+        if not state_path.startswith("/") or any(p in ("", ".", "..") for p in state_parts[1:]):
+            raise ValueError("invalid state path")
+        state_directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        for index, part in enumerate(state_parts[1:]):
+            metadata = os.fstat(state_directory)
+            sticky = index < len(state_parts)-2 and metadata.st_uid == 0 and metadata.st_mode & stat.S_ISVTX
+            if metadata.st_uid not in (0, uid) or (metadata.st_mode & 0o022 and not sticky):
+                raise ValueError("untrusted state directory")
+            if index == len(state_parts)-2:
+                state_descriptor = os.open(part, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=state_directory)
+            else:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=state_directory)
+                os.close(state_directory)
+                state_directory = child
+        metadata = os.fstat(state_descriptor)
+        current = os.stat(state_parts[-1], dir_fd=state_directory, follow_symlinks=False)
+        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != uid or metadata.st_nlink != 1
+                or stat.S_IMODE(metadata.st_mode) != 0o600 or not 0 < metadata.st_size <= 4096
+                or (metadata.st_dev, metadata.st_ino) != (current.st_dev, current.st_ino)):
+            raise ValueError("unsafe state")
+        raw = os.read(state_descriptor, 4097)
+        if len(raw) != metadata.st_size:
+            raise ValueError("changed state")
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate state key")
+                result[key] = value
+            return result
+        state = json.loads(raw, object_pairs_hook=unique)
+        if (type(state) is not dict or set(state) != {"schema_version","generation","state","maintenance_id","request_sha256"}
+                or type(state["schema_version"]) is not int or state["schema_version"] != 1
+                or type(state["generation"]) is not int or state["generation"] < 0):
+            raise ValueError("invalid maintenance state")
+        if state["state"] == "sealed":
+            if state["generation"] < 1 or any(type(state[k]) is not str or not re.fullmatch("[0-9a-f]{64}", state[k]) for k in ("maintenance_id", "request_sha256")):
+                raise ValueError("invalid seal")
+            raise SystemExit("production deploy refused: maintenance sealed")
+        if state["state"] != "open" or state["maintenance_id"] is not None or state["request_sha256"] is not None:
+            raise ValueError("invalid open state")
+    except Exception:
+        raise SystemExit("production deploy refused: maintenance state unavailable")
+    finally:
+        if state_descriptor is not None:
+            os.close(state_descriptor)
+        if state_directory is not None:
+            os.close(state_directory)
     os.set_inheritable(descriptor, True)
     os.execv(sys.argv[1], sys.argv[1:])
 except Exception:
