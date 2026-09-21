@@ -2,7 +2,9 @@
 
 Only application code with independently established identity/ACL evidence may
 publish. Python types, wire parsing, event.raw and model content prove no rights.
-There is no loader, environment switch, route, worker or background refresh.
+Refresh accepts only a trusted application callable, never event.raw or model
+data. There is no credential loader, environment switch, route, scheduler or
+background refresh; loader latency and cancellation belong to the caller.
 
 Snapshot collections accept bounded builtin lists/tuples and freeze to tuples;
 permissions are (Principal, level), destinations are (RequesterContext,
@@ -17,6 +19,7 @@ handed to a network. Successful checks are never durable authorization.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import contextmanager
 from contextvars import ContextVar
 from copy import deepcopy
@@ -170,7 +173,7 @@ class TrustedBriefAuthority:
     clock and monotonic are trusted local clock functions, sampled outside the
     mutex; neither may load policy. max_ttl_seconds is a strict int in [1, 300]
     (default 60). Invalid clocks permanently latch this instance closed.
-    publish failures and invalidate retain the accepted revision high-water.
+    publish/refresh failures and invalidate retain the accepted revision high-water.
     """
     def __init__(self, *, clock=utc_now, monotonic=system_monotonic, max_ttl_seconds=60):
         if (type(max_ttl_seconds) is not int or not 1 <= max_ttl_seconds <= 300
@@ -254,12 +257,44 @@ class TrustedBriefAuthority:
         """
         return self._now().isoformat().replace("+00:00", "Z")
 
-    def publish(self, snapshot: AuthoritySnapshot):
-        """Replace the complete mirror. Invalid input never falls back."""
+    def _begin_publication(self):
         with self._lock:
             self._state = None
             self._epoch += 1
-            epoch = self._epoch
+            return self._epoch
+
+    def publish(self, snapshot: AuthoritySnapshot):
+        """Replace the complete mirror. Invalid input never falls back."""
+        self._commit_snapshot(snapshot, self._begin_publication())
+
+    def refresh(self, loader: Callable[[], AuthoritySnapshot] | None = None):
+        """Revoke first, then synchronously load and publish trusted policy.
+
+        loader is trusted application code with independently established
+        identity/ACL evidence, not event.raw or model data. It takes no arguments
+        and must return an exact AuthoritySnapshot. This API issues no rights.
+        Loading, parsing and clock sampling run outside the authority mutex;
+        caller code owns loader latency, timeouts and cancellation. Exceptions,
+        including cancellation, become a fixed private denial.
+
+        Any newer mutation (including a reentrant one or a failed attempt)
+        supersedes this refresh. Failure never restores old state or clears a
+        newer success. Freshness and accepted revision high-water do not reset.
+        The return value conveys no durable authorization or reconciliation.
+        """
+        epoch = self._begin_publication()
+        try:
+            if not callable(loader):
+                raise _denied()
+            snapshot = loader()
+            self._commit_snapshot(snapshot, epoch)
+        except BaseException:
+            # Revocation already happened at entry. Cleanup here could revoke a
+            # later successful mutation; even cancellation must not do that.
+            raise _denied() from None
+
+    def _commit_snapshot(self, snapshot, epoch):
+        """Shared validation and commit; epoch was assigned before caller work."""
         try:
             snapshot = replace(_exact(snapshot, AuthoritySnapshot))
             observed = _utc(snapshot.observed_at, "observed")
