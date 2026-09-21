@@ -193,6 +193,11 @@ def _scan(path, before, owners, capacity, row_limit, budget_ms, *, card):
         db.row_factory = sqlite3.Row
         db.set_progress_handler(progress, 1000)
         db.execute('PRAGMA query_only=ON')
+        # Connection-local and before the first database read: if the path was
+        # swapped to WAL after our header check, never create a shared wal-index.
+        # Keep normal SQLite locking; immutable mode could ignore live journals.
+        # https://sqlite.org/wal.html#use_of_wal_without_shared_memory
+        db.execute('PRAGMA locking_mode=EXCLUSIVE')
         db.execute('BEGIN')
         version = db.execute('PRAGMA user_version').fetchone()[0]
         fingerprint = replace(before, schema_version=version)

@@ -488,3 +488,48 @@ def test_oversized_blob_in_numeric_metadata(stores, which, table, column, reason
     report = inspect(stores)
     assert_unknown((report.brief, report.card)[which], reason)
     assert SECRET not in repr(report)
+
+
+@pytest.mark.parametrize('which', [0, 1])
+def test_wal_swap_before_connect_never_creates_sidecars(stores, monkeypatch, which):
+    target = stores[which].path
+    replacement = target.parent / 'replacement.db'
+    if which == 0:
+        BriefStore(replacement).enable_delivery()
+    else:
+        CardLedger(replacement, capacity=20).initialize()
+    real_connect = sqlite3.connect
+    db = real_connect(replacement)
+    try:
+        assert db.execute('PRAGMA journal_mode=WAL').fetchone()[0] == 'wal'
+    finally:
+        db.close()
+    assert not Path(str(replacement) + '-wal').exists()
+    assert not Path(str(replacement) + '-shm').exists()
+    replacement_bytes = replacement.read_bytes()
+    touched, swaps = [], []
+
+    class Observe(sqlite3.Connection):
+        def execute(self, *args, **kwargs):
+            try:
+                return super().execute(*args, **kwargs)
+            finally:
+                # A reader may remove sidecars on close; inspect during SQL too.
+                touched.extend(suffix for suffix in ('-wal', '-shm')
+                               if Path(str(target) + suffix).exists())
+
+    def swap_then_connect(path, *args, **kwargs):
+        if path == target.as_uri() + '?mode=ro':
+            os.replace(replacement, target)
+            swaps.append(True)
+            kwargs['factory'] = Observe
+        return real_connect(path, *args, **kwargs)
+
+    monkeypatch.setattr(inventory.sqlite3, 'connect', swap_then_connect)
+    report = inspect(stores)
+    assert swaps == [True]
+    assert_unknown((report.brief, report.card)[which], 'changed')
+    assert touched == []
+    assert target.read_bytes() == replacement_bytes
+    assert not Path(str(target) + '-wal').exists()
+    assert not Path(str(target) + '-shm').exists()
