@@ -24,3 +24,34 @@ jobs:
         run: uv sync --all-extras --locked
       - name: Run release, deployment and live-evidence gates
         run: scripts/ci_release_gates.sh
+
+  image-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build exact-source native production image
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git archive HEAD | docker build --platform linux/amd64 \
+            -f deploy/work-monitor/Dockerfile \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "ostag-image:$GITHUB_SHA" -
+      - name: Verify cold boot and disabled Brief control
+        run: |
+          python3 scripts/verify_work_monitor_image.py \
+            --image "ostag-image:$GITHUB_SHA" --source-sha "$GITHUB_SHA" \
+            --output image-verification
+      - name: Preserve image verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: work-monitor-image-verification
+          path: image-verification/
+          if-no-files-found: warn

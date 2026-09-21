@@ -607,3 +607,24 @@ docker compose -f deploy/work-monitor/docker-compose.yml down  # volume retained
 Run `scripts/work_monitor_container_smoke.sh` to build, verify Feishu/Crypto
 imports, health, SQLite write, restart, and persistence. It retains its unique
 test volume unless `OSTAG_CONTAINER_SMOKE_CLEANUP_VOLUME=1` is explicitly set.
+
+### Native production-image CI
+
+The `image-smoke` job is part of **OS Tag CI**, so its failure prevents that
+workflow from succeeding and triggering automatic production deployment. It builds
+`deploy/work-monitor/Dockerfile` from the exact checkout's Git archive on the
+native Linux/amd64 runner, without repository credentials in the build context.
+
+`scripts/verify_work_monitor_image.py` performs one cold container start with no
+network, host mounts or published ports. It verifies UID10001, all six Brief flags
+OFF, running disabled status, no Brief business databases, exact imported source
+hashes, a fresh current-boot drain acknowledgement and rejection of a wrong-boot
+control. It saves a receipt and container logs as the workflow artifact
+`work-monitor-image-verification`. A health HTTP200 alone does not pass; the
+container is not restarted to turn a failed cold boot into a passing result.
+
+The verifier requires a native Linux/amd64 daemon. Local ARM-to-amd64 emulation
+can hit the status subprocess's existing startup deadline; that failure must be
+recorded rather than weakening the production timeout or silently accepting a
+warm restart. This image check does not enable Brief, prove provider permissions,
+install host tools, exercise multistore rollback or replace D02/live acceptance.
