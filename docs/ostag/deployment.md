@@ -570,33 +570,38 @@ rate limits, no caching, and origin proxying exactly as described in
 `deploy/work-monitor/edgeone-origin.md`.
 
 Back up the live database with SQLite's online API and verify a disposable
-restore before every upgrade:
+restore before every upgrade. Use a private operator-controlled destination
+directory, and a new filename for each copy. Existing targets are always refused,
+including with the legacy `--force` argument. Publication is atomic and cannot
+replace a target created concurrently. Existing SQLite sidecars also cause refusal.
+The operator must keep the destination and its sidecars unused for the entire
+operation; this helper does not establish offline custody or a multi-store snapshot.
+Source SQLite URIs escape literal path characters such as `?` and `#`.
+
+Create a protected restore-check directory instead of a shared fixed `/tmp` path:
+
 
 ```bash
 sudo scripts/backup_work_monitor.sh backup \
   /var/lib/ostag/work_monitor.sqlite3 \
   /var/backups/ostag/work_monitor-$(date -u +%Y%m%dT%H%M%SZ).sqlite3
+restore_check_dir="$(mktemp -d /var/backups/ostag/restore-check.XXXXXXXX)"
 sudo scripts/backup_work_monitor.sh restore \
-  /var/backups/ostag/<selected>.sqlite3 /tmp/ostag-restore-check.sqlite3
-rm /tmp/ostag-restore-check.sqlite3
+  /var/backups/ostag/<selected>.sqlite3 "$restore_check_dir/restored.sqlite3"
 ```
 
-Deploy a new digest only after local gates and backup verification. Roll back
-without changing the database first; if the new release migrated incompatibly,
-stop the service and restore to a new path, then atomically select it:
+Deploy a new digest only after local gates and backup verification. A code-only
+rollback should retain current data. If a release migrated the schema incompatibly,
+restore the selected backup into a new, unused path for inspection. Do not rename
+it over a live database or leave a previous database's WAL/SHM files beside it.
+Stopping one Compose service alone is not proof that all writers have stopped.
 
-```bash
-docker compose -f deploy/work-monitor/docker-compose.yml \
-  -f deploy/work-monitor/docker-compose.production.yml down
-docker pull <registry>/ostag-work-monitor@sha256:<previous-digest>
-export OSTAG_WORK_MONITOR_IMAGE=<registry>/ostag-work-monitor@sha256:<previous-digest>
-sudo scripts/backup_work_monitor.sh restore \
-  /var/backups/ostag/<pre-upgrade>.sqlite3 /var/lib/ostag/work_monitor.restore.sqlite3
-sudo mv /var/lib/ostag/work_monitor.sqlite3 /var/lib/ostag/work_monitor.failed.sqlite3
-sudo mv /var/lib/ostag/work_monitor.restore.sqlite3 /var/lib/ostag/work_monitor.sqlite3
-docker compose -f deploy/work-monitor/docker-compose.yml \
-  -f deploy/work-monitor/docker-compose.production.yml up -d --no-build
-```
+Selecting restored data requires the host recovery controller to establish
+exclusive custody, preserve the newer database and sidecars, validate schema and
+cross-store consistency, and record the authorized data-loss boundary. That
+controller and its live acceptance remain outstanding. The backup helper does not
+perform selection, in-place recovery, or multi-store restoration; the former
+manual `mv` sequence is not an approved production recovery procedure.
 
 These commands are operator instructions, not evidence they were run. Record
 actual external and mobile validation in

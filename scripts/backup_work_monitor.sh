@@ -27,12 +27,12 @@ source = Path(source_text).resolve()
 raw_destination = Path(destination_text).absolute()
 destination_parent = raw_destination.parent.resolve(strict=True)
 destination = destination_parent / raw_destination.name
-force = force_flag == "--force"
+# --force is retained only for argument compatibility. This helper cannot prove
+# exclusive offline custody of a destination or its WAL, so never replaces it.
 if source == destination:
     raise SystemExit("source and destination must differ")
 if not source.is_file():
     raise SystemExit("source database does not exist")
-initial_target = None
 try:
     target_stat = os.lstat(destination)
 except FileNotFoundError:
@@ -40,9 +40,11 @@ except FileNotFoundError:
 else:
     if not stat.S_ISREG(target_stat.st_mode):
         raise SystemExit("destination must not be a symlink or non-regular file")
-    if not force:
-        raise SystemExit("destination exists; pass --force to replace a regular file")
-    initial_target = (target_stat.st_dev, target_stat.st_ino)
+    raise SystemExit("destination exists; choose a new path; in-place restore is unsupported")
+
+for suffix in ("-wal", "-shm", "-journal"):
+    if os.path.lexists(str(destination) + suffix):
+        raise SystemExit("destination SQLite sidecars exist; choose a new path")
 
 fd, temporary_text = tempfile.mkstemp(
     prefix=f".{destination.name}.tmp.", dir=destination.parent
@@ -50,35 +52,30 @@ fd, temporary_text = tempfile.mkstemp(
 os.close(fd)
 temporary = Path(temporary_text)
 try:
-    with sqlite3.connect(f"file:{source}?mode=ro", uri=True) as source_connection:
+    with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as source_connection:
         integrity = source_connection.execute("PRAGMA integrity_check").fetchone()
         if integrity != ("ok",):
             raise SystemExit("source database integrity check failed")
         with sqlite3.connect(temporary) as destination_connection:
             source_connection.backup(destination_connection)
             destination_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        with sqlite3.connect(f"file:{temporary}?mode=ro", uri=True) as verification:
+        with sqlite3.connect(temporary.as_uri() + "?mode=ro", uri=True) as verification:
             if verification.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                 raise SystemExit("copied database integrity check failed")
     os.chmod(temporary, 0o600)
     with temporary.open("rb") as copied:
         os.fsync(copied.fileno())
-    try:
-        final_stat = os.lstat(destination)
-        final_target = (final_stat.st_dev, final_stat.st_ino)
-        if not stat.S_ISREG(final_stat.st_mode) or final_target != initial_target:
-            raise SystemExit("destination changed during backup; refusing replacement")
-    except FileNotFoundError:
-        if initial_target is not None:
-            raise SystemExit("destination changed during backup; refusing replacement")
     directory_fd = os.open(destination_parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
-        os.replace(
+        # Atomic no-replace publication; a racing writer wins without data loss.
+        os.link(
             temporary.name,
             destination.name,
             src_dir_fd=directory_fd,
             dst_dir_fd=directory_fd,
+            follow_symlinks=False,
         )
+        temporary.unlink()
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
