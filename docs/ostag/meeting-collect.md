@@ -1,9 +1,10 @@
 # Local meeting collection draft
 
-Run from the repository using the existing Python 3.11 environment:
+Run from the repository after installing dependencies with `uv sync --locked --extra dev`
+(Python 3.11+). Replace the example dates with your completed time window:
 
 ```sh
-/Volumes/AIMATE_WORK/Developer/CodeX/OStag-company-integration/.venv/bin/python -m ostag.main meeting collect \
+uv run ostag meeting collect \
   --repo osborn-studio/ostag \
   --start 2026-09-13T07:00:00Z --end 2026-09-20T07:00:00Z \
   --timezone America/Los_Angeles --goal '项目周会' \
