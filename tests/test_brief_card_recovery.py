@@ -1,11 +1,12 @@
 """Explicit trusted recovery never renews send or lifetime source authority."""
 import asyncio
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import replace
 import json
 import sqlite3
 import stat
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -315,23 +316,88 @@ async def test_commit_wait_and_final_release_denial_cannot_restore_epoch(
 
 
 @pytest.mark.parametrize('failure', ['stop', 'cancel', 'deadline'])
-async def test_capacity_and_abandonment_during_lock_wait(tmp_path, failure):
-    service = make_service(tmp_path/'cards.db', timeout=0.1)
+@pytest.mark.parametrize('observer_delay', [0, 0.2])
+async def test_capacity_and_abandonment_during_lock_wait(
+        tmp_path, monkeypatch, failure, observer_delay):
+    service = make_service(tmp_path/'cards.db')
     first = await service.deliver(SCOPE, 'job', 'revision')
-    with sqlite3.connect(service.ledger.path) as holder:
+    # Control only this module's operation deadline, not asyncio's watchdog clock.
+    # A slow observer must not turn stop/cancel coverage into a timeout test.
+    monotonic = [100.0]
+    monkeypatch.setattr(module, 'time', SimpleNamespace(**(vars(time) | {'monotonic': lambda: monotonic[0]})))
+    service.timeout = 0.1
+    waiting = asyncio.Event()
+    original = service.ledger.recovery_step
+
+    def observed_busy(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except module._Busy:
+            waiting.set()
+            raise
+
+    monkeypatch.setattr(service.ledger, 'recovery_step', observed_busy)
+    with closing(sqlite3.connect(service.ledger.path)) as holder:
         holder.execute('BEGIN IMMEDIATE')
         task = asyncio.create_task(recover(service, first.delivery_id))
-        await asyncio.sleep(0.01)
-        assert service.active_operations == 1
-        with pytest.raises(CardDeliveryError):
-            await recover(service, first.delivery_id)
-        if failure == 'stop':
-            service.stop()
-        elif failure == 'cancel':
-            task.cancel()
-        with pytest.raises(asyncio.CancelledError if failure == 'cancel' else CardDeliveryError):
-            await task
-        holder.rollback()
+        try:
+            await asyncio.wait_for(waiting.wait(), 2)
+            await asyncio.sleep(observer_delay)
+            assert not task.done()
+            assert service.active_operations == 1
+            with pytest.raises(CardDeliveryError):
+                await recover(service, first.delivery_id)
+            if failure == 'stop':
+                service.stop()
+            elif failure == 'cancel':
+                task.cancel()
+            else:
+                monotonic[0] += 0.2
+            expected = asyncio.CancelledError if failure == 'cancel' else CardDeliveryError
+            with pytest.raises(expected):
+                await asyncio.wait_for(task, 2)
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
+            finally:
+                holder.rollback()
+    assert service.active_operations == 0
+    assert service.ledger.status(SCOPE, first.delivery_id).epoch == 0
+
+
+async def test_recovery_lock_wait_expires_with_real_monotonic_clock(tmp_path, monkeypatch):
+    service = make_service(tmp_path/'cards.db')
+    first = await service.deliver(SCOPE, 'job', 'revision')
+    service.timeout = 0.2
+    busy_hits = []
+    original = service.ledger.recovery_step
+
+    def observed_busy(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except module._Busy:
+            busy_hits.append(1)
+            raise
+
+    monkeypatch.setattr(service.ledger, 'recovery_step', observed_busy)
+    with closing(sqlite3.connect(service.ledger.path)) as holder:
+        holder.execute('BEGIN IMMEDIATE')
+        started = time.monotonic()
+        task = asyncio.create_task(recover(service, first.delivery_id))
+        try:
+            with pytest.raises(CardDeliveryError):
+                await asyncio.wait_for(task, 5)
+            assert busy_hits
+            assert time.monotonic() - started >= service.timeout
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
+            finally:
+                holder.rollback()
     assert service.active_operations == 0
     assert service.ledger.status(SCOPE, first.delivery_id).epoch == 0
 
