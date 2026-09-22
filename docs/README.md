@@ -14,8 +14,9 @@ A completed code change is not proof of production activation or business accept
 |---|---|
 | Understand the system / 理解系统 | [Architecture / 架构](ostag/architecture.md) |
 | Run and inspect tasks / 运行与查询任务 | [CLI reference](cli_reference.md) |
-| Prepare a meeting locally / 本地会议准备 | [Local collection](ostag/meeting-collect.md), [synthetic preview](ostag/meeting-preview.md) |
-| Configure the business model / 配置业务模型 | [DeepSeek profile and private key entry](ostag/deepseek.md) |
+| Prepare a meeting locally / 本地会议准备 | [Local collection](ostag/meeting-collect.md), [synthetic preview (fixture only, no model call)](ostag/meeting-preview.md) |
+| Configure task execution / 配置任务执行 | [Executor conformance](ostag/executor_conformance.md) |
+| Configure Brief/meeting generation (disabled by default) / 配置简报与会议生成（默认关闭） | [DeepSeek profile and private key entry](ostag/deepseek.md) |
 | Operate the task board / 使用任务看板 | [Work monitor](ostag/work_monitor.md), [scoped operational reports](ostag/operational_report.md) |
 | Deploy and recover / 部署与恢复 | [Deployment](ostag/deployment.md), [host rollout](ostag/host-rollout.md) |
 | Assess remaining work / 了解待完成工作 | [Delivery and acceptance plan](ostag/delivery-implementation-plan-2026-09-21.md) |
@@ -98,4 +99,4 @@ Inspect its completeness and coverage fields. If safe patch planning is supporte
 by your installed version and repository configuration, preview `neat fix` before
 applying it; manual content edits still need source and link verification.
 
-本次整理以规则扫描、源代码核对和相对链接检查为依据；规则检查没有告警，并不证明所有历史文档已完成语义审核。
+Neat 的机械规则覆盖不等于语义审核或生产验收。请检查完整性与覆盖范围字段。如果已安装版本和仓库配置支持安全修复，先预览 `neat fix` 再应用；手工修改仍需核对源代码与链接。

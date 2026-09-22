@@ -66,7 +66,8 @@ uv run ostag meeting collect \
   --format markdown
 ```
 
-Replace the example dates and chat ID. Output is private stdout; the command does
+Replace the example dates and chat ID; repeat `--chat-id` for a second chat
+(maximum two). Output is private stdout; the command does
 not save or send it automatically. Missing or incomplete sources are reported as
 gaps (exit code 3), not as complete history. Omitting `--chat-id` produces a
 GitHub-only draft with a Feishu coverage gap. This is single-repository collection,
@@ -77,7 +78,8 @@ not an organization-wide change feed. See [collection guide](docs/ostag/meeting-
 These are separate configuration surfaces:
 
 - **Task execution:** `OSTAG_BACKEND=mock|codex_cli|claude_cli|kimi_cli|openai_api`.
-  Install/configure the selected executor; Kimi requires its feature gates and
+  Install/configure the selected executor (`uv sync --locked --extra openai`
+  for `openai_api`); Kimi requires its feature gates and
   conformance check. See [executor conformance](docs/ostag/executor_conformance.md).
 - **Brief/meeting generation:** the DeepSeek profile uses a fixed
   `https://api.deepseek.com` origin, a protected key file and explicit trusted
@@ -149,8 +151,10 @@ that live acceptance passed. See [documentation maintenance](docs/README.md#docu
 
 ## Deployment and recovery
 
-OStag's production workflow targets Tencent Cloud Lighthouse after successful
-main CI. Consult [deployment](docs/ostag/deployment.md),
+OStag's automatic deployment workflow targets Tencent Cloud Lighthouse after
+successful main CI. Brief service production composition and full ledger host
+migration remain separate, unfinished gates. For a local server installation,
+include the `server` extra (`uv sync --locked --extra server`). Consult [deployment](docs/ostag/deployment.md),
 [work monitor](docs/ostag/work_monitor.md) and [security](docs/ostag/security.md).
 The installed host launcher and its configured hash are a separate release gate.
 
