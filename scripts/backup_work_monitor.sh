@@ -15,6 +15,7 @@ force="${4:-}"
 uv run python - "$mode" "$source_db" "$destination_db" "$force" <<'PY'
 from __future__ import annotations
 
+from contextlib import closing
 import os
 import sqlite3
 import stat
@@ -52,35 +53,42 @@ fd, temporary_text = tempfile.mkstemp(
 os.close(fd)
 temporary = Path(temporary_text)
 try:
-    with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True) as source_connection:
+    with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as source_connection:
         integrity = source_connection.execute("PRAGMA integrity_check").fetchone()
         if integrity != ("ok",):
             raise SystemExit("source database integrity check failed")
-        with sqlite3.connect(temporary) as destination_connection:
+        with closing(sqlite3.connect(temporary)) as destination_connection:
             source_connection.backup(destination_connection)
             destination_connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        with sqlite3.connect(temporary.as_uri() + "?mode=ro", uri=True) as verification:
+            if destination_connection.execute("PRAGMA journal_mode=DELETE").fetchone() != ("delete",):
+                raise SystemExit("copied database could not become a standalone file")
+        with closing(sqlite3.connect(temporary.as_uri() + "?mode=ro", uri=True)) as verification:
             if verification.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                 raise SystemExit("copied database integrity check failed")
     os.chmod(temporary, 0o600)
-    with temporary.open("rb") as copied:
+    with temporary.open("r+b") as copied:
         os.fsync(copied.fileno())
     directory_fd = os.open(destination_parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         # Atomic no-replace publication; a racing writer wins without data loss.
-        os.link(
-            temporary.name,
-            destination.name,
-            src_dir_fd=directory_fd,
-            dst_dir_fd=directory_fd,
-            follow_symlinks=False,
-        )
+        try:
+            os.link(
+                temporary.name,
+                destination.name,
+                src_dir_fd=directory_fd,
+                dst_dir_fd=directory_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError:
+            raise SystemExit("destination appeared concurrently; choose a new path") from None
         temporary.unlink()
         os.fsync(directory_fd)
     finally:
         os.close(directory_fd)
 finally:
     temporary.unlink(missing_ok=True)
+    for suffix in ("-wal", "-shm", "-journal"):
+        Path(str(temporary) + suffix).unlink(missing_ok=True)
 
 print(f"{mode} verified: {destination}")
 PY

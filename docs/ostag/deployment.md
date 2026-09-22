@@ -578,14 +578,16 @@ The operator must keep the destination and its sidecars unused for the entire
 operation; this helper does not establish offline custody or a multi-store snapshot.
 Source SQLite URIs escape literal path characters such as `?` and `#`.
 
-Create a protected restore-check directory instead of a shared fixed `/tmp` path:
+Both `backup` and `restore` copy and verify a single database; neither selects it
+for the service. Create a root-owned mode-0700 restore-check directory instead
+of a shared fixed `/tmp` path:
 
 
 ```bash
 sudo scripts/backup_work_monitor.sh backup \
   /var/lib/ostag/work_monitor.sqlite3 \
   /var/backups/ostag/work_monitor-$(date -u +%Y%m%dT%H%M%SZ).sqlite3
-restore_check_dir="$(mktemp -d /var/backups/ostag/restore-check.XXXXXXXX)"
+restore_check_dir="$(sudo mktemp -d /var/backups/ostag/restore-check.XXXXXXXX)"
 sudo scripts/backup_work_monitor.sh restore \
   /var/backups/ostag/<selected>.sqlite3 "$restore_check_dir/restored.sqlite3"
 ```

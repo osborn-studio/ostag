@@ -167,3 +167,38 @@ def test_restore_refuses_orphaned_sidecars(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match='sidecars'):
         _embedded(monkeypatch, 'restore', source, target)
     assert not target.exists() and wal.read_bytes() == b'preserve'
+
+
+def test_wal_copy_closes_all_connections_before_publication(tmp_path, monkeypatch):
+    import os
+    source, target = tmp_path / 'wal-source.db', tmp_path / 'copy.db'
+    live = sqlite3.connect(source)
+    live.execute('PRAGMA journal_mode=WAL')
+    live.execute('CREATE TABLE proof(value)')
+    live.execute("INSERT INTO proof VALUES ('committed-in-wal')")
+    live.commit()
+    real_connect, real_link = sqlite3.connect, os.link
+    connections = []
+    class Tracked(sqlite3.Connection):
+        closed = False
+        def close(self):
+            super().close()
+            self.closed = True
+    def connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs, factory=Tracked)
+        connections.append(conn)
+        return conn
+    def publish(*args, **kwargs):
+        assert len(connections) == 3 and all(c.closed for c in connections)
+        return real_link(*args, **kwargs)
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    monkeypatch.setattr(os, 'link', publish)
+    try:
+        _embedded(monkeypatch, 'backup', source, target)
+        with real_connect(target) as db:
+            assert db.execute('SELECT value FROM proof').fetchone() == ('committed-in-wal',)
+        assert not any('.tmp.' in p.name for p in tmp_path.iterdir())
+    finally:
+        for conn in connections:
+            conn.close()
+        live.close()
