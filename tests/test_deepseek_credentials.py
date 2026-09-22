@@ -97,7 +97,7 @@ async def test_connectivity_check_uses_only_synthetic_bounded_data(tmp_path, mon
             return TransportResponse('{"ok":true}', 'deepseek-flash', Usage(10, 5, 9))
     monkeypatch.setattr(deepseek_check, 'DeepSeekReadOnlyTransport', Transport)
     assert await deepseek_check.check(directory) == 9
-    assert seen[0].parameters.budget.max_output_tokens == 32
+    assert seen[0].parameters.budget.max_output_tokens == 128
     assert 'synthetic-secret' not in seen[0].serialized_input
 
 

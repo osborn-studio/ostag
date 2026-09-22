@@ -18,11 +18,13 @@ Run on the machine that should own the credential, in an interactive terminal:
 python -m ostag.briefs.deepseek_credentials --directory /absolute/private/secrets
 ```
 
-The parent directory must already exist. This creates a directory with mode 0700
+The parent directory must already exist. The filesystem must support POSIX
+permissions and hardlinks (APFS/ext4, not exFAT). This creates a directory with mode 0700
 and an exclusive `deepseek-api-key` file with mode 0600. Existing keys are never
 silently replaced. Input is hidden and refuses a terminal that cannot disable
 echo. Never pass the key as an argument, paste it in chat, or commit it to Git.
-The input command saves the key only; it does not start jobs or send data.
+Failure messages distinguish a missing parent, existing credential and unsupported
+permissions/filesystem without showing secret content. The input command saves the key only; it does not start jobs or send data.
 
 An optional explicit check sends one small synthetic prompt, incurs API usage,
 and reports only a fixed status and a conservative cost estimate:

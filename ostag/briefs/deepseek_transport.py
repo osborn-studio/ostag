@@ -36,7 +36,6 @@ MAX_OUTPUT_TOKENS = 8192
 FRAMING_RESERVE = 512
 MAX_REQUEST_BYTES = 6 * 1048576 + 16384
 MAX_ENVELOPE_BYTES = 8 * 1048576
-MAX_COUNT_BYTES = 4096
 MAX_CHUNKS = 4096
 _ORIGIN = "https://api.deepseek.com"
 _STOP_REASONS = frozenset({"checkpoint_denied", "cancelled", "timeout"})
@@ -49,6 +48,8 @@ _DIAGNOSTICS = {message: message for message in (
     "unsupported response encoding", "invalid response size",
     "provider response too large", "invalid provider input count",
     "invalid provider JSON", "invalid provider envelope",
+    "invalid provider request", "provider unauthorized", "provider payment required",
+    "provider rate limited", "provider unavailable", "provider request refused",
 )}
 
 
@@ -282,6 +283,14 @@ class DeepSeekReadOnlyTransport:
                             response = await client.send(outgoing, stream=True)
                             try:
                                 check()
+                                if response.status_code != 200:
+                                    reason = {400: "invalid provider request", 401: "provider unauthorized",
+                                        402: "provider payment required", 403: "provider unauthorized",
+                                        429: "provider rate limited"}.get(response.status_code,
+                                        "provider unavailable" if response.status_code >= 500
+                                        else "provider request refused")
+                                    # No error body is read or trusted. Spend stays unknown.
+                                    raise DeepSeekTransportError(reason)
                                 if response.headers.get("content-encoding", "identity") != "identity":
                                     raise DeepSeekTransportError("unsupported response encoding")
                                 length = response.headers.get("content-length")

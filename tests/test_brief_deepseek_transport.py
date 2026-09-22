@@ -96,11 +96,6 @@ async def test_overrun_usage_not_clamped():
     assert result.body == ''
 
 
-async def test_bad_http_status_cannot_produce_draft():
-    result = await adapter(Wire(status=429)).generate(request(parameters=params()))
-    assert result.body == ''
-
-
 async def test_cancel_and_authorization_block_egress():
     from ostag.briefs.deepseek_transport import DeepSeekTransportError
     for cancelled in (False, True):
@@ -236,3 +231,15 @@ def test_composition_refuses_unaudited_or_mismatched_transport(tmp_path, kind):
         h.composition.generation, parameters=params())
     with pytest.raises(ValueError):
         replace(h.composition, model_transport=transports[kind], generation=generation)
+
+
+@pytest.mark.parametrize('status,reason', [(400,'invalid provider request'),
+    (401,'provider unauthorized'), (402,'provider payment required'),
+    (403,'provider unauthorized'), (429,'provider rate limited'), (503,'provider unavailable')])
+async def test_http_failures_have_fixed_safe_diagnostics(status, reason):
+    from ostag.briefs.deepseek_transport import DeepSeekTransportError
+    wire = Wire(data={'error': SECRET}, status=status)
+    with pytest.raises(DeepSeekTransportError, match='^'+reason+'$') as error:
+        await adapter(wire).generate(request(parameters=params()))
+    assert SECRET not in str(error.value) and error.value.__context__ is None
+    assert wire.closed and all(s.closed for s in wire.streams)

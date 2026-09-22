@@ -48,7 +48,7 @@ def store_key(directory: Path, key: str):
     """Create once; refuses replacement, links and non-private directories."""
     if not _valid(key):
         raise ValueError('invalid API key format')
-    failed = False
+    failure = None
     try:
         directory_fd = _directory(directory, create=True)
         temporary = '.deepseek-key-' + uuid4().hex
@@ -77,10 +77,14 @@ def store_key(directory: Path, key: str):
                     os.unlink(temporary, dir_fd=directory_fd)
             finally:
                 os.close(directory_fd)
+    except FileExistsError:
+        failure = 'credential already present; replacement refused'
+    except FileNotFoundError:
+        failure = 'credential parent directory missing'
     except Exception:
-        failed = True
-    if failed:
-        raise ValueError('credential could not be saved; existing files are not replaced')
+        failure = 'credential filesystem or permissions unavailable; requires private modes and hardlinks'
+    if failure:
+        raise ValueError(failure)
 
 
 def read_key(directory: Path) -> str:
@@ -127,6 +131,14 @@ def main():
             warnings.simplefilter('error', getpass.GetPassWarning)
             key = getpass.getpass('DeepSeek API Key（隐藏输入，不会显示）: ')
         store_key(args.directory, key)
+    except ValueError as error:
+        if str(error) in {'invalid API key format', 'credential already present; replacement refused',
+                'credential parent directory missing',
+                'credential filesystem or permissions unavailable; requires private modes and hardlinks'}:
+            print('Key setup did not complete: ' + str(error))
+        else:
+            print('Key setup did not complete.')
+        return 1
     except (Exception, KeyboardInterrupt):
         print('Key setup did not complete. No secret or provider error was printed.')
         return 1
