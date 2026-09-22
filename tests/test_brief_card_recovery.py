@@ -6,6 +6,7 @@ import json
 import sqlite3
 import stat
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -315,23 +316,51 @@ async def test_commit_wait_and_final_release_denial_cannot_restore_epoch(
 
 
 @pytest.mark.parametrize('failure', ['stop', 'cancel', 'deadline'])
-async def test_capacity_and_abandonment_during_lock_wait(tmp_path, failure):
-    service = make_service(tmp_path/'cards.db', timeout=0.1)
+@pytest.mark.parametrize('observer_delay', [0, 0.2])
+async def test_capacity_and_abandonment_during_lock_wait(
+        tmp_path, monkeypatch, failure, observer_delay):
+    service = make_service(tmp_path/'cards.db')
     first = await service.deliver(SCOPE, 'job', 'revision')
+    # Control only this module's operation deadline, not asyncio's watchdog clock.
+    # A slow observer must not turn stop/cancel coverage into a timeout test.
+    monotonic = [100.0]
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: monotonic[0]))
+    service.timeout = 0.1
+    waiting = asyncio.Event()
+    original = service.ledger.recovery_step
+
+    def observed_busy(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        except module._Busy:
+            waiting.set()
+            raise
+
+    monkeypatch.setattr(service.ledger, 'recovery_step', observed_busy)
     with sqlite3.connect(service.ledger.path) as holder:
         holder.execute('BEGIN IMMEDIATE')
         task = asyncio.create_task(recover(service, first.delivery_id))
-        await asyncio.sleep(0.01)
-        assert service.active_operations == 1
-        with pytest.raises(CardDeliveryError):
-            await recover(service, first.delivery_id)
-        if failure == 'stop':
-            service.stop()
-        elif failure == 'cancel':
-            task.cancel()
-        with pytest.raises(asyncio.CancelledError if failure == 'cancel' else CardDeliveryError):
-            await task
-        holder.rollback()
+        try:
+            await asyncio.wait_for(waiting.wait(), 2)
+            await asyncio.sleep(observer_delay)
+            assert not task.done()
+            assert service.active_operations == 1
+            with pytest.raises(CardDeliveryError):
+                await recover(service, first.delivery_id)
+            if failure == 'stop':
+                service.stop()
+            elif failure == 'cancel':
+                task.cancel()
+            else:
+                monotonic[0] += 0.2
+            expected = asyncio.CancelledError if failure == 'cancel' else CardDeliveryError
+            with pytest.raises(expected):
+                await asyncio.wait_for(task, 2)
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
+            holder.rollback()
     assert service.active_operations == 0
     assert service.ledger.status(SCOPE, first.delivery_id).epoch == 0
 
