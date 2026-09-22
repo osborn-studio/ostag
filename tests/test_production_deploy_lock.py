@@ -96,6 +96,10 @@ class Host:
         self.bin = self.root / "bin"
         self.bin.mkdir()
         self.lock = self.root / "deploy.lock"
+        self.maintenance = self.root / 'maintenance.json'
+        self.maintenance.write_text(json.dumps(dict(schema_version=1, generation=0,
+            state='open', maintenance_id=None, request_sha256=None)))
+        self.maintenance.chmod(0o600)
         self.processes: list[subprocess.Popen] = []
         self.outputs = []
         for name in ("docker", "curl", "python3", "sha256sum"):
@@ -112,6 +116,7 @@ class Host:
             "REAL_PYTHON": sys.executable,
             "FAKE_ROOT": str(self.root),
             "OSTAG_DEPLOY_LOCK_PATH": str(self.lock),
+            "OSTAG_MAINTENANCE_STATE_PATH": str(self.maintenance),
             "OSTAG_RELEASE_ROOT": str(self.root),
             "OSTAG_PRODUCTION_ENV_FILE": str(env_file),
             "OSTAG_LOCAL_HEALTH_URL": "http://test.invalid/never-contacted",

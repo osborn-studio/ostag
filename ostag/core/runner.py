@@ -23,6 +23,7 @@ from ostag.core.followups import FollowUpService
 from ostag.core.prompt import PromptContext, build_chat_prompt
 from ostag.core.receipts import parse_receipt_command, render_receipt_text
 from ostag.core.run_ledger import RunLedger
+from ostag.core.ledger_factory import configured_ledger
 from ostag.core.safety import check_message_length, sanitize_user_text
 from ostag.core.schemas import ContextPacket, LedgerEvent, Run, SchemaError, new_id, utc_now_iso
 from ostag.mfs.client import MFSClient
@@ -52,13 +53,23 @@ class OSTagRunner:
         self.mfs = mfs_client or MFSClient(config)
         self.auto_base = auto_base_workflow or AutoBaseWorkflow(config)
         self.channel_brain = channel_brain_store or ChannelBrainStore(config)
-        self.run_ledger = run_ledger or RunLedger(config.run_ledger_path)
+        self.run_ledger = configured_ledger(config.run_ledger_path, managed_paths=config.managed_ledger_paths, existing=run_ledger)
         executors = (
             build_apply_executors(self.auto_base) if hasattr(self.auto_base, "requirements") else {}
         )
         self.approvals = approvals or ApprovalService(config, self.run_ledger, executors)
+        if config.managed_ledger_paths:
+            for component in (self.auto_base, self.approvals):
+                candidate = getattr(component, 'run_ledger', getattr(component, 'ledger', None))
+                if candidate is None:
+                    raise ValueError('Managed ledger policy requires validated workflow and approval ledgers.')
+                configured_ledger(config.run_ledger_path,
+                    managed_paths=config.managed_ledger_paths, existing=candidate)
         self.budget = BudgetService(config, self.run_ledger)
         self.work_monitor = work_monitor
+        if config.managed_ledger_paths and work_monitor is not None:
+            configured_ledger(work_monitor.store.path.with_name('run_ledger.jsonl'),
+                managed_paths=config.managed_ledger_paths, existing=work_monitor.ledger)
         self.copilot_relay = copilot_relay
         self.github_vercel_release = (
             github_vercel_release_workflow or GitHubVercelReleaseWorkflow(config)

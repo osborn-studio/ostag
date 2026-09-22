@@ -28,6 +28,11 @@ BRIEF_FLAGS = (
 )
 
 
+def _managed_ledger_paths():
+    from ostag.core.ledger_factory import parse_managed_paths
+    return parse_managed_paths(os.getenv('OSTAG_MANAGED_LEDGER_PATHS', '[]'))
+
+
 def _brief_bool(name: str) -> bool:
     value = os.getenv(name, "false").strip().lower()
     if value not in {"true", "1", "yes", "on", "false", "0", "no", "off"}:
@@ -102,6 +107,7 @@ class Settings:
     allow_shell: bool = False
     audit_log: Path = Path("./logs/audit.log")
     run_ledger_path: Path = Path("./logs/run_ledger.jsonl")
+    managed_ledger_paths: tuple[Path, ...] = ()
     actor_permissions: tuple[str, ...] = ()
     default_permission_level: str = "propose"
     apply_enabled: bool = False
@@ -278,6 +284,8 @@ class Settings:
     brief_control_path: Path = Path("/run/ostag-brief-control/control.json")
 
     def validate(self) -> Settings:
+        from ostag.core.ledger_factory import validate_managed_paths
+        validate_managed_paths(self.managed_ledger_paths)
         for field, env in BRIEF_FLAGS:
             value = getattr(self, field)
             if type(value) is not bool:
@@ -515,6 +523,7 @@ def load_settings(config_path: str | None = None, **overrides: object) -> Settin
         allow_shell=_bool("OSTAG_ALLOW_SHELL", False),
         audit_log=Path(os.getenv("OSTAG_AUDIT_LOG", "./logs/audit.log")),
         run_ledger_path=Path(os.getenv("OSTAG_RUN_LEDGER_PATH", "./logs/run_ledger.jsonl")),
+        managed_ledger_paths=_managed_ledger_paths(),
         actor_permissions=_csv("OSTAG_ACTOR_PERMISSIONS"),
         default_permission_level=os.getenv("OSTAG_DEFAULT_PERMISSION_LEVEL", "propose"),
         apply_enabled=_bool("OSTAG_APPLY_ENABLED", False),

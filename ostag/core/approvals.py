@@ -14,6 +14,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol, runtime_checkable
 
+from ostag.core.frozen_custody import deny_retired
+from ostag.core.effects import PendingEffect
+
 from ostag.config import Settings
 from ostag.core.channel_brain import ChannelBrainStore, ChannelPolicy
 from ostag.core.followups import FollowUpService
@@ -47,7 +50,7 @@ PENDING_STATES = ("proposed", "needs_approval", "ready_to_apply")
 
 @runtime_checkable
 class ApplyExecutor(Protocol):
-    async def apply(self, receipt: ActionReceipt) -> str:
+    async def apply(self, receipt: ActionReceipt) -> str | PendingEffect:
         """Execute the mutation described by the receipt; return evidence text."""
 
 
@@ -254,6 +257,7 @@ class ApprovalService:
             }
 
         receipt = self._resolve_receipt(command.reference, chat_id, platform or None)
+        deny_retired(receipt)
         self._check_stale(receipt, actor_id)
 
         if command.verb == "approve":
@@ -338,9 +342,38 @@ class ApprovalService:
                     ),
                 )
             try:
-                evidence = await executor.apply(applying)
+                if applying.target_system == "brief_field_change":
+                    from ostag.core.effects import _authorized_apply_invocation
+                    with _authorized_apply_invocation(self.ledger, applying) as invocation:
+                        observation = await executor.apply(applying)
+                        if (type(observation) is not PendingEffect
+                                or observation.action_id != applying.action_id
+                                or observation.attempt_id != invocation.attempt_id):
+                            raise SchemaError("effect_verification_required",
+                                "An external observation is not verified execution evidence.",
+                                "Reconcile the journal and independent readback before completion.")
+                        return {"action": applying.to_dict(), "pending_effect": observation.to_dict()}
+                else:
+                    evidence = await executor.apply(applying)
             except Exception as exc:  # noqa: BLE001
                 failed = applying.with_state("failed")
+                if applying.target_system == "brief_field_change":
+                    # Provider bodies and storage exceptions can contain private
+                    # field values. Only fixed diagnostics cross this boundary.
+                    # Failed state is not proof of provider absence; the effect
+                    # journal and JSONL retain custody even if this write fails.
+                    try:
+                        self.ledger.record_receipt_state(
+                            failed, previous_state=applying.state, actor_id=actor_id,
+                            detail="effect_verification_required",
+                        )
+                    except Exception:
+                        pass
+                    raise SchemaError(
+                        code="apply_failed",
+                        message="External effect remains unverified.",
+                        recovery_hint="Reconcile retained evidence before any further attempt.",
+                    ) from None
                 self.ledger.record_receipt_state(
                     failed,
                     previous_state=applying.state,
@@ -399,6 +432,8 @@ class ApprovalService:
                 f"这是高风险操作，还需 {remaining} 位其他审批人回复 "
                 f"approve {receipt.action_id}。\n{render_receipt_text(receipt)}"
             )
+        if "pending_effect" in result:
+            return f"操作结果待核验，尚未确认执行完成。请勿重复执行 {receipt.action_id}。"
         verb_labels = {"approve": "已批准", "reject": "已拒绝", "apply": "已执行"}
         prefix = verb_labels.get(command.verb, command.verb)
         return f"{prefix} {receipt.action_id}。\n{render_receipt_text(receipt)}"

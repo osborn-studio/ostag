@@ -214,7 +214,7 @@ def test_inert_app_and_reentry_with_no_business_files(tmp_path):
         first = app.state.brief_status_owner
         response = client.get("/healthz")
         assert response.status_code == 200 and response.json() == {"status": "ok"}
-        assert response.headers["X-OStag-Brief-Status"] == "ok"
+        assert response.headers["X-OStag-Brief-Status"] == "ok", first.reason
         control(configured.brief_control_path, first.boot_id)
         # Observe actual heartbeat publication with a bounded deadline, no race-hiding sleep.
         client.portal.call(wait_for_generation, first, 1)

@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
+from pathlib import Path
 
 from ostag.briefs import startup_inventory as inv
 from ostag.briefs import retention, revisions
@@ -54,6 +55,8 @@ def reconcile_startup(*, target_identities, generation_config: GenerationConfig,
         separators=(',', ':')).encode()).hexdigest()
     if failures:
         return Reconciliation(report.binding, persistence, False, failures, 0, 0, 0)
+    # Inventory validates all inputs before normalization or filesystem access.
+    # Use its same absolute Path contract for the second, cross-reference scan.
     data = {}
     # SELECT only bounded metadata. Never pull draft bodies/source excerpts.
     columns = {
@@ -68,6 +71,7 @@ def reconcile_startup(*, target_identities, generation_config: GenerationConfig,
         'callback': {'brief_callbacks': 'binding'},
     }
     try:
+        paths = {kind: Path(arguments[kind + '_path']).absolute() for kind in KINDS}
         for kind in KINDS:
             tables = {}
             def capture(db, remaining):
@@ -83,17 +87,17 @@ def reconcile_startup(*, target_identities, generation_config: GenerationConfig,
                         "CASE WHEN length(CAST(payload_json AS BLOB))<=1048576 AND json_valid(payload_json) "
                         "THEN CASE WHEN json_extract(payload_json,'$.retired')=1 THEN '{}' ELSE "
                         + inv._bounded_text("json_extract(payload_json,'$.config')", 16384)
-                        + ' END END'])
+                        + ' END END'], nullable=(0,))
                 if kind == 'retention':
                     tables['done'] = inv._rows(db, remaining, 'retention_targets', 'scope,job,kind', 'done')
                 if kind == 'revision':
                     tables['bindings'] = inv._fetch(db, remaining, 'revision_roots', [
                         inv._bounded_text('job'), *[inv._bounded_text(
                             "json_extract(snapshot,'$." + name + "')", 8192)
-                            for name in ('revision', 'outbox', 'destination', 'binding')]])
+                            for name in ('revision', 'outbox', 'destination', 'binding')]], nullable=(1, 2, 3, 4))
                 return ()
             budget = getattr(arguments['config'], kind + '_budget')
-            result = inv._scan(arguments[kind + '_path'], replace(getattr(report, kind).fingerprint, schema_version=None),
+            result = inv._scan(paths[kind], replace(getattr(report, kind).fingerprint, schema_version=None),
                 budget.row_limit, budget.budget_ms, version=getattr(arguments['config'], kind + '_schema'),
                 verify=lambda db: None, count=capture)
             # _scan expects a filesystem-only fingerprint, without schema version.
@@ -107,6 +111,7 @@ def reconcile_startup(*, target_identities, generation_config: GenerationConfig,
     leases = counts['brief']['jobs.custody']
     unknown = sum(counts['brief'][k] for k in ('costs.started', 'costs.unknown',
         'deliveries.started', 'deliveries.unknown', 'reads.unsettled'))
+    unknown += sum(counts['brief'].get(k, 0) for k in ('effects.begun', 'effects.unknown'))
     unknown += sum(counts['card'][k] for k in ('cards.started', 'cards.unknown'))
     blockers = set()
     try:
@@ -175,8 +180,13 @@ def reconcile_startup(*, target_identities, generation_config: GenerationConfig,
         if (job not in boxes or (revision, outbox, destination) !=
                 (boxes[job][2], boxes[job][0], jobs[job][7])):
             blockers.add('revision_binding')
-        if job in acknowledged and json.loads(binding) != acknowledged[job][0]['binding']:
-            blockers.add('revision_binding')
+        if job in acknowledged:
+            try:
+                matches = json.loads(binding) == acknowledged[job][0]['binding']
+            except (TypeError, ValueError):
+                matches = False
+            if not matches:
+                blockers.add('revision_binding')
     if counts['revision'].get('events', 0):
         blockers.add('revision_chain_requires_verification')
     for (raw,) in data['callback']['brief_callbacks']:

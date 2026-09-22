@@ -403,7 +403,9 @@ previous image and Compose file. It deliberately does not restore the database
 automatically: retain the failed database and use the verified backup only
 after an operator confirms that a migration is incompatible.
 
-Run a non-mutating server check at any time:
+After trusted state provisioning and verified launcher installation, run the
+non-mutating server check. An active maintenance seal or unavailable state
+denies this check before runtime access; it is not a recovery bypass:
 
 ```bash
 /usr/local/sbin/ostag-deploy-work-monitor preflight
@@ -446,6 +448,11 @@ script walks directory descriptors without following symlinks. The lock itself
 must be a regular file owned by the effective UID, exactly mode `0600`, with
 one link; symlinks, hardlinks, special files, and permissive files are refused.
 The default `/run` location assumes the existing trusted root host invocation.
+
+The launcher also requires the persistent [maintenance state](maintenance-seal.md)
+under this lock before runtime access. Missing or sealed state denies preflight
+and deployment. Trusted offline provisioning and verified installation remain
+outstanding; the repository change does not initialize production state.
 
 `OSTAG_DEPLOY_LOCK_PATH` is an explicit absolute path override solely for trusted
 isolated tests or host administration. Tests must choose a private local temp

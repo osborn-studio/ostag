@@ -1,5 +1,6 @@
 import os
 import shutil
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,13 @@ INSTALL_COMMANDS = [
     "sudo apt-get update && sudo apt-get install -y ripgrep pandoc",
     "uv sync --all-extras --locked",
 ]
+OWNERSHIP_COMMANDS = [
+    "sudo .venv/bin/python -c 'import os, platform; assert os.geteuid() == 0 "
+    'and platform.system() == "Linux" and platform.machine() == "x86_64"\'',
+    "sudo .venv/bin/python -m pytest -q -p no:cacheprovider "
+    "tests/test_maintenance_seal.py::test_both_readers_require_same_effective_uid",
+]
+OWNERSHIP_TRACE = [' '.join(shlex.split(command)) for command in OWNERSHIP_COMMANDS]
 RELEASE_COMMANDS = [
     "uv run --locked python -m compileall ostag",
     "uv run ruff check ostag tests",
@@ -68,16 +76,20 @@ def test_ci_keeps_required_setup_and_one_unconditional_gate():
                           "PYTEST_ADDOPTS": "-o faulthandler_timeout=60"}
     setup = next(s for s in job["steps"] if s.get("uses") == "actions/setup-python@v5")
     assert setup["with"]["python-version"] == "3.11"
-    assert [s["run"] for s in job["steps"] if "run" in s] == [
-        *INSTALL_COMMANDS, "scripts/ci_release_gates.sh"
-    ]
+    commands = [s["run"] for s in job["steps"] if "run" in s]
+    assert commands[:-1] == [*INSTALL_COMMANDS, "scripts/ci_release_gates.sh"]
+    assert commands[-1].replace('\\\n  ', '').splitlines() == [
+        'set -euo pipefail', *OWNERSHIP_COMMANDS]
     for item in [job, *job["steps"]]:
         assert "if" not in item
         assert "continue-on-error" not in item
 
 
-@pytest.mark.parametrize("entry", ["workflow", "ci_release_gates.sh", "deploy_preflight.sh"])
-@pytest.mark.parametrize("fail_command", ["", "uv run pytest -vv", RELEASE_COMMANDS[-1]])
+@pytest.mark.parametrize("entry,fail_command", [
+    (entry, failure)
+    for entry in ("workflow", "ci_release_gates.sh", "deploy_preflight.sh")
+    for failure in ("", "uv run pytest -vv", RELEASE_COMMANDS[-1])
+] + [('workflow', command) for command in OWNERSHIP_TRACE])
 def test_release_flow_runs_once_and_stops_at_failure(tmp_path, entry, fail_command):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
@@ -116,12 +128,12 @@ case "$command" in
 esac
 '''
     for name in (
-        "uv", "docker", "work_monitor_smoke.sh", "copilot_relay_smoke.sh",
+        "uv", "docker", "sudo", "work_monitor_smoke.sh", "copilot_relay_smoke.sh",
         "secret_hygiene_check.sh", "render_launchd_plist.sh", "live_validation_record.sh",
         "connector_live_smoke.sh", "provider_evidence_live_smoke.sh",
         "mfs_validation_record.sh", "validate_live_validation_record.sh",
     ):
-        target = (bin_dir if name in ("uv", "docker") else scripts) / name
+        target = (bin_dir if name in ("uv", "docker", "sudo") else scripts) / name
         target.write_text(stub)
         target.chmod(0o755)
 
@@ -144,7 +156,11 @@ esac
         capture_output=True, text=True, timeout=30,
     )
     observed = trace.read_text().splitlines()
-    if fail_command:
+    if fail_command in OWNERSHIP_TRACE:
+        assert result.returncode == 42, result.stdout + result.stderr
+        assert observed == (RELEASE_COMMANDS + DEPLOY_COMMANDS + EVIDENCE_COMMANDS
+                            + OWNERSHIP_TRACE[:OWNERSHIP_TRACE.index(fail_command) + 1])
+    elif fail_command:
         assert result.returncode == 42, result.stdout + result.stderr
         assert observed == RELEASE_COMMANDS[:RELEASE_COMMANDS.index(fail_command) + 1]
         assert not (tmp_path / "release/live-validation-gate-fixture").exists()
@@ -154,6 +170,8 @@ esac
         if entry != "deploy_preflight.sh":
             expected += EVIDENCE_COMMANDS
             assert "ci release gates passed" in result.stdout
+        if entry == 'workflow':
+            expected += OWNERSHIP_TRACE
         assert observed == expected
 
 
@@ -167,5 +185,5 @@ def test_real_collection_nodeids_survive_workflow_diagnostics():
     assert result.returncode == 0, result.stdout + result.stderr
     nodes = [line for line in result.stdout.splitlines()
              if line.startswith("tests/test_ci_release_flow.py::")]
-    assert len(nodes) == 11
+    assert len(nodes) == 13
     assert "tests/test_ci_release_flow.py::test_real_collection_nodeids_survive_workflow_diagnostics" in nodes

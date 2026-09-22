@@ -158,3 +158,53 @@ async def test_cross_store_mismatches_and_unknown_are_quarantined(populated, dam
     report = reconcile(ledgers)
     assert report.complete and not report.ready, report
     assert expected in report.blockers
+
+
+@pytest.mark.parametrize('form', ['absolute-string', 'relative-path', 'relative-string'])
+def test_reconciliation_accepts_same_path_forms_as_inventory(stores, tmp_path, monkeypatch, form):
+    monkeypatch.chdir(tmp_path)
+    paths = {}
+    for kind in KINDS:
+        path = stores[kind].path
+        if form.startswith('relative'):
+            path = path.relative_to(tmp_path)
+        if form.endswith('string'):
+            path = str(path)
+        paths[kind + '_path'] = path
+    assert reconcile(stores, **paths).ready
+
+
+def test_missing_generation_config_is_explicit_blocker_not_failed_scan(stores):
+    from test_brief_store import admit, SCOPE as admitted_scope
+    admit(stores['brief'], payload={'synthetic': True})
+    result = reconcile(stores, owners=(admitted_scope,))
+    assert result.complete and not result.ready
+    assert 'generation_config_mismatch' in result.blockers
+    assert 'cross_reference_unavailable' not in result.blockers
+
+
+async def test_retired_revision_is_explicit_binding_blocker_not_failed_scan(populated):
+    ledgers, _, preview, card, callback, revision = populated
+    await card.deliver(SCOPE, preview.job_id, preview.revision_id)
+    revision.register(SCOPE, preview.job_id)
+    revision.ledger.retire_local(SCOPE, preview.job_id)
+    result = reconcile(ledgers)
+    assert result.complete and not result.ready
+    assert 'revision_binding' in result.blockers
+    assert 'cross_reference_unavailable' not in result.blockers
+
+
+async def test_missing_config_does_not_hide_known_effect_custody(stores, tmp_path):
+    from tests.test_effect_journal import journal_rig, apply_journal
+    root = tmp_path / 'effects'
+    root.mkdir()
+    async def operation(permit):
+        return {'synthetic': True}
+    rig = journal_rig(root, operation)
+    await apply_journal(rig)
+    stores['brief'] = rig[2].store
+    result = reconcile(stores, config=RuntimeInventoryConfig(brief_schema=5), owners=(rig[3],))
+    assert result.complete and not result.ready
+    assert result.unknown_effects == 1
+    assert 'unknown_remote_effect' in result.blockers
+    assert 'generation_config_mismatch' in result.blockers

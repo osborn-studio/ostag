@@ -13,12 +13,13 @@ import json
 import fcntl
 import hashlib
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any
 
+from ostag.core.frozen_custody import RetiredCustody, is_retired, deny_retired
 from ostag.core.event import NormalizedEvent
 from ostag.core.identity import Principal
 from ostag.core.safety import redact_secrets
@@ -81,8 +82,14 @@ def _epoch_valid(value):
 
 
 class RunLedger:
-    def __init__(self, path: Path, *, clock: Any | None = None) -> None:
-        self.path = Path(path)
+    def __init__(self, path: Path, *, clock: Any | None = None, coordination=None) -> None:
+        from ostag.core.ledger_coordination import LedgerCoordination
+        if coordination is not None:
+            if type(coordination) is not LedgerCoordination:
+                raise _proposal_error('ledger_coordination_unavailable')
+            coordination.bind(path)
+        self.coordination = coordination
+        self.path = coordination.ledger_path if coordination else Path(path)
         self.clock = clock or (lambda: datetime.now(UTC))
 
     def append(self, event: LedgerEvent) -> LedgerEvent:
@@ -90,6 +97,10 @@ class RunLedger:
         record["payload"] = _redact_deep(record.get("payload", {}))
         if _is_recovery(record):
             raise _proposal_error('recovery_requires_verified_snapshot')
+        if record['event_type'] == 'action_proposed':
+            # Retirement projections belong to a verified maintenance protocol,
+            # never to ordinary append, regardless of action ID or kind version.
+            deny_retired(record['payload'].get('receipt'))
         if (record['event_type'] == 'action_proposed'
                 and str(record['payload'].get('receipt', {}).get('action_id', '')).startswith(
                     'action_frozen')):
@@ -104,7 +115,7 @@ class RunLedger:
                 if self._frozen_original(records, action_id) is None:
                     raise _proposal_error('action_not_found')
                 entry = self._fold_receipts(records)[action_id]
-                if (entry.get('quarantined') or entry.get('superseded_by') is not None
+                if (entry.get('retired') or entry.get('quarantined') or entry.get('superseded_by') is not None
                         or entry['receipt']['state'] != record['payload'].get('from_state')):
                     raise _proposal_error('frozen_state_conflict')
             self._write_locked(handle, record, durable=frozen_state)
@@ -112,29 +123,57 @@ class RunLedger:
 
     @contextmanager
     def _exclusive(self, *, read_only=False, bounded=True):
-        """Cooperating append/unique-create writers serialize on the same inode."""
-        if not read_only:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open('rb' if read_only else 'a+b') as handle:
-            if not bounded:
-                # Legacy append callers did not have a ledger_busy failure.
-                # Shared blocking admission serializes with strict frozen scans
-                # without imposing the new proposal admission deadline on them.
-                fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
-            else:
-                deadline = monotonic() + .5
-                while True:
+        """Optional stable domain lock precedes the existing inode lock.
+
+        Default legacy callers are unchanged. Host opt-in is not proof that old
+        binaries stopped; no replacement operation is enabled by this primitive.
+        """
+        deadline = monotonic() + .5 if bounded and self.coordination else None
+        guard = self.coordination.hold(deadline=deadline) if self.coordination else nullcontext()
+        with guard:
+            if not read_only and self.coordination is None:
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.coordination:
+                flags = (os.O_RDONLY if read_only else os.O_RDWR | os.O_APPEND) | os.O_NOFOLLOW | os.O_NONBLOCK
+                try:
+                    descriptor = os.open(self.path, flags)
                     try:
-                        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        break
-                    except BlockingIOError:
+                        opened = os.fdopen(descriptor, 'rb' if read_only else 'a+b')
+                    except BaseException:
+                        os.close(descriptor)
+                        raise
+                except OSError:
+                    raise SchemaError('ledger_coordination_unavailable', 'Ledger coordination is unavailable.',
+                        'Verify the managed ledger domain; do not recreate or bypass its lock.') from None
+            else:
+                opened = self.path.open('rb' if read_only else 'a+b')
+            with opened as handle:
+                if self.coordination:
+                    self.coordination.verify_ledger(handle)
+                if not bounded:
+                    # Managed readers share snapshots, so every managed append
+                    # must exclude them. Unmanaged legacy admission is unchanged.
+                    mode = fcntl.LOCK_EX if self.coordination else fcntl.LOCK_SH
+                    fcntl.flock(handle.fileno(), mode)
+                else:
+                    if deadline is None:
+                        deadline = monotonic() + .5
+                    while True:
                         if monotonic() >= deadline:
-                            raise _proposal_error('ledger_busy') from None
-                        sleep(.001)
-            try:
-                yield handle
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                            raise _proposal_error('ledger_busy')
+                        try:
+                            mode = (fcntl.LOCK_SH if read_only and self.coordination
+                                    else fcntl.LOCK_EX)
+                            fcntl.flock(handle.fileno(), mode | fcntl.LOCK_NB)
+                            break
+                        except BlockingIOError:
+                            if monotonic() >= deadline:
+                                raise _proposal_error('ledger_busy') from None
+                            sleep(.001)
+                try:
+                    yield handle
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
     def _write_locked(handle, record, *, durable=False):
@@ -187,6 +226,8 @@ class RunLedger:
                         uncertain = False
                     elif record['event_type'] == 'action_proposed':
                         receipt = ActionReceipt.from_dict(payload['receipt'])
+                        if is_retired(receipt):
+                            RetiredCustody.from_receipt(receipt)
                         if (receipt.action_id.startswith('action_frozen')
                                 and payload.get('proposal_binding') != _proposal_binding(payload)):
                             raise ValueError('invalid frozen binding')
@@ -289,7 +330,9 @@ class RunLedger:
                     raise _proposal_error('action_not_found')
                 if original.get('chat_id') != chat_id or original.get('platform') != platform:
                     raise _proposal_error('receipt_scope_mismatch')
-                return ActionReceipt.from_dict(self._fold_receipts(records)[action_id]['receipt'])
+                current = ActionReceipt.from_dict(self._fold_receipts(records)[action_id]['receipt'])
+                deny_retired(current)
+                return current
         except FileNotFoundError:
             raise _proposal_error('action_not_found') from None
 
@@ -304,6 +347,7 @@ class RunLedger:
         The parent directory must be provisioned before use. File and directory
         are synchronized before return. This neither approves nor executes it.
         """
+        deny_retired(receipt)
         if (type(receipt) is not ActionReceipt or not receipt.action_id.startswith('action_frozen')
                 or receipt.state not in ('proposed', 'needs_approval')
                 or type(receipt.principal) is not Principal
@@ -442,11 +486,15 @@ class RunLedger:
         )
 
     def _read_all(self) -> list[dict[str, Any]]:
-        if not self.path.exists():
+        if self.coordination is None and not self.path.exists():
             return []
         records: list[dict[str, Any]] = []
-        with self.path.open("r", encoding="utf-8", errors="replace") as handle:
+        reader = (self._exclusive(read_only=True) if self.coordination else
+                  self.path.open("r", encoding="utf-8", errors="replace"))
+        with reader as handle:
             for line in handle:
+                if isinstance(line, bytes):
+                    line = line.decode('utf-8', errors='replace')
                 line = line.strip()
                 if not line:
                     continue
@@ -624,6 +672,7 @@ class RunLedger:
     def record_receipt_state(
         self, receipt: ActionReceipt, *, previous_state: str, actor_id: str = "", detail: str = ""
     ) -> LedgerEvent:
+        deny_retired(receipt)
         payload: dict[str, Any] = {
             "action_id": receipt.action_id,
             "from_state": previous_state,
@@ -774,6 +823,19 @@ class RunLedger:
                         else:
                             receipt_payload["legacy_identity"] = "unbound"
                     previous = entries.get(action_id)
+                    if previous is not None and previous.get('retired'):
+                        if records is not None:
+                            raise _proposal_error('ledger_integrity')
+                        continue  # lenient listing must never resurrect erased authority
+                    retired = is_retired(receipt_payload)
+                    if retired:
+                        try:
+                            RetiredCustody.from_receipt(ActionReceipt.from_dict(receipt_payload))
+                        except (SchemaError, ValueError, TypeError, KeyError):
+                            if records is not None:
+                                raise _proposal_error('ledger_integrity') from None
+                            entries.pop(action_id, None)
+                            continue
                     if previous is not None:
                         old_principal = previous["receipt"].get("principal")
                         new_principal = receipt_payload.get("principal")
@@ -782,6 +844,7 @@ class RunLedger:
                             receipt_payload["legacy_identity"] = "unbound"
                     entries[action_id] = {
                         "receipt": receipt_payload,
+                        "retired": retired,
                         "chat_id": payload.get("chat_id", ""),
                         "platform": payload.get("platform", ""),
                         "proposer_id": payload.get("proposer_id", ""),
@@ -806,12 +869,13 @@ class RunLedger:
                                     known['receipt']['state'] = 'blocked'
                             continue
                         old['superseded_by'] = action_id
-                        old['receipt']['state'] = 'stale'
+                        if not old.get('retired'):
+                            old['receipt']['state'] = 'stale'
                         old['receipt']['updated_at'] = record.get('created_at')
             elif event_type == "action_state_changed":
                 entry = entries.get(payload.get("action_id", ""))
                 if entry and payload.get("to_state"):
-                    if entry.get('quarantined') or entry.get('superseded_by') is not None:
+                    if entry.get('retired') or entry.get('quarantined') or entry.get('superseded_by') is not None:
                         continue  # never resurrect a superseded approval
                     entry["receipt"]["state"] = payload["to_state"]
                     entry["receipt"]["updated_at"] = record.get(

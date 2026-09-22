@@ -70,7 +70,8 @@ class ScanBudget:
 class RuntimeInventoryConfig:
     """Explicit trusted configuration; defaults match the current ledger defaults.
 
-    Brief schema4 is the delivery-enabled schema, not BriefStore's initial schema2.
+    Brief schema4 is delivery-enabled; explicit schema5 adds effect custody.
+    Neither is BriefStore's initial schema2.
     Versions other than these current schemas are invalid arguments, not migration
     requests. Each budget covers one store, including its metadata row.
     """
@@ -189,6 +190,37 @@ def _brief_counts(db, remaining, owners):
     observations = _rows(db, remaining, 'brief_delivery_observations', 'delivery_id', 'ordinal')
     _require(all(r[0] in delivery_ids and type(r[1]) is int and 1 <= r[1] <= 32
                  for r in observations))
+    if db.execute('PRAGMA user_version').fetchone()[0] == 5:
+        meta = _rows(db, remaining, 'brief_effect_meta', 'epoch,ledger_epoch', 'id,highwater')
+        _require(len(meta) == 1 and _digest_value(meta[0][0])
+                 and (meta[0][1] == 'initial' or _digest_value(meta[0][1])) and meta[0][2] == 1
+                 and type(meta[0][3]) is int and 0 <= meta[0][3] < 2**62)
+        intents = _rows(db, remaining, 'brief_action_intents',
+            'action_id,job_id,namespace,platform,actor_id,resource_key,kind,intent_digest,ledger_epoch',
+            'created_us')
+        _require(all(r[2:5] in owners for r in intents), 'owner')
+        _require(all(jobs.get(r[1]) == r[2:5] and r[6] == 'brief.field.update'
+                     and _digest_value(r[5]) and _digest_value(r[7])
+                     and (r[8] == 'initial' or _digest_value(r[8])) and _time_value(r[9])
+                     for r in intents))
+        actions = {r[0] for r in intents}
+        attempts = _rows(db, remaining, 'brief_effect_attempts',
+            'attempt_id,action_id,owner_id,state,permit_digest', 'fence,issued_us,expires_us,begun_us')
+        _require({r[1] for r in attempts} == actions and len(attempts) == len(actions))
+        _require(all(_identifier_value(r[0]) and _identifier_value(r[2]) and _digest_value(r[4])
+                     and type(r[5]) is int and 0 < r[5] <= meta[0][3]
+                     and all(_time_value(t) for t in r[6:9]) and r[6] <= r[8] < r[7]
+                     for r in attempts))
+        _tally(counts, 'effects', 'begun unknown', (r[3] for r in attempts))
+        counts['effects.intents'] = len(intents)
+        attempt_ids = {r[0]: r[8] for r in attempts}
+        evidence = _rows(db, remaining, 'brief_effect_observations',
+                         'attempt_id,kind,evidence_sha256', 'ordinal,observed_us')
+        _require(all(r[0] in attempt_ids and r[1] in
+                     ('transport_response', 'transport_error', 'independent_readback')
+                     and _digest_value(r[2]) and type(r[3]) is int and 1 <= r[3] <= 32
+                     and _time_value(r[4]) and r[4] >= attempt_ids[r[0]] for r in evidence))
+        counts['effects.observations'] = len(evidence)
     return tuple(sorted(counts.items()))
 
 
@@ -666,7 +698,7 @@ def inspect_runtime_startup(*, brief_path: str | Path, card_path: str | Path,
         _require(type(config) is RuntimeInventoryConfig)
         for kind, version in zip(kinds, (4, 2, 1, 1, 1)):
             value = getattr(config, kind + '_schema')
-            _require(type(value) is int and value == version)
+            _require(type(value) is int and (value in (4, 5) if kind == 'brief' else value == version))
             budget = getattr(config, kind + '_budget')
             _require(type(budget) is ScanBudget)
             for value, maximum in ((budget.row_limit, 10000), (budget.budget_ms, 5000)):
