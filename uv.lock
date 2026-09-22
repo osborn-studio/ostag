@@ -792,6 +792,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+deepseek = [
+    { name = "httpx" },
+]
 dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -820,6 +823,7 @@ slack = [
 requires-dist = [
     { name = "dingtalk-stream", marker = "extra == 'dingtalk'", specifier = ">=0.24.3" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.115" },
+    { name = "httpx", marker = "extra == 'deepseek'", specifier = "==0.28.1" },
     { name = "httpx", marker = "extra == 'openai'", specifier = "==0.28.1" },
     { name = "lark-oapi", marker = "extra == 'feishu'", specifier = ">=1.4.22" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.93.0" },
@@ -831,7 +835,7 @@ requires-dist = [
     { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.22.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.34" },
 ]
-provides-extras = ["feishu", "slack", "dingtalk", "openai", "server", "dev"]
+provides-extras = ["feishu", "slack", "dingtalk", "deepseek", "openai", "server", "dev"]
 
 [[package]]
 name = "packaging"

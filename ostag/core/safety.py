@@ -11,7 +11,7 @@ SECRET_PATTERNS = [
     re.compile(r"xapp-[A-Za-z0-9\-]+"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
     re.compile(
-        r"(?i)(ANTHROPIC_API_KEY|OPENAI_API_KEY|FEISHU_APP_SECRET|LARK_APP_SECRET|"
+        r"(?i)(ANTHROPIC_API_KEY|OPENAI_API_KEY|DEEPSEEK_API_KEY|FEISHU_APP_SECRET|LARK_APP_SECRET|"
         r"OSTAG_VERCEL_ACCESS_TOKEN)\s*=\s*[^\s]+"
     ),
 ]
