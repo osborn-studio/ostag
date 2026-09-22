@@ -29,7 +29,8 @@ from ostag.briefs.delivery import FeishuBinding
 from ostag.briefs.generation import GenerationConfig
 from ostag.briefs.lifecycle import BriefLifecycle, LifecycleDenied
 from ostag.briefs.meeting_service import DurableMeetingRequest, register_retention
-from ostag.briefs.openai_transport import OpenAIReadOnlyTransport
+from ostag.briefs.openai_transport import OpenAIReadOnlyTransport, MODEL_ID as OPENAI_MODEL
+from ostag.briefs.deepseek_transport import DeepSeekReadOnlyTransport, MODEL_ID as DEEPSEEK_MODEL
 from ostag.briefs.rendering import PrivatePreview, render_private
 from ostag.briefs.retention import RetentionCoordinator, RetentionLedger, RetentionPolicy, _identity
 from ostag.briefs.revisions import RevisionLedger
@@ -56,7 +57,7 @@ class TrustedBriefComposition:
     directory: Path
     image_sha256: str
     authority: TrustedBriefAuthority
-    model_transport: OpenAIReadOnlyTransport
+    model_transport: OpenAIReadOnlyTransport | DeepSeekReadOnlyTransport
     generation: GenerationConfig
     authenticate: Callable[[object], RequesterContext]
     resolve_binding: Callable[[], FeishuBinding]
@@ -89,7 +90,7 @@ class TrustedBriefComposition:
         if (not self.directory.is_absolute() or '..' in self.directory.parts
                 or type(self.image_sha256) is not str or not re.fullmatch('[0-9a-f]{64}', self.image_sha256)
                 or type(self.authority) is not TrustedBriefAuthority
-                or type(self.model_transport) is not OpenAIReadOnlyTransport
+                or type(self.model_transport) not in (OpenAIReadOnlyTransport, DeepSeekReadOnlyTransport)
                 or type(self.card_transport) is not CardTransport
                 or type(self.generation) is not GenerationConfig
                 or type(self.policy) is not RetentionPolicy
@@ -105,6 +106,9 @@ class TrustedBriefComposition:
                 or type(self.initialize_new) is not bool or type(self.maintenance) is not bool
                 or (self.maintenance and self.initialize_new)):
             raise ValueError('trusted Brief composition required')
+        expected = {OpenAIReadOnlyTransport: OPENAI_MODEL, DeepSeekReadOnlyTransport: DEEPSEEK_MODEL}
+        if self.generation.parameters.expected_model_id != expected[type(self.model_transport)]:
+            raise ValueError('model transport and generation profile must match')
 
     def config_identity(self, meetings):
         return hashlib.sha256(json.dumps(dict(generation=self.generation.to_dict(),
