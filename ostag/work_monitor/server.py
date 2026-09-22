@@ -163,19 +163,28 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         nonlocal auth, auto_feishu_ws, auto_scheduler, auto_daily_scheduler
-        # Validate every configured domain before starting databases or owners.
-        for path in managed_ledger_paths:
-            configured_ledger(path, managed_paths=managed_ledger_paths)
-        if runtime.service is not None:
-            configured_ledger(runtime.service.store.path.with_name('run_ledger.jsonl'),
-                managed_paths=managed_ledger_paths, existing=runtime.service.ledger)
         if scheduler is not None and managed_ledger_paths:
-            # Unknown injected owners cannot attest to their ledger wiring.
+            # Reject unknown owners before inspecting their configured domains.
             from .scheduler import WorkMonitorScheduler
             if type(scheduler) is not WorkMonitorScheduler:
                 raise ValueError('Managed ledger policy requires a validated scheduler.')
             configured_ledger(scheduler.store.path.with_name('run_ledger.jsonl'),
                 managed_paths=managed_ledger_paths, existing=scheduler.ledger)
+        # Validate every configured domain before starting databases or owners.
+        for path in managed_ledger_paths:
+            configured_ledger(path, managed_paths=managed_ledger_paths)
+        if managed_ledger_paths:
+            monitor_path = (runtime.service.store.path if runtime.service is not None
+                            else configured.monitor_server_db)
+            configured_ledger(monitor_path.with_name('run_ledger.jsonl'),
+                              managed_paths=managed_ledger_paths)
+            if (feishu_ws is None and configured.feishu_use_websocket
+                    and configured.feishu_app_id and configured.feishu_app_secret):
+                configured_ledger(configured.run_ledger_path,
+                                  managed_paths=managed_ledger_paths)
+        if runtime.service is not None:
+            configured_ledger(runtime.service.store.path.with_name('run_ledger.jsonl'),
+                managed_paths=managed_ledger_paths, existing=runtime.service.ledger)
         if runtime.service is None or runtime.projector is None:
             store = MonitorStore(configured.monitor_server_db)
             identities = IdentityStore(

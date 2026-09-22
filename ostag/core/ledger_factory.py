@@ -46,6 +46,8 @@ def configured_ledger(path, *, managed_paths=(), clock=None, existing=None):
         raise _denied()
     domains = {p: LedgerCoordination.open(p) for p in paths}
     required = domains.get(target)
+    if required is None:
+        raise _denied()
     if existing is not None:
         if (type(existing) is not RunLedger or existing.path.absolute() != target
                 or existing.coordination != required):

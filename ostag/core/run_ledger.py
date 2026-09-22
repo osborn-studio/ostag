@@ -151,8 +151,10 @@ class RunLedger:
                 if self.coordination:
                     self.coordination.verify_ledger(handle)
                 if not bounded:
-                    # Preserve blocking legacy admission and existing inode mode.
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_SH)
+                    # Managed readers share snapshots, so every managed append
+                    # must exclude them. Unmanaged legacy admission is unchanged.
+                    mode = fcntl.LOCK_EX if self.coordination else fcntl.LOCK_SH
+                    fcntl.flock(handle.fileno(), mode)
                 else:
                     if deadline is None:
                         deadline = monotonic() + .5
@@ -160,7 +162,9 @@ class RunLedger:
                         if monotonic() >= deadline:
                             raise _proposal_error('ledger_busy')
                         try:
-                            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            mode = (fcntl.LOCK_SH if read_only and self.coordination
+                                    else fcntl.LOCK_EX)
+                            fcntl.flock(handle.fileno(), mode | fcntl.LOCK_NB)
                             break
                         except BlockingIOError:
                             if monotonic() >= deadline:

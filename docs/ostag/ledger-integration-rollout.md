@@ -15,6 +15,20 @@ its validated coordination lock. Startup refuses missing/unsafe domains before
 starting the Monitor database owners; it does not recreate coordination files.
 This only covers cooperating constructors, not old binaries or manual writers.
 
+Every requested ledger must belong to the non-empty managed set; omission is an
+error, never a legacy fallback. The Monitor service and daily scheduler derive
+their domain as `monitor_server_db.parent / "run_ledger.jsonl"`. The runner,
+AutoBase and approvals use `run_ledger_path` (by default derived from the audit
+log's parent by `load_settings`). With the automatic Feishu WebSocket enabled and
+credentials present, the Monitor process creates that runner too. These can be
+two different paths, so list and provision both. Startup checks both reachable
+domains before creating the Monitor database. Resolve paths using the actual
+host working directory and configuration; do not copy example paths blindly.
+
+Managed readers share the inode snapshot lock, and all managed writes exclude
+them. Legacy uncoordinated lock behavior is retained. A removed managed ledger is
+an integrity failure, not an empty history, and reads never recreate it.
+
 The effect journal is not registered as a production provider executor. An
 explicit owned schema4 database migration and verified backup are required to
 create schema5. Ordinary startup does not perform that migration. Schema5
@@ -51,3 +65,11 @@ separate from successful runs. Native osstack Loop acceptance records only this
 integration scope; GraphSpec validation is not Graph execution or business
 acceptance. Formal GitHub approval, merge, main CI, deployment and a matching
 release SHA plus public health are separate release gates.
+
+For this foundation release, keep `PRODUCTION_DEPLOY_SCRIPT_SHA256` unchanged.
+The repository candidate intentionally differs from the currently installed
+launcher. Before any future host rollout, record the installed hash, verify the
+offline provisioning/migration prerequisites, run the missing/unsafe/sealed-state
+rejection probes without Docker access, and only then change the installation
+and its matching hash pin together. No provisioning or recovery controller is
+included in this foundation release.

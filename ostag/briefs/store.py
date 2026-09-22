@@ -1770,8 +1770,10 @@ class BriefStore:
 
     @staticmethod
     def _cost_schema(db: sqlite3.Connection) -> None:
-        if db.execute("PRAGMA user_version").fetchone()[0] not in (2, 3, 4):
-            raise BriefSchemaError("cost operations require schema2; reopen for forward migration")
+        # Schema5 retains the cost tables. Unknown future versions remain denied
+        # until their compatibility is explicitly implemented and verified.
+        if db.execute("PRAGMA user_version").fetchone()[0] not in (2, 3, 4, EFFECT_SCHEMA_VERSION):
+            raise BriefSchemaError("cost operations require a supported schema2–5 store")
 
     @staticmethod
     def _cost_row(db: sqlite3.Connection, reservation_id: str) -> sqlite3.Row:

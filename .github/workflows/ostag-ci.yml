@@ -24,6 +24,12 @@ jobs:
         run: uv sync --all-extras --locked
       - name: Run release, deployment and live-evidence gates
         run: scripts/ci_release_gates.sh
+      - name: Verify maintenance ownership on native Linux amd64
+        run: |
+          set -euo pipefail
+          sudo .venv/bin/python -c 'import os, platform; assert os.geteuid() == 0 and platform.system() == "Linux" and platform.machine() == "x86_64"'
+          sudo .venv/bin/python -m pytest -q -p no:cacheprovider \
+            tests/test_maintenance_seal.py::test_both_readers_require_same_effective_uid
 
   image-smoke:
     runs-on: ubuntu-latest
