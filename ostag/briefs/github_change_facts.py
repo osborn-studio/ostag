@@ -110,10 +110,14 @@ def _classify(scope: FrozenScope, principal: GitHubPrincipal, item: HistoryItem)
         if target.get("ref") != repo.default_branch:
             caveats.append("target_is_not_default_branch")
         require(row.get("state") in ("open", "closed"))
-        if row.get("merged_at"):
+        if row.get("merged_at") is not None:
             require(row["state"] == "closed")
             events.append(("pr_merged", row["merged_at"]))
             caveats.append("merged_not_deployed")
+        elif row["state"] == "closed":
+            require("merged_at" in row)  # Missing is not an explicit unmerged observation.
+            events.append(("pr_closed_unmerged", row.get("closed_at")))
+            caveats.append("closed_not_merged_or_deployed")
         events.append(("pr_created", row.get("created_at")))
         # An old open PR is relevant pending input, but its *current* state has no window event.
         if row.get("state") == "open":

@@ -205,6 +205,12 @@ class Collector:
                     "closed_at", "issue_closed")
                 if item.get(field) is not None:
                     events.append((event, stamp(item[field])))
+                elif part == "pulls" and item.get("state") == "closed":
+                    require("merged_at" in item, "merge_status_unknown")
+                    # A missing time cannot be classified as outside the window.
+                    require(item.get("closed_at") is not None, "closure_time_unknown")
+                    events.append(("pr_closed_unmerged", stamp(item["closed_at"])))
+                    caveats.append("closed_not_merged_or_deployed")
                 url = f"https://github.com/{self.repo}/{'pull' if part == 'pulls' else 'issues'}/{number}"
             elif part == "issue_comments":
                 match = re.fullmatch(re.escape(f"https://api.github.com/repos/{self.repo}/issues/")
