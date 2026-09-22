@@ -549,7 +549,8 @@ Prepare a CVM or Lighthouse Linux host with Docker, a protected registry login,
 and a host persistent directory:
 
 ```bash
-sudo install -d -m 0700 -o 10001 -g 10001 /var/lib/ostag /var/backups/ostag
+sudo install -d -m 0700 -o 10001 -g 10001 /var/lib/ostag
+sudo install -d -m 0700 -o root -g root /var/backups/ostag
 sudo install -m 0600 /dev/null /opt/ostag/source/deploy/work-monitor/.env
 docker login <registry>
 docker pull <registry>/ostag-work-monitor@sha256:<approved-digest>
@@ -577,6 +578,9 @@ replace a target created concurrently. Existing SQLite sidecars also cause refus
 The operator must keep the destination and its sidecars unused for the entire
 operation; this helper does not establish offline custody or a multi-store snapshot.
 Source SQLite URIs escape literal path characters such as `?` and `#`.
+The backup tree and all its parents must remain operator-controlled, separate
+from application-writable data. A killed copy may leave private temporary files;
+inspect them offline before cleanup, and never treat them as completed backups.
 
 Both `backup` and `restore` copy and verify a single database; neither selects it
 for the service. Create a root-owned mode-0700 restore-check directory instead
