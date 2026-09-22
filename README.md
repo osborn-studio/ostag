@@ -1,245 +1,168 @@
-# OS Tag
+# OStag
 
-> OS Tag turns any work thread into a governed, auditable, multi-agent work loop.
+[English](README.md) · [简体中文](README.zh-CN.md) · [Documentation](docs/README.md)
 
-OS Tag is an open, self-hostable control plane for human-agent collaboration.
-Teams delegate work from Feishu/Lark, DingTalk, Slack group threads — or any
-agent delegates via the CLI — to the right backend (mock, Codex CLI, Claude
-CLI, OpenAI API), with scoped context, policy checks, action receipts,
-approvals, artifacts, durable follow-ups, and a full audit ledger. It
-maintains systems of record such as Feishu Base / DingTalk AI Table
-requirement tables while keeping humans in control.
+OStag is a self-hosted control plane for human–agent collaboration. It turns work
+threads and CLI requests into scoped, auditable runs with permissions, approval
+receipts, artifacts and durable follow-ups. It also provides a remote work monitor
+and local meeting preparation from GitHub activity and selected Feishu chats.
 
-OS Tag is not a Claude Tag clone and not a Zilliz official product. It
-competes on being open, neutral, inspectable, and system-of-record aware —
-see [docs/claude_tag_strategy.md](docs/claude_tag_strategy.md) for the full
-strategic direction.
+## Capabilities and availability
 
-## What it does
+| Capability | What is available | Setup and limits |
+|---|---|---|
+| Thread and CLI work | Event adapters, workflow routing, agent backends, replies and run ledgers | Configure each platform and executor; mock/dry-run is the default |
+| Governed actions | Frozen proposals, approval/apply receipts, actor and channel policies, budgets | Enable governed writes explicitly; connector support varies |
+| Requirements and follow-ups | Feishu Base / DingTalk table workflows, durable continuations, proposal-only ambient monitoring | Requires the relevant connector, permissions and channel configuration |
+| Remote work monitor | Persistent task board, Feishu/Telegram delivery, receipt-governed controls, optional scoped reports | Requires server, bot and deployment configuration |
+| Local meeting preparation | One GitHub repository and up to two selected Feishu chats, time-windowed Markdown/JSON with citations and gaps | Uses your local authenticated CLIs; no model call or message sending |
+| Brief/meeting service | Durable stores, authorization checks, revision/card handling and DeepSeek transport implemented | Disabled by default; trusted production composition and live acceptance are still required |
+| GitHub → Vercel release | SHA-bound PR review and production-release workflow | Separate opt-in workflow; not OStag's own Tencent deployment pipeline |
 
-- **Source-thread work loop** — mention `@OS Tag` in a group; the adapter
-  normalizes the event, the runner opens an auditable run, applies safety
-  checks, retrieves allowlisted MFS context, routes to a workflow or backend,
-  and replies in the thread.
-- **Governed writes** — with `OSTAG_GOVERNED_WRITES=true`, table mutations
-  become action receipts: propose → `approve 1` → `apply 1`. The exact
-  approved payload is what executes. No apply without approval, ever.
-- **Actor permissions** — `read < propose < write < admin`, global or scoped
-  per channel; approving or applying requires `write`; denials are ledgered
-  as security events.
-- **Run ledger** — every handled event creates a run with source, actor,
-  intent, context packet (hashed), status, and terminal outcome, in an
-  append-only JSONL ledger with secret redaction.
-- **Durable follow-ups** — proposals auto-schedule pending-approval
-  reminders; `continue run_x` schedules a follow-up; continuations survive
-  restarts, fire once, and cancel when resolved.
-- **Ambient monitors** (opt-in) — unowned / overdue / stale / missing-status
-  requirement detection with per-record suppression, rate limits, cited
-  evidence, and ledger audit. Proposal-only: ambient never writes.
-- **Agent-facing CLI** — every command supports compact `--json`; errors
-  carry `code`, `message`, `recovery_hint`.
-- **Remote work monitor** — signed OStag/osstack event streams feed a persistent
-  mobile Feishu/Telegram board; pause/resume/retry/cancel stay receipt-governed.
-- **Governed PR release** (opt-in) — an allowlisted group PR mention freezes the
-  GitHub head SHA and checks into a high-risk receipt; after `approve` + `apply`,
-  OStag submits a SHA-bound GitHub review and waits for that SHA to reach a
-  Vercel Production `READY` deployment with an assigned alias.
+Implementation, deployment and business acceptance are separate gates. Feature
+flags alone do not provide authenticated ingress or grants. Full ledger host
+migration/recovery, production Brief activation and real business pilots remain
+open. See the [delivery plan](docs/ostag/delivery-implementation-plan-2026-09-21.md)
+and [host rollout](docs/ostag/host-rollout.md) before enabling new service features.
 
-## Local meeting preparation
+## Quick start
 
-`ostag meeting collect` reads one GitHub repository and up to two explicitly
-selected Feishu chats through the operator's locally authenticated CLIs. It emits
-private Markdown or JSON with sources and coverage gaps; it does not send messages
-or activate server-side meeting workflows. See [usage and limits](docs/ostag/meeting-collect.md)
-and the [stage release status](docs/plans/2026-09-13-company-assistant/RELEASE-STATUS-2026-09-20.md).
+Requires Python 3.11+, Git and [uv](https://docs.astral.sh/uv/). Run from the
+repository root:
+
+```bash
+git clone https://github.com/osborn-studio/ostag.git
+cd ostag
+uv sync --locked --extra dev
+uv run python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
+```
+
+For a fresh checkout, defaults use the mock backend and do not send a platform
+reply. Local audit/ledger files may be created. Review `.env.example` before
+adding your own `.env`; never commit credentials. Existing environment settings
+can change the backend and other behavior.
+
+Submit a local task through the same pipeline:
+
+```bash
+uv run ostag run --platform feishu --chat oc_demo --text "Summarize the next steps" --json
+```
+
+This returns the reply locally; platform delivery requires a configured live
+adapter. See [CLI reference](docs/cli_reference.md) and
+[platform setup](docs/README.md#platforms-and-integrations).
+
+## Prepare a meeting locally
+
+Authenticate `gh` and `lark-cli` separately using your own accounts. Select a
+completed UTC time window of at most 31 days and the exact chats you can access:
+
+```bash
+uv run ostag meeting collect \
+  --repo osborn-studio/ostag \
+  --start 2026-09-13T00:00:00Z --end 2026-09-20T00:00:00Z \
+  --timezone Asia/Shanghai --goal 'Weekly project review' \
+  --chat-id oc_REPLACE_WITH_YOUR_CHAT_ID \
+  --format markdown
+```
+
+Replace the example dates and chat ID. Output is private stdout; the command does
+not save or send it automatically. Missing or incomplete sources are reported as
+gaps (exit code 3), not as complete history. Omitting `--chat-id` produces a
+GitHub-only draft with a Feishu coverage gap. This is single-repository collection,
+not an organization-wide change feed. See [collection guide](docs/ostag/meeting-collect.md).
+
+## Models and executors
+
+These are separate configuration surfaces:
+
+- **Task execution:** `OSTAG_BACKEND=mock|codex_cli|claude_cli|kimi_cli|openai_api`.
+  Install/configure the selected executor; Kimi requires its feature gates and
+  conformance check. See [executor conformance](docs/ostag/executor_conformance.md).
+- **Brief/meeting generation:** the DeepSeek profile uses a fixed
+  `https://api.deepseek.com` origin, a protected key file and explicit trusted
+  composition. It is not a `deepseek` value for `OSTAG_BACKEND`. Install its
+  dependency with `uv sync --locked --extra deepseek`; follow the
+  [DeepSeek guide](docs/ostag/deepseek.md) for hidden key entry and an optional
+  paid synthetic connection check. No automatic OpenAI fallback is enabled.
+- **Development and auditing:** Codex, Claude CLI and osstack tooling are developer
+  tools; their credentials do not configure the deployed business model.
+
+## Common commands
+
+```bash
+uv run ostag runs list --json
+uv run ostag status --run run_x --json
+uv run ostag ledger export --run run_x --json
+uv run ostag context export --run run_x --json
+uv run ostag receipts list --pending --json
+uv run ostag followups list --json
+uv run ostag connector list --json
+uv run ostag executor list --json
+```
+
+For configured governed writes, the interaction is proposal → `approve <ref>` →
+`apply <ref>`. Approval binds the frozen payload; actor permissions, channel
+policies and other applicable gates still apply. See
+[receipts](docs/action_receipt_protocol.md), [governed writes](docs/governed_writes.md)
+and [channel policy](docs/channel_policy.md).
 
 ## Architecture
 
 ```text
-Feishu/Lark/Slack/DingTalk thread @OS Tag ──┐            ┌── ostag run (CLI/agents)
-                                            ▼            ▼
-                         Adapter → NormalizedEvent → OSTagRunner
-                                                        │  run ledger (JSONL, redacted)
-                        safety checks → receipt commands → channel brain
-                                                        │  context packet (hashed)
-                              AutoBase workflow ────────┤
-                              (governed writes → receipts → approve/apply
-                               via connector executors)  │
-                              Backend (mock/Codex/Claude/OpenAI) 
-                                                        ▼
-                                        reply in source thread + audit
+Platform event / CLI request
+  → adapter → normalized event → runner
+  → identity, policy and scoped context
+  → workflow / executor → reply and artifacts
+  → receipts, run ledger and audit
+
+Work monitor: signed events → durable board → governed controls
+Local meeting collect: authenticated CLIs → evidence + gaps → private draft
+Brief service: explicit trusted composition → guarded worker and private delivery
 ```
 
-Boundaries: adapters own transport/rendering; core owns events, runs,
-receipts, ledger, policy; connectors own system-of-record operations;
-executors/backends own agent invocation; workflows coordinate domain
-operations; the CLI exposes stable human/agent operations. Details:
-[docs/ostag/architecture.md](docs/ostag/architecture.md).
+Adapters own platform transport; core owns governance and ledgers; connectors own
+external operations; workflows coordinate domain behavior. MFS retrieval and
+channel memory provide optional scoped context. Start with the
+[architecture guide](docs/ostag/architecture.md) and [documentation index](docs/README.md).
 
-## Quick start
+## Development and validation
 
-Development and release checks require ripgrep, Pandoc, the SQLite and GitHub
-CLIs, and Docker with Compose. Pandoc is required for the meeting Markdown
-integration checks; missing it fails verification instead of skipping those checks.
+Full release checks additionally require ripgrep, Pandoc, the SQLite and GitHub
+CLIs, and Docker with Compose. Pandoc is required by meeting integration checks.
 
 ```bash
-cp .env.example .env
-uv sync --extra dev
-python -m ostag.main --platform feishu --dry-run --event examples/feishu_event.json
+uv sync --all-extras --locked
+uv run ruff check ostag tests
 uv run pytest
-scripts/release_check.sh      # full release gate
+scripts/release_check.sh
 ```
 
-Submit work through the full pipeline from the CLI (nothing is posted to any
-platform; the reply returns to you):
+If osstack is installed, run repository knowledge hygiene separately:
 
 ```bash
-ostag run --platform feishu --chat oc_demo --text "请总结项目下一步" --json
+osstack neat check --repo . --all --fail-on warning
 ```
 
-## CLI surface
+A clean mechanical report does not prove that claims match runtime behavior or
+that live acceptance passed. See [documentation maintenance](docs/README.md#documentation-maintenance).
 
-```bash
-ostag run --chat <id> --text "..." --json      # submit a task
-ostag status --run run_x --json                # run snapshot
-ostag runs list --json                         # recent runs
-ostag ledger export --run run_x --json         # full audit trail
-ostag context export --run run_x --json        # what the run was given (hashed)
-ostag artifacts list --run run_x --json
+## Deployment and recovery
 
-ostag receipts list --pending --json           # pending approvals
-ostag approve|reject|apply|continue <ref> --json
-ostag followups list --json                    # scheduled continuations
-ostag followups run-once --json
+OStag's production workflow targets Tencent Cloud Lighthouse after successful
+main CI. Consult [deployment](docs/ostag/deployment.md),
+[work monitor](docs/ostag/work_monitor.md) and [security](docs/ostag/security.md).
+The installed host launcher and its configured hash are a separate release gate.
 
-ostag connector list --json                    # platform capability declarations
-ostag channel policy show|set --platform p --chat c ...
-ostag ambient run-once [--send] --json
-ostag memory show|remember|sync ...
-```
+The backup helper verifies a single SQLite copy into a **new, unused path**. It
+refuses existing destinations even with `--force`; it is not an in-place or
+multi-store recovery controller. Never substitute a healthy endpoint or model
+connection check for migration, rollback or business acceptance evidence.
 
-Full reference: [docs/cli_reference.md](docs/cli_reference.md).
+## Origins and license
 
-Work-monitor architecture, deterministic smoke, production deployment, backup,
-rollback, and the explicitly incomplete external evidence checklist are in
-[docs/ostag/work_monitor.md](docs/ostag/work_monitor.md) and
-[docs/ostag/deployment.md](docs/ostag/deployment.md).
-
-## Governance model
-
-| Layer | Mechanism |
-|---|---|
-| Receipts | state machine: `apply` only from approved state; stale receipts refuse all verbs ([docs/action_receipt_protocol.md](docs/action_receipt_protocol.md)) |
-| Permissions | `OSTAG_ACTOR_PERMISSIONS` + per-channel grants ([docs/channel_policy.md](docs/channel_policy.md)) |
-| Governed writes | opt-in per deployment or per channel; frozen `apply_payload`; connector executors; no delete path ([docs/governed_writes.md](docs/governed_writes.md)) |
-| Audit | run ledger + audit log, secrets redacted ([docs/run_ledger.md](docs/run_ledger.md)) |
-| Reporting | identity-scoped JSON/HTML operations report with derived Agent Presence, disabled by default ([docs/ostag/operational_report.md](docs/ostag/operational_report.md)) |
-| Async | durable continuations ([docs/async_runs.md](docs/async_runs.md)) |
-| Ambient | opt-in, cited, suppressed, proposal-only ([docs/ambient_v2.md](docs/ambient_v2.md)) |
-| Security | defaults and hardening roadmap ([docs/security_governance.md](docs/security_governance.md)) |
-
-Safe defaults: dry-run on, mock backend, MFS off, shell off, applies off,
-governed writes off (fully backward compatible), unsafe CLI flags require
-explicit env vars, audit and ledger redact secrets.
-
-## Platforms and backends
-
-- Platform setup: [Feishu](docs/ostag/feishu_setup.md) ·
-  [Lark](docs/ostag/lark_setup.md) · [Slack](docs/ostag/slack_setup.md) ·
-  [DingTalk](docs/ostag/dingtalk_setup.md) ·
-  [deployment](docs/ostag/deployment.md) (launchd, Docker Compose)
-- Backends: `OSTAG_BACKEND=mock|codex_cli|claude_cli|kimi_cli|openai_api`
-  (`uv sync --extra openai` for the API backend; unsafe CLI modes require
-  explicit `OSTAG_*_UNSAFE_MODE` flags; Kimi stays disabled until both executor
-  feature flags are enabled after `ostag executor test kimi_cli` passes)
-- Executor conformance: `ostag executor list --json` and
-  `ostag executor test kimi_cli --json`; OSStack registration is declared
-  separately and is never inferred from a locally installed command.
-- Operational report: `ostag monitor report --platform feishu --actor <id>
-  --scope personal --format json`; the monitor server exposes the same scoped
-  schema-v2 projection and six-state Agent Presence summary at `/v1/report` and
-  `/v1/report.html` when explicitly enabled.
-- Capability declarations per connector: `ostag connector list --json`
-  ([docs/connector_capabilities.md](docs/connector_capabilities.md))
-
-## Platform operating model
-
-Feishu and DingTalk should present the same OS Tag operating model to users:
-
-- **Feishu** — Feishu Base requirement pools, Feishu multidimensional-table
-  tasks, internal approval flows, and customer/business group ambient
-  monitoring with status follow-through.
-- **DingTalk** — DingTalk AI Table requirement management, AI Table task
-  objects, internal approval flows, and customer/business group ambient
-  monitoring with status follow-through.
-
-The platform-specific connector owns the system-of-record details, while the
-governance layer stays consistent: receipts, actor permissions, approval
-quorum, four-eyes rules, budgets, follow-ups, and ledger audit.
-
-## Requirement table operations
-
-With a default Feishu Base / DingTalk AI Table configured
-(`OSTAG_AUTO_BASE_DEFAULT_BASE_TOKEN` / `..._TABLE_ID`):
-
-```text
-@OS Tag 请把 交易-001 分配给 @张三，状态改为 开发交付中
-@OS Tag 请将 市场周报 优先级改为 高
-@OS Tag 请为 交易盯盘 创建飞书任务并分配给 @李四
-```
-
-The workflow updates only existing fields, locates exactly one matching
-record (refuses ambiguity), respects channel policy (writable fields, task
-confirmation, daily budgets), and — with governed writes on — proposes a
-receipt instead of writing:
-
-```text
-OS Tag: 已生成待审批操作：[1] 更新需求「交易-001」… 回复：approve 1 / reject 1
-你:     @OS Tag approve 1
-你:     @OS Tag apply 1
-```
-
-Docx bulk import into the requirement pool works the same way (`自动入表`).
-
-## Context: MFS and channel memory
-
-MFS retrieval is disabled by default and scope-allowlisted
-(`MFS_ALLOWED_SCOPES`). Channel memory is local markdown plus a per-channel
-brain (facts, preferences, policy) — scoped, inspectable, editable:
-
-```bash
-python -m ostag.main memory remember --platform feishu --chat-id oc_demo --text "Use mock backend for pilot."
-ostag channel policy show --platform feishu --chat oc_demo --json
-```
-
-Every run that reaches the workflow/backend records a hashed context packet
-(`ostag context export --run run_x --json`).
-
-## Provenance
-
-Forked from and inspired by `zilliztech/mfs` (Apache-2.0) open-tag-skill;
-adapted and renamed as OS Tag with multi-platform adapters and the governance
-layer. See [FORK_ORIGIN.md](FORK_ORIGIN.md) and upstream research notes in
-[docs/research/](docs/research/).
-
-## Roadmap
-
-Done: run ledger · action receipts · actor permissions · governed writes with
-connector executors · CLI-submittable runs · context packets · durable
-continuations · per-channel policy · ambient monitors V2.
-
-Also done since: governed task creation · environment scrub for agent
-subprocesses · high-risk approval quorum · four-eyes rule · GitHub and GitLab
-issues connectors (governed create/comment via gh/glab CLI) · SHA-bound GitHub
-PR review plus Vercel Production release · per-channel daily cost budgets.
-
-Next: MFS-deepened context packets · sandbox hardening for code-writing
-executors · Slack Block Kit / Feishu card renderers · GitHub/GitLab thread
-reading · web admin console.
-
-## Acceptance
-
-Scoring standard: [docs/ostag/acceptance_criteria.md](docs/ostag/acceptance_criteria.md)
-and the benchmark scorecard in
-[docs/claude_tag_strategy.md](docs/claude_tag_strategy.md) §16. Release
-requires `uv run pytest` green and `scripts/release_check.sh` exit 0.
+OStag originated from the `zilliztech/mfs` open-tag skill and incorporates research
+and adaptations inspired by OpenTag. See [fork provenance](FORK_ORIGIN.md),
+[upstream research](docs/research/) and [product strategy](docs/claude_tag_strategy.md).
+It is an independent project, not an official Zilliz product. Licensed under
+[Apache-2.0](LICENSE).

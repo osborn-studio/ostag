@@ -1,10 +1,13 @@
 # Existing-host rollout: observed prerequisites and execution order
 
 This runbook starts from main `96fc142666528f514d8c98fe67e1bc1d3fd6b17c`.
+The observations below describe that release, not the current installed host.
+Re-observe launcher hashes, locks, mounts and flags before using the ordered
+procedure; do not reinstall old tools based on this snapshot.
 It is not a migration or activation receipt. Preserve the original acceptance
 criteria in `delivery-implementation-plan-2026-09-21.md`.
 
-## Verified host facts
+## Historical host snapshot before the mutex rollout
 
 The installed launcher hash `de656d47992b53e2a8546bf4a156396f7a542618f74cc2037c68fc4d9d3da4dc`
 exactly matches `scripts/deploy_work_monitor_release.sh` at repository commit
