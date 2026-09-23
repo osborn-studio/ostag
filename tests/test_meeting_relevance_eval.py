@@ -1,6 +1,8 @@
 """Offline OT-2 contract, accounting and isolation checks."""
 import copy
+import ast
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -119,7 +121,8 @@ def test_rejects_unbound_or_invalid_predictions(change):
 
 @pytest.mark.parametrize("raw", [b'{"suite":{},"suite":{}}', b'{"x":NaN}',
                                  b'{"x":"\\ud800"}', b'{"x":Infinity}',
-                                 b'[' * 2000, b' ' * (1024 * 1024 + 1)])
+                                 b'[' * 2000 + b']' * 2000, b' ' * (1024 * 1024 + 1)],
+                         ids=["duplicate-key", "nan", "surrogate", "infinity", "depth", "size"])
 def test_strict_json_rejects_ambiguous_or_unbounded_input(raw):
     with pytest.raises(ContractError):
         parse_input(raw)
@@ -139,7 +142,8 @@ def test_offline_evaluation_has_no_network_or_control_plane_dependencies(monkeyp
     before = copy.deepcopy(data)
     report = evaluate(data)
     assert data == before
-    assert report["network_calls"] == 0
+    assert report["network_client_present"] is False
+    assert report["network_activity_measured"] is False
     assert report["live_model_evaluated"] is False
 
 
@@ -185,14 +189,118 @@ def test_cli_replays_fixture_and_emits_label_free_snapshot_and_bound_baseline():
     assert report["candidate"] == report["baseline"]
     assert report["baseline"]["development"]["relevance"]["false_positive"] == 2
     assert report["baseline"]["holdout"]["duplicate"]["recall"] == {
-        "numerator": 1, "denominator": 2}
+        "numerator": 1, "denominator": 3}
 
 
 def test_cli_rejects_bad_input_without_echoing_private_text():
     envelope = {"suite": suite(), "candidate": None}
     envelope["suite"]["cases"][0]["private_note"] = "SENSITIVE-SENTINEL"
     result = subprocess.run([sys.executable, "-m", "ostag.briefs.meeting_relevance_eval"],
-                            input=json.dumps(envelope).encode(), capture_output=True)
+                            input=json.dumps(envelope).encode(), capture_output=True,
+                            cwd=Path(__file__).resolve().parents[1])
     assert result.returncode == 2
     assert result.stdout == b""
     assert result.stderr == b"Invalid meeting evaluation input\n"
+
+
+def test_fixture_snapshot_ids_do_not_disclose_scenario_or_gold():
+    root = Path(__file__).resolve().parents[1]
+    data = json.loads((root / "examples/meeting-relevance-eval.json").read_text())["suite"]
+    serialized = json.dumps(input_snapshot(data))
+    for clue in ("paraphrase", "collision", "independent-events", "literal-copy",
+                 "unknown-origin", "insufficient-context", "whitespace-copy",
+                 '"relevant"', '"irrelevant"', '"duplicate"', '"distinct"', '"uncertain"'):
+        assert clue not in serialized
+    report = evaluate(data)
+    assert report["holdout_sealed"] is False
+    assert any("published reference labels" in limit for limit in report["limitations"])
+
+
+def test_snapshot_output_is_utf8_even_with_ascii_stdio_configuration():
+    root = Path(__file__).resolve().parents[1]
+    raw = (root / "examples/meeting-relevance-eval.json").read_bytes()
+    result = subprocess.run([sys.executable, "-m", "ostag.briefs.meeting_relevance_eval",
+                             "--snapshot"], input=raw, capture_output=True, cwd=root,
+                            env={**os.environ, "PYTHONIOENCODING": "ascii"})
+    assert result.returncode == 0
+    assert result.stderr == b""
+    assert json.loads(result.stdout)["cases"][0]["topic"] == "API 网关发布"
+
+
+def test_module_and_package_imports_remain_isolated_from_production():
+    root = Path(__file__).resolve().parents[1]
+    source = root / "ostag/briefs/meeting_relevance_eval.py"
+    imports = set()
+    for node in ast.walk(ast.parse(source.read_text())):
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            imports.add(node.module)
+    assert imports <= {"__future__", "collections", "hashlib", "json", "sys"}
+    result = subprocess.run([sys.executable, "-c", (
+        "import json,sys; import ostag.briefs.meeting_relevance_eval; "
+        "print(json.dumps(sorted(n for n in sys.modules "
+        "if n == 'ostag' or n.startswith('ostag.'))))")], capture_output=True, cwd=root,
+        check=True)
+    assert json.loads(result.stdout) == ["ostag", "ostag.briefs",
+                                        "ostag.briefs.meeting_relevance_eval"]
+
+
+@pytest.mark.parametrize("field,limit", [("text", 4096), ("cases", 100), ("terms", 16)])
+def test_exact_limits_are_accepted_and_one_over_is_rejected(field, limit):
+    data = suite()
+    if field == "text":
+        data["cases"][0]["materials"][0]["text"] = "x" * limit
+    elif field == "cases":
+        data["cases"] = [{**copy.deepcopy(data["cases"][0]), "id": f"c{i}"}
+                         for i in range(limit)]
+    else:
+        data["cases"][0]["terms"] = [f"term-{i}" for i in range(limit)]
+    evaluate(data)
+    if field == "text":
+        data["cases"][0]["materials"][0]["text"] += "x"
+    elif field == "cases":
+        data["cases"].append({**copy.deepcopy(data["cases"][0]), "id": "overflow"})
+    else:
+        data["cases"][0]["terms"].append("overflow")
+    with pytest.raises(ContractError):
+        evaluate(data)
+
+
+@pytest.mark.parametrize("reference", ["relevant", "irrelevant", "uncertain"])
+@pytest.mark.parametrize("prediction", ["relevant", "irrelevant", "abstain", None])
+def test_metric_denominators_partition_all_supplied_references(reference, prediction):
+    data = suite()
+    data["cases"][0]["gold"]["relevance"] = [reference] * 2
+    candidate = baseline(input_snapshot(data))
+    if prediction is None:
+        candidate["cases"] = []
+    else:
+        candidate["cases"][0]["relevance"] = [prediction] * 2
+    row = evaluate(data, candidate)["candidate"]["development"]["relevance"]
+    assert row["total"] == row["known_reference"] + row["reference_uncertain"] == 2
+    assert row["known_reference"] == row["scored"] + (
+        row["not_run"] + row["abstained"] if reference != "uncertain" else 0)
+    assert row["true_positive"] <= row["positive_reference"] <= row["known_reference"]
+
+
+def test_json_container_depth_has_a_portable_explicit_limit():
+    assert parse_input(b"[" * 16 + b"]" * 16) is not None
+    with pytest.raises(ContractError):
+        parse_input(b"[" * 17 + b"]" * 17)
+
+
+def test_closed_output_pipe_has_distinct_exit_code_without_traceback():
+    root = Path(__file__).resolve().parents[1]
+    raw = (root / "examples/meeting-relevance-eval.json").read_bytes()
+    with subprocess.Popen([sys.executable, "-m", "ostag.briefs.meeting_relevance_eval"],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, cwd=root) as process:
+        process.stdout.close()
+        process.stdout = None
+        process.stdin.write(raw)
+        process.stdin.close()
+        process.stdin = None
+        _, error = process.communicate(timeout=10)
+    assert process.returncode == 1
+    assert error == b"Unable to write meeting evaluation output\n"

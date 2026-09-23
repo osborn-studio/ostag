@@ -102,7 +102,7 @@ def _validate_suite(suite, *, with_gold=True):
 
 
 def input_snapshot(suite):
-    """Construct a fresh label-free snapshot before either method is scored."""
+    """Copy inputs without gold fields; callers must audit other semantic cues."""
     _validate_suite(suite)
     return {"version": "meeting-relevance-input/1", "provenance": "synthetic", "cases": [
         {**{k: case[k] for k in ("id", "family", "split", "topic")},
@@ -215,9 +215,11 @@ def evaluate(suite, candidate=None):
                    "reference": dict(case["gold"]), "baseline": base_rows[case["id"]],
                    "candidate": candidate_rows.get(case["id"])
                    if candidate_rows is not None else None} for case in suite["cases"]],
-        "acceptance_evaluated": False, "live_model_evaluated": False, "network_calls": 0,
+        "acceptance_evaluated": False, "live_model_evaluated": False, "holdout_sealed": False,
+        "network_client_present": False, "network_activity_measured": False,
         "conclusion": "inconclusive_synthetic_only",
         "limitations": ["Synthetic engineering examples, not independent human annotations.",
+                        "Holdout has published reference labels, not a sealed or blinded test.",
                         "Declared family/origin and exact-text leakage checks cannot prove independence.",
                         "Candidate method and synthetic provenance are operator declarations.",
                         "No model execution, cost, time saved or production benefit is measured.",
@@ -238,6 +240,13 @@ def parse_input(raw):
         _require(type(raw) is bytes and len(raw) <= MAX_BYTES)
         value = json.loads(raw.decode("utf-8"), object_pairs_hook=_object,
                            parse_constant=lambda _: _require(False))
+        pending = [(value, 0)]
+        while pending:
+            item, depth = pending.pop()
+            if type(item) in (dict, list):
+                _require(depth < 16)
+                children = item.values() if type(item) is dict else item
+                pending.extend((child, depth + 1) for child in children)
         _bytes(value)  # Reject lone surrogates and non-finite numbers, including 1e999.
         return value
     except (ValueError, TypeError, UnicodeError, RecursionError):
@@ -256,10 +265,21 @@ def main(argv=None):
             result = snapshot if args == ["--snapshot"] else baseline(snapshot)
         else:
             result = evaluate(value["suite"], value["candidate"])
-        print(_bytes(result).decode("utf-8"))
+        encoded = _bytes(result) + b"\n"
     except (ValueError, TypeError, KeyError, RecursionError, UnicodeError):
         print("Invalid meeting evaluation input", file=sys.stderr)
         return 2
+    try:
+        sys.stdout.buffer.write(encoded)
+        sys.stdout.buffer.flush()
+    except OSError:
+        # Close a failed pipe so interpreter shutdown does not retry its buffer.
+        try:
+            sys.stdout.close()
+        except OSError:
+            pass
+        print("Unable to write meeting evaluation output", file=sys.stderr)
+        return 1
     return 0
 
 
