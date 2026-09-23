@@ -52,6 +52,14 @@ references are `duplicate`, `distinct`, `uncertain`. Predictions replace
 independent human judgments. Neither relevance nor duplication establishes claim
 truth, factual support, responsibility, a deadline, or execution authority.
 
+For this fixture rubric, duplicate excerpts repeat the same identifiable
+notice/claim without a new substantive assertion. Different identifiable objects,
+additional facts, or contradictions are `distinct`. Identical generic wording
+without adequate origin/context remains `uncertain`. Cases c008/c013/c014 include
+explicit project/record/notice identifiers so their labels can be judged from
+the supplied text, rather than an imagined background scenario. Repetition does
+not prove whether underlying witnesses are independent or an assertion is true.
+
 Input is bounded to 1 MiB, 100 cases, two materials per case, 4,096 UTF-8 bytes per
 material and 16 literal terms per topic. Duplicate JSON keys, non-finite numbers,
 lone surrogates, more than 16 nested containers and malformed structures are
