@@ -1,0 +1,10 @@
+{
+  "source_commit": "369ee98b",
+  "files": {
+    "ostag/briefs/meeting_relevance_eval.py": "fecd274e23a23212e79b02f7d46a0c9a9ee2184fa5bad06d1978d7debcfed440",
+    "tests/test_meeting_relevance_eval.py": "a6d3a42fceb4b46504bf8772f7c83074135e5f735f58e65e8c57c027e498f60a",
+    "examples/meeting-relevance-eval.json": "6be2a3d12d8bd6dea79bdb90394dc8b1b0683f5627dd2abf0ba8b230af18a512",
+    "docs/ostag/meeting-relevance-eval.md": "12b5729fb846b45dac2b458e0e884607f905cbe148a807396484f00b67cf77de"
+  },
+  "prompt_sha256": "47715c065df755e02c4565a63e461c0fd0dd595c8812a88801ac0798e81d4bfa"
+}

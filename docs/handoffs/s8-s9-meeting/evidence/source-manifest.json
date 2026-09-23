@@ -1,0 +1,10 @@
+{
+  "source_commit": "22aafffbaa4c9bd6768fd7d8b153910b05e2d13f",
+  "files": {
+    "ostag/briefs/meeting_relevance_eval.py": "3a888395ab51cc6368a4629fb57a32f29bfb0b9b93e8176e91838d872e9619a1",
+    "tests/test_meeting_relevance_eval.py": "9c15f77c8c3bde84974f00e83ffb5529f74e579cd46d03167da7c07df171665c",
+    "examples/meeting-relevance-eval.json": "37058c328a0b62518b06aa7a40ad8c62ceb95ec0d2416452fe5424303039b4b1",
+    "docs/ostag/meeting-relevance-eval.md": "302b755cd7f2f9b998438f938660e8f39c5a4ea7a16f226f6333fecaeb63d09f",
+    "docs/handoffs/s8-s9-meeting/evidence/baseline-report.json": "fed07c97ca3601699c601545e3f72f51c1737161f63d4c6f401e052798df1215"
+  }
+}
