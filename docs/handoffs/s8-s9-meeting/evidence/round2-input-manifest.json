@@ -1,0 +1,11 @@
+{
+  "files": {
+    "ostag/briefs/meeting_relevance_eval.py": "3a888395ab51cc6368a4629fb57a32f29bfb0b9b93e8176e91838d872e9619a1",
+    "tests/test_meeting_relevance_eval.py": "9c15f77c8c3bde84974f00e83ffb5529f74e579cd46d03167da7c07df171665c",
+    "examples/meeting-relevance-eval.json": "0163f2ae5839dd04d7572d5175bc892f6317c07bb815b07176a8387496d91df0",
+    "docs/ostag/meeting-relevance-eval.md": "b5e308a70743d23c1699d623aea31823c45f5a2c9d1fc592b85e5f415a897e7a",
+    "ostag/__init__.py": "3b892a2bb398d875b4857b1a432c1023911d6fdbb99e7f6459c139615a371223",
+    "ostag/briefs/__init__.py": "afcbbae19e026901913cc681e68dce554dfe3639c12e23f7cce6956861ca6701"
+  },
+  "prompt_sha256": "a5bd83c80433d70c194276bdf337558e6a631b6ddea6a3b5d3c34bc55dce8956"
+}

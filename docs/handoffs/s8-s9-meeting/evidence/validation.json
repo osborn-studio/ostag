@@ -1,0 +1,55 @@
+{
+  "python_311": {
+    "version": "3.11.15",
+    "full_command": "uv run --locked pytest -q",
+    "exit_code": 0,
+    "passed": 5136,
+    "skipped": 13,
+    "warnings": 11,
+    "seconds": 307.96,
+    "log_sha256": "a4d9272f3578ae7829cbc7afe1f2aa8e66129286fedd772c77a451eb0d5e4ee9"
+  },
+  "python_313": {
+    "version": "3.13.13",
+    "passed": 5114,
+    "failed": 2,
+    "skipped": 13,
+    "exit_code": 1,
+    "failure": "test_brief_control_bridge_integration.py::test_real_card_send_uncertainty_survives_seal_stop_and_manual_apply[seal/io_timeout] active_operations expected 0 got 1",
+    "untouched_baseline_commit": "0bc3d88f",
+    "baseline_probe_failed": 2,
+    "same_probe_python_311_passed": 2,
+    "root_cause_not_diagnosed": true
+  },
+  "initial_dependency_failure": {
+    "dev_extras_only_collection_errors": 34,
+    "resolution": "uv sync --all-extras --locked"
+  },
+  "final_targeted": {
+    "command": "uv run --locked pytest -q tests/test_meeting_relevance_eval.py",
+    "passed": 49,
+    "exit_code": 0
+  },
+  "related_regression": {
+    "passed": 389,
+    "exit_code": 0,
+    "scope": "new evaluator, meeting collect/facts/contracts, status intent, routing explanations"
+  },
+  "ruff": {
+    "scope": "ostag tests",
+    "exit_code": 0
+  },
+  "compileall": {
+    "exit_code": 0
+  },
+  "baseline_replay": {
+    "byte_equal": true
+  },
+  "secret_hygiene": {
+    "exit_code": 0
+  },
+  "production_deployment_performed": false,
+  "jev_live_called": false,
+  "ci_release_checks_not_yet_run_on_this_branch": true,
+  "recorded_at_utc": "2026-09-23T08:26:37.202832+00:00"
+}
