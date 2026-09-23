@@ -15,6 +15,7 @@ A completed code change is not proof of production activation or business accept
 | Understand the system / 理解系统 | [Architecture / 架构](ostag/architecture.md) |
 | Run and inspect tasks / 运行与查询任务 | [CLI reference](cli_reference.md) |
 | Prepare a meeting locally / 本地会议准备 | [Local collection](ostag/meeting-collect.md), [synthetic preview (fixture only, no model call)](ostag/meeting-preview.md) |
+| Evaluate meeting relevance offline / 离线评测材料相关性与重复 | [OT-2 synthetic benchmark](ostag/meeting-relevance-eval.md) (no model call or production changes) |
 | Configure task execution / 配置任务执行 | [Executor conformance](ostag/executor_conformance.md) |
 | Configure Brief/meeting generation (disabled by default) / 配置简报与会议生成（默认关闭） | [DeepSeek profile and private key entry](ostag/deepseek.md) |
 | Operate the task board / 使用任务看板 | [Work monitor](ostag/work_monitor.md), [scoped operational reports](ostag/operational_report.md) |
